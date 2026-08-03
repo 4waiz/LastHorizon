@@ -15,6 +15,7 @@ export interface HUDCallbacks {
   onMuted: (muted: boolean) => void;
   onTimeMode: (mode: TimeMode) => void;
   onResetProgress: () => void;
+  onInteract: () => void;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
@@ -33,6 +34,10 @@ export class HUD {
   private counter = document.querySelector<HTMLElement>('.counter')!;
   private hint = $('hint');
   private debug = $('debug');
+  private prompt = $('prompt');
+  private promptText = $('promptText');
+  private fade = $('fade');
+  private btnAct = $<HTMLButtonElement>('btnAct');
 
   private btnSound = $<HTMLButtonElement>('btnSound');
   private btnQuality = $<HTMLButtonElement>('btnQuality');
@@ -261,6 +266,11 @@ export class HUD {
       this.input.queueJump();
     });
 
+    this.btnAct.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.cb.onInteract();
+    });
+
     this.btnRun.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       this.running = !this.running;
@@ -326,6 +336,25 @@ export class HUD {
     this.toast.classList.add('is-on');
     window.clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => this.toast.classList.remove('is-on'), ms);
+  }
+
+  /** Show or clear the "press E" prompt. Pass null to hide. */
+  setPrompt(text: string | null): void {
+    if (text) {
+      this.promptText.textContent = text;
+      this.prompt.classList.add('is-on');
+      if (this.isTouch) this.btnAct.hidden = false;
+    } else {
+      this.prompt.classList.remove('is-on');
+      this.btnAct.hidden = true;
+    }
+  }
+
+  /** Fade the screen to black and back; resolves when the fade finishes. */
+  setFade(on: boolean, seconds = 0.7): Promise<void> {
+    this.fade.style.transitionDuration = `${seconds}s`;
+    this.fade.classList.toggle('is-on', on);
+    return new Promise((resolve) => window.setTimeout(resolve, seconds * 1000 + 40));
   }
 
   setDebug(text: string | null): void {

@@ -818,3 +818,82 @@ body {
     animation: none !important;
   }
 }
+
+/* ============================ interaction ============================== */
+
+.prompt {
+  position: absolute;
+  left: 50%;
+  bottom: calc(112px + var(--safe-b));
+  transform: translate(-50%, 8px);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 16px 9px 10px;
+  border-radius: 999px;
+  background: rgba(248, 244, 234, 0.93);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+  font-size: 13.5px;
+  color: #4e483d;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.prompt.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.prompt kbd {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 7px;
+  background: #4e483d;
+  color: var(--paper);
+  font: 600 11.5px/1 inherit;
+  letter-spacing: 0.04em;
+}
+
+/* Full-screen fade used when sleeping. */
+.fade {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: #14110d;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.7s ease;
+}
+
+.fade.is-on {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.touch__act {
+  position: absolute;
+  right: calc(112px + var(--safe-r));
+  bottom: calc(52px + var(--safe-b));
+  width: 62px;
+  height: 62px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font: 600 11px/1 inherit;
+  letter-spacing: 0.1em;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.touch__act:active {
+  transform: scale(0.93);
+}

@@ -321,62 +321,6 @@ function asphaltTexture(): THREE.Texture {
   return tex;
 }
 
-/** Branching hairline cracks, drawn as thin dark ribbons on the surface. */
-function crackGeometry(line: Polyline, rng: Rng, count: number): THREE.BufferGeometry {
-  const quads: number[][] = [];
-  const n = line.pts.length;
-
-  const walk = (startI: number, lateral: number, steps: number, width: number, depth: number) => {
-    let i = startI;
-    let lat = lateral;
-    let dir = rng.next() < 0.5 ? 1 : -1;
-    for (let s = 0; s < steps && i > 1 && i < n - 2; s++) {
-      const di = Math.round(rng.range(1, 3));
-      const dl = rng.range(0.25, 1.1) * dir;
-      const nextI = i + di;
-      const nextLat = clamp(lat + dl, -ROAD_HALF_WIDTH + 0.3, ROAD_HALF_WIDTH - 0.3);
-
-      const a = line.pts[i];
-      const ta = line.tangents[i];
-      const b = line.pts[Math.min(n - 1, nextI)];
-      const tb = line.tangents[Math.min(n - 1, nextI)];
-      const ax = a.x + -ta.y * lat;
-      const az = a.z + ta.x * lat;
-      const bx = b.x + -tb.y * nextLat;
-      const bz = b.z + tb.x * nextLat;
-      const dx = bx - ax;
-      const dz = bz - az;
-      const len = Math.hypot(dx, dz) || 1;
-      const px = (-dz / len) * width * 0.5;
-      const pz = (dx / len) * width * 0.5;
-      quads.push([
-        ax - px, a.y + 0.012, az - pz,
-        ax + px, a.y + 0.012, az + pz,
-        bx + px, b.y + 0.012, bz + pz,
-        bx - px, b.y + 0.012, bz - pz,
-      ]);
-
-      i = nextI;
-      lat = nextLat;
-      if (rng.next() < 0.22) dir *= -1;
-      if (depth > 0 && rng.next() < 0.16) {
-        walk(i, lat, Math.round(steps * 0.4), width * 0.65, depth - 1);
-      }
-    }
-  };
-
-  for (let c = 0; c < count; c++) {
-    walk(
-      Math.round(rng.range(6, n - 20)),
-      rng.range(-ROAD_HALF_WIDTH + 0.6, ROAD_HALF_WIDTH - 0.6),
-      Math.round(rng.range(5, 16)),
-      rng.range(0.05, 0.13),
-      2,
-    );
-  }
-  return quadsToGeometry(quads);
-}
-
 export interface RoadBuild {
   group: THREE.Group;
   /** Low-poly surfaces worth feeding to the collision BVH (none — the
@@ -397,12 +341,6 @@ export function buildRoadMeshes(net: RoadNetwork): RoadBuild {
   paintMat.polygonOffsetFactor = -3;
   paintMat.polygonOffsetUnits = -3;
 
-  const crackMat = makeToon(0x6f7370, { id: 'crack', transparent: true, opacity: 0.55 });
-  crackMat.polygonOffset = true;
-  crackMat.polygonOffsetFactor = -2;
-  crackMat.polygonOffsetUnits = -2;
-
-  const rng = new Rng(4242);
 
   for (const [name, line] of [['Main', net.main], ['Side', net.side]] as const) {
     const hw = line.halfWidth;
@@ -449,9 +387,6 @@ export function buildRoadMeshes(net: RoadNetwork): RoadBuild {
     dash.name = `Dashes${name}`;
     group.add(dash);
 
-    const cracks = new THREE.Mesh(crackGeometry(line, rng, name === 'Main' ? 22 : 9), crackMat);
-    cracks.name = `Cracks${name}`;
-    group.add(cracks);
   }
 
   // Crosswalks: fat bars across the main road at two spots.

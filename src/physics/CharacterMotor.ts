@@ -59,8 +59,39 @@ export class CharacterMotor {
     groundNormal: null,
   };
   private readonly tmp = new THREE.Vector3();
+  private readonly step = new THREE.Vector3();
+  private readonly sweepFrom = new THREE.Vector3();
+  private readonly sweepDir = new THREE.Vector3();
 
   constructor(public config: MotorConfig = { ...DEFAULT_MOTOR }) {}
+
+  /**
+   * Continuous guard against passing through thin geometry.
+   *
+   * Depenetration always pushes toward the *nearest* surface. If a single
+   * step carries the capsule past the mid-plane of a wall, the nearest
+   * surface is the far face — and the solver helpfully ejects the character
+   * out the other side. Sweeping ahead and clamping the step to stop short of
+   * the first hit removes that failure mode at any speed.
+   *
+   * Modifies `delta` in place.
+   */
+  private sweepClamp(world: CollisionWorld, delta: THREE.Vector3): void {
+    const cfg = this.config;
+    const dist = delta.length();
+    if (dist < cfg.radius * 0.5 || !world.ready) return;
+
+    this.sweepDir.copy(delta).divideScalar(dist);
+    const probeHeights = [cfg.radius + 0.02, cfg.height * 0.5, cfg.height - cfg.radius - 0.02];
+
+    let allowed = dist;
+    for (const hy of probeHeights) {
+      this.sweepFrom.set(this.position.x, this.position.y + hy, this.position.z);
+      const hit = world.raycast(this.sweepFrom, this.sweepDir, dist + cfg.radius * 1.2);
+      if (hit) allowed = Math.min(allowed, Math.max(0, hit.distance - cfg.radius * 1.05));
+    }
+    if (allowed < dist) delta.setLength(allowed);
+  }
 
   get eyeHeight(): number {
     return this.config.height * 0.86;
@@ -92,7 +123,7 @@ export class CharacterMotor {
     // Split the frame so no single resolve pass moves further than
     // maxSubstep; that is what prevents tunnelling at run speed.
     const speed = this.velocity.length();
-    const steps = clamp(Math.ceil((speed * dt) / cfg.maxSubstep), 1, 6);
+    const steps = clamp(Math.ceil((speed * dt) / cfg.maxSubstep), 1, 12);
     const h = dt / steps;
 
     const wasGrounded = this.grounded;
@@ -105,7 +136,10 @@ export class CharacterMotor {
       // still. A gentler force keeps contact without the creep.
       const g = this.grounded && this.velocity.y <= 0 ? cfg.groundStick : cfg.gravity;
       this.velocity.y = Math.max(cfg.terminalVelocity, this.velocity.y + g * h);
-      this.position.addScaledVector(this.velocity, h);
+
+      this.step.copy(this.velocity).multiplyScalar(h);
+      this.sweepClamp(world, this.step);
+      this.position.add(this.step);
 
       this.writeSegment();
       world.resolveCapsule(this.segment, cfg.radius, this.result);

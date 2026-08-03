@@ -21,45 +21,112 @@ import { AssetBundle } from '../core/AssetManager';
  * can find.
  */
 
+/** A collision box in a building's own local frame (x right, y up, z fore). */
+interface LocalBox {
+  x: number;
+  y: number;
+  z: number;
+  hx: number;
+  hy: number;
+  hz: number;
+}
+
 interface Placement {
   model: string;
   x: number;
   z: number;
   /** Radians about +Y. Models face +Z at 0. */
   yaw: number;
-  /** Collision box: half-extents plus a local centre offset. */
+  /** Simple one-box collider: half-extents plus a local centre offset. */
   collider?: { hx: number; hy: number; hz: number; oy?: number; oz?: number };
+  /** Detailed colliders, used where the player can go inside. */
+  boxes?: LocalBox[];
   /** Radius vegetation must stay out of. */
   keepout?: number;
-  /** Sunk into the ground by this much, to seat on a slope. */
-  sink?: number;
+  /** Footprint levelled flat under the building, half-extents in local space. */
+  pad?: { hx: number; hz: number; blend?: number };
+  /** Raised above the levelled pad by this much. */
+  lift?: number;
 }
 
 const HALF_PI = Math.PI / 2;
 
+// ---- HouseOpen room shell ------------------------------------------------
+// The Blender model faces -Y, which the exporter maps to +Z, so Blender +Y
+// becomes local -Z here. Wall thickness 0.22, doorway 1.20 wide centred at
+// local x = -1.35.
+const OPEN_W = 7.4;
+const OPEN_D = 6.2;
+const OPEN_H = 2.92;
+const OPEN_T = 0.22;
+
+function houseOpenBoxes(): LocalBox[] {
+  const hw = OPEN_W / 2;
+  const hd = OPEN_D / 2;
+  const t = OPEN_T / 2;
+  const wy = OPEN_H / 2;
+  const dl = -1.95;
+  const dr = -0.75;
+  return [
+    // floor deck — a 6 cm lip the capsule steps over at the threshold
+    { x: 0, y: -0.045, z: 0, hx: hw - OPEN_T, hy: 0.055, hz: hd - OPEN_T },
+    // back wall (Blender +Y)
+    { x: 0, y: wy, z: -(hd - t), hx: hw, hy: wy, hz: t },
+    // side walls
+    { x: -(hw - t), y: wy, z: 0, hx: t, hy: wy, hz: hd },
+    { x: hw - t, y: wy, z: 0, hx: t, hy: wy, hz: hd },
+    // front wall, split around the doorway
+    { x: (-hw + dl) / 2, y: wy, z: hd - t, hx: (dl + hw) / 2, hy: wy, hz: t },
+    { x: (dr + hw) / 2, y: wy, z: hd - t, hx: (hw - dr) / 2, hy: wy, hz: t },
+    // furniture the player should bump into
+    { x: -2.43, y: 0.37, z: -1.73, hx: 0.95, hy: 0.37, hz: 1.05 },  // bed
+    { x: 1.5, y: 0.40, z: 0.5, hx: 0.70, hy: 0.40, hz: 0.55 },      // table
+  ];
+}
+
+/** Local position of the pillow end of the bed, for the sleep prompt. */
+const BED_LOCAL = new THREE.Vector3(-2.43, 0.62, -1.73);
+
 const PLACEMENTS: Placement[] = [
   // ---- west side of the main road, the hero row ------------------------
   { model: 'HouseLarge', x: -15.8, z: 62, yaw: HALF_PI,
-    collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5, sink: 0.25 },
+    collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5,
+    pad: { hx: 3.9, hz: 4.7, blend: 2.8 } },
   { model: 'HouseSolar', x: -16.6, z: 43, yaw: HALF_PI + 0.06,
-    collider: { hx: 3.1, hy: 2.4, hz: 3.7, oy: 1.6 }, keepout: 8.5, sink: 0.2 },
+    collider: { hx: 3.1, hy: 2.4, hz: 3.7, oy: 1.6 }, keepout: 8.5,
+    pad: { hx: 3.6, hz: 4.2, blend: 2.8 } },
   { model: 'Shed', x: -15.2, z: 31.5, yaw: HALF_PI - 0.22,
-    collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5, sink: 0.15 },
+    collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5,
+    pad: { hx: 2.3, hz: 3.0, blend: 2.2 } },
 
   // ---- east side ---------------------------------------------------------
-  { model: 'HouseSmall', x: 14.8, z: 34, yaw: -HALF_PI,
-    collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.0, sink: 0.2 },
+  // The one you can walk into.
+  { model: 'HouseOpen', x: 15.6, z: 33, yaw: -HALF_PI,
+    boxes: houseOpenBoxes(), keepout: 9.5, lift: 0.05,
+    pad: { hx: 4.3, hz: 3.8, blend: 3.0 } },
   { model: 'PorchHouse', x: 16.4, z: 6, yaw: -HALF_PI - 0.05,
-    collider: { hx: 2.4, hy: 2.0, hz: 3.9, oy: 1.6, oz: 0.9 }, keepout: 8.5, sink: 0.18 },
+    collider: { hx: 2.4, hy: 2.0, hz: 3.9, oy: 1.6, oz: 0.9 }, keepout: 8.5,
+    pad: { hx: 3.0, hz: 4.4, blend: 2.6 } },
   { model: 'HouseSmall', x: 18.6, z: -24, yaw: -HALF_PI + 0.14,
-    collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.0, sink: 0.2 },
+    collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.0,
+    pad: { hx: 3.2, hz: 3.9, blend: 2.6 } },
 
   // ---- along the side road ----------------------------------------------
   { model: 'HouseLarge', x: 52, z: -22, yaw: Math.PI * 0.86,
-    collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5, sink: 0.25 },
+    collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5,
+    pad: { hx: 3.9, hz: 4.7, blend: 2.8 } },
   { model: 'Shed', x: 66, z: -40, yaw: Math.PI * 0.72,
-    collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5, sink: 0.15 },
+    collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5,
+    pad: { hx: 2.3, hz: 3.0, blend: 3.0 } },
 ];
+
+/** Something the player can walk up to and press interact on. */
+export interface Interactable {
+  position: THREE.Vector3;
+  radius: number;
+  kind: 'sleep';
+  prompt: string;
+}
 
 /** Retaining walls cut into the embankment, as in the reference frames. */
 const WALLS: Array<{ x: number; z: number; yaw: number }> = [
@@ -96,6 +163,7 @@ export class World {
   private lampPositions: THREE.Vector3[] = [];
   private lampLights: THREE.PointLight[] = [];
   private lampPools: THREE.InstancedMesh | null = null;
+  private interiorLight: THREE.PointLight | null = null;
 
   readonly spawn = new THREE.Vector3();
   spawnFacing = 0;
@@ -104,13 +172,27 @@ export class World {
   private colliderMeshes: THREE.Mesh[] = [];
   private buildingCount = 0;
 
+  readonly interactables: Interactable[] = [];
+
   constructor(
     private readonly assets: AssetBundle,
     private readonly preset: QualityPreset,
   ) {
     this.group.name = 'World';
     this.road = new RoadNetwork(WORLD_SIZE, naturalHeight);
-    this.terrain = new Terrain(this.road);
+    // Pads must exist before the terrain grid is computed — they are what
+    // stops buildings hanging off the downhill side of a slope.
+    this.terrain = new Terrain(
+      this.road,
+      PLACEMENTS.filter((p) => p.pad).map((p) => ({
+        x: p.x,
+        z: p.z,
+        yaw: p.yaw,
+        halfX: p.pad!.hx,
+        halfZ: p.pad!.hz,
+        blend: p.pad!.blend ?? 4,
+      })),
+    );
   }
 
   build(): void {
@@ -173,11 +255,20 @@ export class World {
     this.colliderMeshes.push(mesh);
   }
 
+  /** Local (x, z) offset rotated by yaw into world space. */
+  private localToWorld(p: Placement, lx: number, lz: number): [number, number] {
+    const c = Math.cos(p.yaw);
+    const s = Math.sin(p.yaw);
+    return [p.x + lx * c + lz * s, p.z - lx * s + lz * c];
+  }
+
   private placeBuildings(): void {
     for (const p of PLACEMENTS) {
       const obj = this.instantiate(p.model);
       if (!obj) continue;
-      const y = this.terrain.heightAt(p.x, p.z) - (p.sink ?? 0);
+      // The pad under the footprint is level, so the centre height seats every
+      // corner of the building at once.
+      const y = this.terrain.heightAt(p.x, p.z) + (p.lift ?? 0);
       obj.position.set(p.x, y, p.z);
       obj.rotation.y = p.yaw;
       obj.updateMatrixWorld(true);
@@ -185,7 +276,13 @@ export class World {
       this.buildingCount++;
 
       if (p.keepout) this.keepouts.push({ x: p.x, z: p.z, radius: p.keepout });
-      if (p.collider) {
+
+      if (p.boxes) {
+        for (const b of p.boxes) {
+          const [wx, wz] = this.localToWorld(p, b.x, b.z);
+          this.addCollider(wx, y + b.y, wz, p.yaw, b.hx, b.hy, b.hz);
+        }
+      } else if (p.collider) {
         const c = p.collider;
         const oz = c.oz ?? 0;
         this.addCollider(
@@ -198,6 +295,8 @@ export class World {
           c.hz,
         );
       }
+
+      if (p.model === 'HouseOpen') this.furnishOpenHouse(p, y);
     }
 
     for (const w of WALLS) {
@@ -244,6 +343,28 @@ export class World {
       this.group.add(barrier);
       this.addCollider(bp.x, this.terrain.heightAt(bp.x, bp.z) + 0.75, bp.z, bp.yaw, 3.4, 0.8, 0.3);
     }
+  }
+
+  /** Warm interior light and the bed you can sleep in. */
+  private furnishOpenHouse(p: Placement, y: number): void {
+    const [lx, lz] = this.localToWorld(p, 0.4, 0.6);
+    const lamp = new THREE.PointLight(0xffd9a0, 0, 9.5, 1.9);
+    lamp.position.set(lx, y + OPEN_H - 1.0, lz);
+    this.group.add(lamp);
+    this.interiorLight = lamp;
+
+    // A little bounce so the room is never a black box in daylight.
+    const fill = new THREE.PointLight(0xf3e6cc, 3.2, 8.0, 2.2);
+    fill.position.set(lx, y + 1.5, lz);
+    this.group.add(fill);
+
+    const [bx, bz] = this.localToWorld(p, BED_LOCAL.x, BED_LOCAL.z);
+    this.interactables.push({
+      position: new THREE.Vector3(bx, y + BED_LOCAL.y, bz),
+      radius: 2.8,
+      kind: 'sleep',
+      prompt: 'Sleep until morning',
+    });
   }
 
   private nearestRoadPoint(z: number): { x: number; z: number; yaw: number; index: number } {
@@ -552,6 +673,12 @@ export class World {
     this.birds?.update(dt, elapsed, cameraPos);
     this.collectibles?.update(dt, player);
     this.updateLamps(player, lampFactor);
+    if (this.interiorLight) {
+      // Only worth paying for when the player is actually nearby.
+      const near = this.interiorLight.position.distanceToSquared(player) < 26 * 26;
+      this.interiorLight.visible = near;
+      this.interiorLight.intensity = near ? 6 + lampFactor * 10 : 0;
+    }
   }
 
   private updateLamps(player: THREE.Vector3, lampFactor: number): void {

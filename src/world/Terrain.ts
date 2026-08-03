@@ -47,9 +47,23 @@ export function naturalHeight(x: number, z: number): number {
   return h;
 }
 
-export interface TerrainSample {
-  height: number;
-  normal: THREE.Vector3;
+/**
+ * A flattened building platform.
+ *
+ * Seating a building at the terrain height of its centre leaves the downhill
+ * corners hanging in mid-air on any slope. Levelling a pad under the
+ * footprint — and ramping back to natural ground around it — is how real
+ * level geometry handles it, and it also gives interiors a flat floor.
+ */
+export interface BuildingPad {
+  x: number;
+  z: number;
+  /** Radians about +Y, matching the building's yaw. */
+  yaw: number;
+  halfX: number;
+  halfZ: number;
+  /** Metres over which the ground ramps back to natural. */
+  blend: number;
 }
 
 export class Terrain {
@@ -63,20 +77,61 @@ export class Terrain {
 
   mesh!: THREE.Mesh;
 
-  constructor(private readonly road: RoadNetwork) {
+  private padLevels: number[] = [];
+
+  constructor(
+    private readonly road: RoadNetwork,
+    private readonly pads: BuildingPad[] = [],
+  ) {
     const n = this.segments + 1;
     this.heights = new Float32Array(n * n);
     this.colors = new Float32Array(n * n * 3);
+    this.padLevels = pads.map((p) => this.roadBlended(p.x, p.z));
     this.computeGrid();
+  }
+
+  /** Ground height accounting for the road corridor but not building pads. */
+  private roadBlended(x: number, z: number): number {
+    const nat = naturalHeight(x, z);
+    const { dist, elevation } = this.road.sample(x, z);
+    const flatTo = ROAD_HALF_WIDTH + SHOULDER_WIDTH;
+    const w = smoothstep(flatTo, flatTo + ROAD_BLEND, dist);
+    return lerp(elevation - 0.05, nat, w);
+  }
+
+  /** Level of the pad a building sits on, in world units. */
+  padLevel(index: number): number {
+    return this.padLevels[index] ?? 0;
+  }
+
+  /** Flatten toward any pad this point falls inside or near. */
+  private applyPads(x: number, z: number, h: number): number {
+    let out = h;
+    for (let i = 0; i < this.pads.length; i++) {
+      const p = this.pads[i];
+      const dx = x - p.x;
+      const dz = z - p.z;
+      const c = Math.cos(p.yaw);
+      const s = Math.sin(p.yaw);
+      // rotate the world offset into the pad's local frame
+      const lx = dx * c - dz * s;
+      const lz = dx * s + dz * c;
+      const ox = Math.max(0, Math.abs(lx) - p.halfX);
+      const oz = Math.max(0, Math.abs(lz) - p.halfZ);
+      const d = Math.hypot(ox, oz);
+      if (d >= p.blend) continue;
+      out = lerp(this.padLevels[i], out, smoothstep(0, p.blend, d));
+    }
+    return out;
   }
 
   private computeGrid(): void {
     const n = this.segments + 1;
     const half = this.size / 2;
 
-    const grass = new THREE.Color(0x93b87c);
-    const grassDark = new THREE.Color(0x7ba367);
-    const dry = new THREE.Color(0xc4be8a);
+    const grass = new THREE.Color(0xa2c785);
+    const grassDark = new THREE.Color(0x89b06e);
+    const dry = new THREE.Color(0xcbc796);
     const dirt = new THREE.Color(0xd2c296);
     const rock = new THREE.Color(0xa9a395);
     const tmp = new THREE.Color();
@@ -87,13 +142,12 @@ export class Terrain {
         const x = -half + i * this.cell;
         const k = j * n + i;
 
-        const nat = naturalHeight(x, z);
-        const { dist, elevation } = this.road.sample(x, z);
-
-        // Flat carriageway + shoulder, then a smooth ramp back to natural.
+        const { dist } = this.road.sample(x, z);
         const flatTo = ROAD_HALF_WIDTH + SHOULDER_WIDTH;
-        const w = smoothstep(flatTo, flatTo + ROAD_BLEND, dist);
-        const h = lerp(elevation - 0.05, nat, w);
+
+        // Flat carriageway + shoulder, then a ramp back to natural ground,
+        // then any building pads levelled on top of that.
+        const h = this.applyPads(x, z, this.roadBlended(x, z));
         this.heights[k] = h;
 
         // colour: dirt verge near the road, grass beyond, drier up high
@@ -103,7 +157,7 @@ export class Terrain {
         const altitude = smoothstep(16, 34, h);
 
         tmp.copy(grass).lerp(grassDark, variation * 0.75);
-        tmp.lerp(dry, patch * 0.55 + altitude * 0.35);
+        tmp.lerp(dry, patch * 0.34 + altitude * 0.26);
         tmp.lerp(dirt, verge);
         tmp.lerp(rock, smoothstep(30, 48, h) * 0.35);
 

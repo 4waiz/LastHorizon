@@ -66,7 +66,7 @@ PALETTE = {
     "hat_band":     "#B79A54",
     "shirt":        "#EFEDE2",
     "shirt_shade":  "#DBD8C9",
-    "shorts":       "#8A9455",
+    "shorts":       "#9B8FC7",
     "shoe":         "#9C7F5E",
     "eye":          "#2A2320",
 
@@ -379,6 +379,26 @@ def apply_modifiers(obj):
             bpy.ops.object.modifier_apply(modifier=m.name)
         except RuntimeError:
             obj.modifiers.remove(m)
+    return obj
+
+
+def boolean_diff(obj, cutters):
+    """Carve `cutters` out of `obj`, then delete them. Keeps obj's material."""
+    mat = obj.data.materials[0] if obj.data.materials else None
+    for c in cutters:
+        m = obj.modifiers.new("bool_" + c.name, "BOOLEAN")
+        m.operation = "DIFFERENCE"
+        m.object = c
+        m.solver = "EXACT"
+        c.display_type = "WIRE"
+    apply_modifiers(obj)
+    for c in cutters:
+        bpy.data.objects.remove(c, do_unlink=True)
+    obj.data.materials.clear()
+    if mat:
+        obj.data.materials.append(mat)
+    for poly in obj.data.polygons:
+        poly.use_smooth = False
     return obj
 
 

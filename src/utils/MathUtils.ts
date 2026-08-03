@@ -44,7 +44,13 @@ export function dampTowards(current: number, target: number, lambda: number, dt:
   return current + (target - current) * damp(lambda, dt);
 }
 
-/** Wrap an angle into (-PI, PI]. */
+/**
+ * Wrap an angle into [-PI, PI).
+ *
+ * Note the half-open end: an exact half turn normalises to -PI, so
+ * `angleDelta` resolves a perfect 180 degree turn consistently one way rather
+ * than flip-flopping between frames.
+ */
 export function wrapAngle(a: number): number {
   let r = (a + Math.PI) % TAU;
   if (r < 0) r += TAU;

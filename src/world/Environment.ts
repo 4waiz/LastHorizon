@@ -17,7 +17,7 @@ import { clamp, lerp, saturate, smoothstep } from '../utils/MathUtils';
 export const DAY_LENGTH_SECONDS = 300;
 
 /** Haze starts this far out. Closer than this and the hills vanish. */
-const FOG_NEAR = 95;
+const FOG_NEAR = 130;
 
 interface Keyframe {
   t: number;
@@ -52,24 +52,24 @@ const SCRIPT: Keyframe[] = [
   },
   {
     t: 0.34, // morning
-    zenith: 0x4784cf, horizon: 0xdfe7e4, sun: 0xfff0cf,
-    sunIntensity: 2.05, skyFill: 0x9fc4e8, groundFill: 0x8e8264,
-    fillIntensity: 0.80, fog: 0xd8e4e6, fogDensityScale: 1.0,
-    cloudLit: 0xf9f2df, cloudShade: 0xc7cfda,
+    zenith: 0x3d84d8, horizon: 0xe4eef0, sun: 0xfff5e0,
+    sunIntensity: 2.55, skyFill: 0xb2d3f2, groundFill: 0xa9a189,
+    fillIntensity: 0.72, fog: 0xdfeaee, fogDensityScale: 0.88,
+    cloudLit: 0xfdf8ee, cloudShade: 0xd2dbe6,
   },
   {
     t: 0.5, // high afternoon — the reference frame
-    zenith: 0x4183d4, horizon: 0xd9e6ec, sun: 0xfff4dc,
-    sunIntensity: 2.45, skyFill: 0xa8caea, groundFill: 0x9a8f6d,
-    fillIntensity: 0.86, fog: 0xd5e3e8, fogDensityScale: 0.92,
-    cloudLit: 0xf8f1de, cloudShade: 0xc6cedb,
+    zenith: 0x3a7fd6, horizon: 0xdfecf2, sun: 0xfff7e6,
+    sunIntensity: 2.95, skyFill: 0xb6d6f4, groundFill: 0xaba38a,
+    fillIntensity: 0.74, fog: 0xdeeaf0, fogDensityScale: 0.80,
+    cloudLit: 0xfefaf1, cloudShade: 0xd4dde8,
   },
   {
     t: 0.68, // late afternoon
-    zenith: 0x4380cb, horizon: 0xe8dcc4, sun: 0xffe6b4,
-    sunIntensity: 2.15, skyFill: 0xa6c3e0, groundFill: 0x9c8a62,
-    fillIntensity: 0.80, fog: 0xdfdccb, fogDensityScale: 0.96,
-    cloudLit: 0xfaeed6, cloudShade: 0xc9c4c8,
+    zenith: 0x3d7fd0, horizon: 0xeee5d2, sun: 0xffefcc,
+    sunIntensity: 2.70, skyFill: 0xb0cde8, groundFill: 0xa89a76,
+    fillIntensity: 0.72, fog: 0xe6e4d6, fogDensityScale: 0.85,
+    cloudLit: 0xfdf5e4, cloudShade: 0xd3ced2,
   },
   {
     t: 0.79, // golden hour
@@ -198,6 +198,11 @@ export class Environment {
     this.sky.setCloudCount(preset.cloudCount);
     this.fog.far = preset.fogFar;
     this.applyTime(this.time);
+  }
+
+  /** Snap the clock, e.g. after sleeping. */
+  jumpTo(t: number): void {
+    this.applyTime(t);
   }
 
   setMode(mode: TimeMode): void {

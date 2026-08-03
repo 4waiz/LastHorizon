@@ -33,14 +33,27 @@ FPS = 30
 # Geometry helpers
 # --------------------------------------------------------------------------
 
+# Cross-sections use 12 points rather than 8. At the size the character sits
+# on screen, those extra four are the difference between a visibly faceted
+# limb and a rounded one — and this is the one model always in frame.
+RING_N = 12
+
+
 def ring(z, cx, cy, hw, hd, k=0.55):
-    """Octagonal cross-section: a rounded rectangle in 8 points, CCW from +Z."""
-    return [
-        (cx + hw, cy - hd * k, z), (cx + hw, cy + hd * k, z),
-        (cx + hw * k, cy + hd, z), (cx - hw * k, cy + hd, z),
-        (cx - hw, cy + hd * k, z), (cx - hw, cy - hd * k, z),
-        (cx - hw * k, cy - hd, z), (cx + hw * k, cy - hd, z),
-    ]
+    """Superellipse cross-section, CCW seen from +Z.
+
+    `k` blends between a rounded rectangle (low) and an ellipse (high):
+    limbs want the ellipse, the torso wants a little squareness.
+    """
+    pts = []
+    power = 2.0 + (1.0 - k) * 2.4
+    for i in range(RING_N):
+        a = 2 * math.pi * i / RING_N
+        ca, sa = math.cos(a), math.sin(a)
+        x = math.copysign(abs(ca) ** (2.0 / power), ca)
+        y = math.copysign(abs(sa) ** (2.0 / power), sa)
+        pts.append((cx + hw * x, cy + hd * y, z))
+    return pts
 
 
 def boolean_diff(obj, cutters):
@@ -63,8 +76,8 @@ def boolean_diff(obj, cutters):
     return obj
 
 
-def loft_z(name, sections, mat_key, cap_bottom=True, cap_top=True):
-    """Loft octagonal rings stacked along Z.
+def loft_z(name, sections, mat_key, cap_bottom=True, cap_top=True, smooth=True):
+    """Loft cross-sections stacked along Z.
 
     sections: list of (z, cx, cy, half_width, half_depth[, k])
     """
@@ -75,14 +88,21 @@ def loft_z(name, sections, mat_key, cap_bottom=True, cap_top=True):
         k = s[5] if len(s) > 5 else 0.55
         verts.extend(ring(z, cx, cy, hw, hd, k))
     for r in range(n - 1):
-        for i in range(8):
-            j = (i + 1) % 8
-            faces.append((r * 8 + i, r * 8 + j, (r + 1) * 8 + j, (r + 1) * 8 + i))
+        for i in range(RING_N):
+            j = (i + 1) % RING_N
+            faces.append((r * RING_N + i, r * RING_N + j,
+                          (r + 1) * RING_N + j, (r + 1) * RING_N + i))
     if cap_bottom:
-        faces.append(tuple(range(7, -1, -1)))
+        faces.append(tuple(range(RING_N - 1, -1, -1)))
     if cap_top:
-        faces.append(tuple(range((n - 1) * 8, n * 8)))
-    return mesh_from(name, verts, faces, mat_key)
+        faces.append(tuple(range((n - 1) * RING_N, n * RING_N)))
+    obj = mesh_from(name, verts, faces, mat_key)
+    if smooth:
+        # Smooth normals across the loft; the silhouette stays low-poly but the
+        # shading reads as a rounded limb instead of a stack of facets.
+        for poly in obj.data.polygons:
+            poly.use_smooth = True
+    return obj
 
 
 # --------------------------------------------------------------------------
@@ -153,6 +173,14 @@ LEG_R = ["thigh.R", "shin.R", "foot.R"]
 TORSO = ["hips", "spine", "chest", "neck"]
 
 
+def smooth(obj):
+    """Round the shading on a beveled box so it reads as a soft form."""
+    apply_modifiers(obj)
+    for poly in obj.data.polygons:
+        poly.use_smooth = True
+    return obj
+
+
 def build_parts():
     parts = []
 
@@ -160,19 +188,21 @@ def build_parts():
     # Rounded cube: big and readable, the way the reference frame reads at
     # third-person distance. Front of the face sits at y = -0.099.
     head = box("head", (0.216, 0.206, 0.238), (0, 0.004, 1.152), "skin")
-    bevel(head, 0.058, 4)
+    bevel(head, 0.062, 5)
+    smooth(head)
     parts.append((head, ["head"]))
 
     for s, tag in ((1, "L"), (-1, "R")):
         ear = box("ear." + tag, (0.022, 0.044, 0.058), (s * 0.109, 0.014, 1.136), "skin")
-        bevel(ear, 0.010, 2)
+        bevel(ear, 0.010, 3)
+        smooth(ear)
         parts.append((ear, ["head"]))
 
     # ---- hair --------------------------------------------------------------
     # Offsetting the head shape and carving away the face gives hair that
     # actually hugs the skull. Stacked boxes always read as a helmet.
     shell = box("hair", (0.216, 0.206, 0.238), (0, 0.004, 1.152), "hair")
-    bevel(shell, 0.058, 4)
+    bevel(shell, 0.062, 5)
     apply_modifiers(shell)
     shell.scale = (1.122, 1.128, 1.110)
     shell.location = (0, 0.004 * (1 - 1.128), 1.152 * (1 - 1.110))
@@ -188,6 +218,8 @@ def build_parts():
         # expose the ears, keeping a thin sideburn in front of each
         cutters.append(box("cutC%d" % s, (0.22, 0.30, 0.26), (s * 0.198, 0.150, 1.040)))
     boolean_diff(shell, cutters)
+    for poly in shell.data.polygons:
+        poly.use_smooth = True
     parts.append((shell, ["head"]))
 
     # Chunky locks along the hairline. Without them the offset shell reads as
@@ -201,7 +233,8 @@ def build_parts():
     ]
     for i, (lx, ly, lz, lw, ld, lh) in enumerate(LOCKS):
         lock = box("lock%d" % i, (lw, ld, lh), (lx, ly, lz), "hair")
-        bevel(lock, 0.016, 2)
+        bevel(lock, 0.018, 3)
+        smooth(lock)
         parts.append((lock, ["head"]))
 
     # ---- face --------------------------------------------------------------
@@ -275,20 +308,29 @@ def build_parts():
         parts.append((hand, ["hand." + tag, "lowerarm." + tag]))
 
     # ---- shorts -----------------------------------------------------------
-    shorts = loft_z("shorts", [
-        (0.628, 0, 0.000, 0.122, 0.086, 0.60),
-        (0.560, 0, 0.000, 0.127, 0.090, 0.60),
-        (0.490, 0, 0.000, 0.132, 0.092, 0.60),
-        (0.452, 0, 0.000, 0.130, 0.090, 0.60),
-    ], "shorts")
-    parts.append((shorts, ["hips", "spine", "thigh.L", "thigh.R"]))
+    # A single flared tube reads as a skirt. Build a hip block that splits
+    # into two separate legs, each with its own cuff.
+    hips = loft_z("shorts_hip", [
+        (0.632, 0, 0.000, 0.121, 0.086, 0.62),
+        (0.578, 0, 0.000, 0.126, 0.090, 0.62),
+        (0.536, 0, 0.000, 0.129, 0.092, 0.62),
+    ], "shorts", cap_top=False)
+    parts.append((hips, ["hips", "spine", "thigh.L", "thigh.R"]))
 
     for s, tag in ((1, "L"), (-1, "R")):
+        leg = loft_z("shorts_leg." + tag, [
+            (0.548, s * 0.060, 0.000, 0.064, 0.088, 0.72),
+            (0.496, s * 0.068, 0.000, 0.063, 0.070, 0.80),
+            (0.446, s * 0.073, 0.000, 0.062, 0.066, 0.85),
+            (0.408, s * 0.075, 0.000, 0.060, 0.064, 0.88),
+        ], "shorts", cap_bottom=False, cap_top=False)
+        parts.append((leg, ["thigh." + tag, "hips"]))
+        # turn-up at the hem
         cuff = loft_z("cuff." + tag, [
-            (0.470, s * 0.070, 0, 0.058, 0.062),
-            (0.412, s * 0.073, 0, 0.056, 0.060),
-        ], "shorts", cap_top=False)
-        parts.append((cuff, ["thigh." + tag, "hips"]))
+            (0.418, s * 0.0745, 0.000, 0.065, 0.069, 0.88),
+            (0.396, s * 0.0755, 0.000, 0.064, 0.068, 0.88),
+        ], "shorts", cap_bottom=False)
+        parts.append((cuff, ["thigh." + tag]))
 
     # ---- legs -------------------------------------------------------------
     for s, tag, bones in ((1, "L", LEG_L), (-1, "R", LEG_R)):
@@ -310,10 +352,12 @@ def build_parts():
         ], "shoe")
         parts.append((upper, ["foot." + tag]))
         sole = box("sole." + tag, (0.086, 0.164, 0.030), (s * 0.080, -0.020, 0.017), "shoe")
-        bevel(sole, 0.013, 2)
+        bevel(sole, 0.016, 3)
+        smooth(sole)
         parts.append((sole, ["foot." + tag]))
         toe = box("toe." + tag, (0.078, 0.052, 0.052), (s * 0.080, -0.070, 0.038), "shoe")
-        bevel(toe, 0.022, 3)
+        bevel(toe, 0.026, 4)
+        smooth(toe)
         parts.append((toe, ["foot." + tag]))
 
     return parts

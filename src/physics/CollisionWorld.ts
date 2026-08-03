@@ -60,9 +60,13 @@ export class CollisionWorld {
     generator.attributes = ['position'];
     generator.useGroups = false;
     const merged = generator.generate();
-    merged.computeBoundsTree({ maxLeafTris: 8 });
 
-    this.bvh = merged.boundsTree as MeshBVH;
+    // Construct the BVH directly rather than via the prototype helper: that
+    // helper only exists on whichever copy of THREE.BufferGeometry got
+    // patched, and a duplicated three install would silently break it.
+    const bvh = new MeshBVH(merged, { maxLeafTris: 8 });
+    merged.boundsTree = bvh;
+    this.bvh = bvh;
     this.collider = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ visible: false }));
     this.collider.name = 'CollisionProxy';
     this.collider.matrixAutoUpdate = false;

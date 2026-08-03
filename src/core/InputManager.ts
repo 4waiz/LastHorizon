@@ -31,6 +31,7 @@ export class InputManager {
 
   private keys = new Set<string>();
   private jumpQueued = false;
+  private interactQueued = false;
   private pointerActive = false;
   private pointerId = -1;
   private lastPointer = { x: 0, y: 0 };
@@ -90,6 +91,10 @@ export class InputManager {
     if (e.repeat) return;
     const code = e.code;
     if (down) {
+      if (code === 'KeyE' || code === 'KeyF' || code === 'Enter') {
+        this.interactQueued = true;
+        e.preventDefault();
+      }
       if (code === 'Space') {
         this.jumpQueued = true;
         e.preventDefault();
@@ -137,6 +142,17 @@ export class InputManager {
 
   queueJump(): void {
     this.jumpQueued = true;
+  }
+
+  queueInteract(): void {
+    this.interactQueued = true;
+  }
+
+  /** True exactly once per interact press. */
+  consumeInteract(): boolean {
+    if (!this.interactQueued) return false;
+    this.interactQueued = false;
+    return true;
   }
 
   /** True exactly once per jump press. */
@@ -204,6 +220,7 @@ export class InputManager {
     this.pointerActive = false;
     this.pointerId = -1;
     this.jumpQueued = false;
+    this.interactQueued = false;
     this.move.x = 0;
     this.move.y = 0;
     this.lookX = 0;

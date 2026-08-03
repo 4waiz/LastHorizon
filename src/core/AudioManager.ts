@@ -33,13 +33,21 @@ function noiseBuffer(ctx: AudioContext, seconds: number, brown = false): AudioBu
   return buf;
 }
 
-/** A calm, slowly rotating chord bed. Four chords, no leading tones. */
-const CHORDS = [
-  [146.83, 220.0, 277.18], // D3  A3  C#4
-  [130.81, 196.0, 246.94], // C3  G3  B3
-  [164.81, 246.94, 329.63], // E3  B3  E4
-  [110.0, 174.61, 220.0], // A2  F3  A3
+/**
+ * Lo-fi chord bed: lush sevenths and ninths in a slow ii-V-I-vi loop, the
+ * harmony that reads as "lo-fi" rather than "ambient drone". Voiced low and
+ * close, run through a soft low-pass, with a little tape wobble on the
+ * detune and a whisper of vinyl noise underneath.
+ */
+const CHORDS: number[][] = [
+  [146.83, 220.00, 261.63, 349.23], // Dm9   D  A  C  F
+  [196.00, 246.94, 293.66, 392.00], // G13   G  B  D  G
+  [130.81, 196.00, 246.94, 329.63], // Cmaj7 C  G  B  E
+  [110.00, 164.81, 207.65, 261.63], // Am7   A  E  G# C
 ];
+
+/** A gentle bell figure that drifts over the pad. */
+const MOTIF = [523.25, 587.33, 698.46, 587.33, 523.25, 440.0];
 
 export class AudioManager {
   private ctx: AudioContext | null = null;
@@ -60,6 +68,8 @@ export class AudioManager {
 
   private padVoices: Array<{ osc: OscillatorNode; gain: GainNode }> = [];
   private chordIndex = 0;
+  private motifStep = 0;
+  private padTone: BiquadFilterNode | null = null;
   private nextChordAt = 0;
   private nextBirdAt = 0;
   private nextInsectAt = 0;
@@ -89,11 +99,11 @@ export class AudioManager {
       this.master.connect(ctx.destination);
 
       this.musicGain = ctx.createGain();
-      this.musicGain.gain.value = 0.16;
+      this.musicGain.gain.value = 0.30;
       this.musicGain.connect(this.master);
 
       this.ambientGain = ctx.createGain();
-      this.ambientGain.gain.value = 0.5;
+      this.ambientGain.gain.value = 0.34;
       this.ambientGain.connect(this.master);
 
       this.sfxGain = ctx.createGain();
@@ -127,7 +137,7 @@ export class AudioManager {
     filter.Q.value = 0.6;
 
     const gain = ctx.createGain();
-    gain.gain.value = 0.30;
+    gain.gain.value = 0.11;
 
     src.connect(filter).connect(gain).connect(this.ambientGain!);
     src.start();
@@ -173,22 +183,78 @@ export class AudioManager {
 
   private buildPad(): void {
     const ctx = this.ctx!;
-    for (let i = 0; i < 3; i++) {
-      const osc = ctx.createOscillator();
-      osc.type = i === 2 ? 'sine' : 'triangle';
-      osc.frequency.value = CHORDS[0][i];
-      osc.detune.value = (i - 1) * 5;
 
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.value = 900;
+    // Shared warmth: one soft low-pass over the whole bed, the single most
+    // "lo-fi" thing you can do to a synth pad.
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 760;
+    tone.Q.value = 0.4;
+    tone.connect(this.musicGain!);
+    this.padTone = tone;
+
+    // Slow pitch drift, like a tape that isn't quite steady.
+    const wobble = ctx.createOscillator();
+    wobble.type = 'sine';
+    wobble.frequency.value = 0.14;
+    const wobbleAmount = ctx.createGain();
+    wobbleAmount.gain.value = 5.5; // cents
+    wobble.connect(wobbleAmount);
+    wobble.start();
+
+    for (let i = 0; i < 4; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = i === 3 ? 'sine' : 'triangle';
+      osc.frequency.value = CHORDS[0][i];
+      osc.detune.value = (i - 1.5) * 4;
+      wobbleAmount.connect(osc.detune);
 
       const gain = ctx.createGain();
       gain.gain.value = 0;
-      osc.connect(filter).connect(gain).connect(this.musicGain!);
+      osc.connect(gain).connect(tone);
       osc.start();
       this.padVoices.push({ osc, gain });
     }
+
+    // Vinyl surface noise: very quiet, heavily filtered, always there.
+    const hiss = ctx.createBufferSource();
+    hiss.buffer = noiseBuffer(ctx, 3.5);
+    hiss.loop = true;
+    const hissFilter = ctx.createBiquadFilter();
+    hissFilter.type = 'bandpass';
+    hissFilter.frequency.value = 2600;
+    hissFilter.Q.value = 0.7;
+    const hissGain = ctx.createGain();
+    hissGain.gain.value = 0.014;
+    hiss.connect(hissFilter).connect(hissGain).connect(this.musicGain!);
+    hiss.start();
+  }
+
+  /** One soft bell note from the motif, played every few chord changes. */
+  private bell(when: number, freq: number): void {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = freq * 2.01;
+
+    const g1 = ctx.createGain();
+    g1.gain.setValueAtTime(0, when);
+    g1.gain.linearRampToValueAtTime(0.075, when + 0.02);
+    g1.gain.exponentialRampToValueAtTime(0.0004, when + 2.6);
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0, when);
+    g2.gain.linearRampToValueAtTime(0.022, when + 0.015);
+    g2.gain.exponentialRampToValueAtTime(0.0004, when + 1.2);
+
+    osc.connect(g1).connect(this.musicGain!);
+    osc2.connect(g2).connect(this.musicGain!);
+    osc.start(when);
+    osc2.start(when);
+    osc.stop(when + 2.8);
+    osc2.stop(when + 1.4);
   }
 
   setMuted(m: boolean): void {
@@ -229,9 +295,9 @@ export class AudioManager {
 
     // wind rises a little with speed, and thins out after dark
     if (this.windFilter && this.windGain) {
-      const target = 420 + speed * 90 + Math.sin(now * 0.21) * 130;
+      const target = 300 + speed * 45 + Math.sin(now * 0.15) * 90;
       this.windFilter.frequency.setTargetAtTime(target, now, 0.6);
-      this.windGain.gain.setTargetAtTime(lerp(0.30, 0.20, nightFactor), now, 1.2);
+      this.windGain.gain.setTargetAtTime(lerp(0.11, 0.075, nightFactor), now, 1.2);
     }
 
     // transformer hum, gated by proximity to a pole
@@ -241,17 +307,28 @@ export class AudioManager {
       this.humPan.pan.setTargetAtTime(clamp(polePan, -1, 1), now, 0.3);
     }
 
-    // slow chord rotation
+    // Chord rotation. Slow, but with an audible swell so it breathes rather
+    // than drones — and the low-pass opens a touch on each new chord.
     if (now >= this.nextChordAt) {
-      this.nextChordAt = now + 11.5;
+      this.nextChordAt = now + 9.0;
       const chord = CHORDS[this.chordIndex % CHORDS.length];
       this.chordIndex++;
       this.padVoices.forEach((v, i) => {
-        v.osc.frequency.setTargetAtTime(chord[i], now, 2.2);
+        v.osc.frequency.setTargetAtTime(chord[i], now, 1.4);
         v.gain.gain.cancelScheduledValues(now);
-        v.gain.gain.setTargetAtTime(0.22, now, 3.0);
-        v.gain.gain.setTargetAtTime(0.07, now + 7.0, 3.0);
+        v.gain.gain.setTargetAtTime(0.19 - i * 0.022, now, 1.8);
+        v.gain.gain.setTargetAtTime(0.055, now + 5.5, 2.6);
       });
+      if (this.padTone) {
+        this.padTone.frequency.cancelScheduledValues(now);
+        this.padTone.frequency.setTargetAtTime(1020, now, 1.5);
+        this.padTone.frequency.setTargetAtTime(700, now + 4.5, 2.5);
+      }
+      // A bell note on every other chord, tracing the motif.
+      if (this.chordIndex % 2 === 1) {
+        this.bell(now + 0.4, MOTIF[this.motifStep % MOTIF.length]);
+        this.motifStep++;
+      }
     }
 
     // birdsong by day, crickets by night

@@ -4,7 +4,7 @@ import { Settings, QualityLevel, TimeMode } from './Settings';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
 import { AssetManager } from './AssetManager';
-import { World } from '../world/World';
+import { World, Interactable } from '../world/World';
 import { Environment } from '../world/Environment';
 import { Player } from '../player/Player';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera';
@@ -57,6 +57,8 @@ export class Game {
   private readonly camForward = new THREE.Vector3();
   private readonly camRight = new THREE.Vector3();
   private nearestPole = { distance: 999, pan: 0 };
+  private activeInteractable: Interactable | null = null;
+  private sleeping = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
@@ -110,6 +112,7 @@ export class Game {
         this.world.collectibles.restoreAll();
         this.hud.setCounter(0, this.world.collectibles.total);
       },
+      onInteract: () => this.input.queueInteract(),
     });
     this.hud.setCounter(this.world.collectibles.count, this.world.collectibles.total);
 
@@ -226,7 +229,7 @@ export class Game {
   }
 
   private update(dt: number): void {
-    const uiBlocking = this.hud.infoOpen;
+    const uiBlocking = this.hud.infoOpen || this.sleeping;
     if (uiBlocking) this.input.releaseAll();
 
     // 1. character
@@ -280,8 +283,70 @@ export class Game {
       0.35 + this.env.dayFactor * 0.65,
     );
 
-    // 6. audio
+    // 6. interactables
+    this.updateInteraction();
+
+    // 7. audio
     this.updateAudio(dt);
+  }
+
+  /**
+   * Offer the nearest thing in reach, and act on it if asked.
+   *
+   * Distance is measured against the player's chest rather than their feet so
+   * a bed you're standing beside still counts.
+   */
+  private updateInteraction(): void {
+    if (this.sleeping) return;
+
+    let best: Interactable | null = null;
+    let bestDist = Infinity;
+    const p = this.player.lookTarget;
+    for (const it of this.world.interactables) {
+      const d = it.position.distanceTo(p);
+      if (d < it.radius && d < bestDist) {
+        best = it;
+        bestDist = d;
+      }
+    }
+
+    if (best !== this.activeInteractable) {
+      this.activeInteractable = best;
+      this.hud.setPrompt(best ? best.prompt : null);
+    }
+
+    if (best && this.input.consumeInteract()) {
+      if (best.kind === 'sleep') void this.sleep();
+    } else if (!best) {
+      // Drop a press aimed at nothing so it can't fire later.
+      this.input.consumeInteract();
+    }
+  }
+
+  /** Fade out, roll the clock round to dawn, fade back in. */
+  private async sleep(): Promise<void> {
+    if (this.sleeping) return;
+    this.sleeping = true;
+    this.hud.setPrompt(null);
+    this.activeInteractable = null;
+    this.input.releaseAll();
+
+    await this.hud.setFade(true, 1.1);
+
+    this.env.setMode('cycle');
+    this.settings.setTimeMode('cycle');
+    this.env.jumpTo(0.285); // just after first light
+    // Re-seat the player beside the bed so they don't wake up inside it.
+    const bed = this.world.interactables.find((i) => i.kind === 'sleep');
+    if (bed) {
+      this.player.motor.teleport(bed.position.x + 1.5, bed.position.y - 0.4, bed.position.z);
+      this.camera.resetBehind(this.player.lookTarget, this.player.controller.facing);
+    }
+    this.render();
+
+    await this.hud.setFade(false, 1.4);
+    this.sleeping = false;
+    this.hud.showToast('Morning', 'You slept until the light came back.');
   }
 
   private updateAudio(dt: number): void {

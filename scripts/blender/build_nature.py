@@ -182,7 +182,7 @@ def grass_tuft():
     for i in range(4):
         a = i * math.pi / 4 + 0.3
         c, s = math.cos(a), math.sin(a)
-        w, h = 0.085, 0.30 + 0.06 * (i % 2)
+        w, h = 0.042, 0.34 + 0.07 * (i % 2)
         v = [(-w * c, -w * s, 0.0), (w * c, w * s, 0.0),
              (w * c * 0.35, w * s * 0.35, h), (-w * c * 0.35, -w * s * 0.35, h)]
         o.append(mesh_from("bl%d" % i, v, [(0, 1, 2, 3)], "grass_green"))

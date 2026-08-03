@@ -57,6 +57,13 @@ const GradeShader = {
 export class PostProcessing {
   private composer: EffectComposer | null = null;
   private renderPass: RenderPass | null = null;
+  /**
+   * ShaderPass deep-clones the uniform object it is handed, so mutating
+   * `GradeShader.uniforms` after construction does nothing. Keep the pass's
+   * own uniforms and write to those.
+   */
+  private gradePass: ShaderPass | null = null;
+  private daylight = 1;
   enabled = false;
 
   constructor(
@@ -77,8 +84,10 @@ export class PostProcessing {
       const composer = new EffectComposer(this.renderer);
       this.renderPass = new RenderPass(this.scene, this.camera);
       composer.addPass(this.renderPass);
-      composer.addPass(new ShaderPass(GradeShader));
+      this.gradePass = new ShaderPass(GradeShader);
+      composer.addPass(this.gradePass);
       composer.addPass(new OutputPass());
+      this.setDaylight(this.daylight);
       const size = this.renderer.getSize(new THREE.Vector2());
       composer.setSize(size.x, size.y);
       composer.setPixelRatio(this.renderer.getPixelRatio());
@@ -94,6 +103,7 @@ export class PostProcessing {
     this.composer?.dispose();
     this.composer = null;
     this.renderPass = null;
+    this.gradePass = null;
   }
 
   setCamera(camera: THREE.Camera): void {
@@ -109,8 +119,12 @@ export class PostProcessing {
    * olive. It only makes sense as a daytime bounce-light cue.
    */
   setDaylight(dayFactor: number): void {
-    GradeShader.uniforms.uWarmth.value = 0.012 + dayFactor * 0.034;
-    GradeShader.uniforms.uEdgeDesat.value = 0.06 + dayFactor * 0.10;
+    this.daylight = dayFactor;
+    const u = this.gradePass?.uniforms;
+    if (!u) return;
+    u.uWarmth.value = 0.005 + dayFactor * 0.018;
+    u.uEdgeDesat.value = 0.05 + dayFactor * 0.11;
+    u.uVignette.value = 0.16 + dayFactor * 0.13;
   }
 
   resize(width: number, height: number, pixelRatio: number): void {
