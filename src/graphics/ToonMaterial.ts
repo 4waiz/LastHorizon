@@ -26,7 +26,17 @@ export interface ToonOptions {
   transparent?: boolean;
   opacity?: number;
   side?: THREE.Side;
-  flatShading?: boolean;
+  vertexColors?: boolean;
+  map?: THREE.Texture;
+  /**
+   * Uniqueness token. Materials are shared by value, so two callers asking
+   * for the same colour get the *same object* — mutating one then mutates
+   * the other. Pass an id whenever the caller intends to configure the
+   * material further.
+   */
+  id?: string;
+  /* Note: MeshToonMaterial has no flatShading; the Blender kit bakes flat
+     normals into the geometry instead. */
 }
 
 /** Uniforms shared by every patched material, updated once per frame. */
@@ -180,6 +190,7 @@ export function makeToon(
   const emissive = opts.emissive ? new THREE.Color(opts.emissive) : null;
 
   const key = [
+    opts.id ?? '-',
     col.getHexString(),
     kind,
     fadeable ? 1 : 0,
@@ -188,7 +199,8 @@ export function makeToon(
     opts.emissiveIntensity ?? 1,
     opts.transparent ? 1 : 0,
     opts.opacity ?? 1,
-    opts.flatShading ? 1 : 0,
+    opts.vertexColors ? 1 : 0,
+    opts.map ? opts.map.uuid : '-',
   ].join('|');
 
   const hit = cache.get(key);
@@ -200,7 +212,8 @@ export function makeToon(
     side,
     transparent: !!opts.transparent,
     opacity: opts.opacity ?? 1,
-    flatShading: !!opts.flatShading,
+    vertexColors: !!opts.vertexColors,
+    map: opts.map ?? null,
     fog: true,
   }) as ToonMaterial;
 

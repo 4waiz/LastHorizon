@@ -109,12 +109,12 @@ uniform float uOpacity;
 
 void main() {
   vec3 n = normalize(vN);
-  // Two broad bands driven by how much the facet faces up-sun, matching the
-  // banding the toon materials use on the ground.
-  float up = clamp(n.y * 0.65 + dot(n, normalize(uSunDir)) * 0.55 + 0.28, 0.0, 1.0);
-  float band = up < 0.34 ? 0.0 : up < 0.68 ? 0.55 : 1.0;
-  vec3 col = mix(uShade, uLit, band);
-  col = mix(col, uLit, clamp(vH * 0.05, 0.0, 0.35));
+  // Soft-edged bands. Hard steps turn a faceted cumulus into shattered
+  // glass; easing the boundaries keeps the painted, poster-like read.
+  float up = clamp(n.y * 0.62 + dot(n, normalize(uSunDir)) * 0.50 + 0.34, 0.0, 1.0);
+  float band = smoothstep(0.22, 0.44, up) * 0.5 + smoothstep(0.52, 0.78, up) * 0.5;
+  vec3 col = mix(uShade, uLit, 0.32 + band * 0.68);
+  col = mix(col, uLit, clamp(vH * 0.035, 0.0, 0.28));
   gl_FragColor = vec4(col, uOpacity);
   #include <colorspace_fragment>
 }
@@ -128,19 +128,20 @@ interface CloudEntry {
 
 function cloudGeometry(rng: Rng): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const lobes = rng.int(5, 9);
-  const spread = rng.range(16, 30);
+  const lobes = rng.int(6, 10);
+  const spread = rng.range(18, 32);
   for (let i = 0; i < lobes; i++) {
-    const r = rng.range(7, 15);
+    const r = rng.range(8, 15);
     const g = new THREE.IcosahedronGeometry(r, 1);
-    // squash and jitter so no lobe reads as a sphere
+    // Squash and jitter so no lobe reads as a sphere — but gently: heavy
+    // per-vertex noise on a low subdivision reads as broken geometry.
     const pos = g.attributes.position as THREE.BufferAttribute;
     for (let v = 0; v < pos.count; v++) {
       pos.setXYZ(
         v,
-        pos.getX(v) * rng.range(1.0, 1.35) + rng.jitter(r * 0.14),
-        pos.getY(v) * rng.range(0.42, 0.62) + rng.jitter(r * 0.08),
-        pos.getZ(v) * rng.range(0.9, 1.2) + rng.jitter(r * 0.12),
+        pos.getX(v) * rng.range(1.02, 1.22) + rng.jitter(r * 0.06),
+        pos.getY(v) * rng.range(0.46, 0.60) + rng.jitter(r * 0.035),
+        pos.getZ(v) * rng.range(0.94, 1.14) + rng.jitter(r * 0.055),
       );
     }
     g.translate(
@@ -165,7 +166,7 @@ export class Sky {
   private cloudMat: THREE.ShaderMaterial;
   private entries: CloudEntry[] = [];
   private wind = new THREE.Vector2(0.86, 0.51);
-  private bounds = 620;
+  private bounds = 760;
 
   constructor(cloudCount: number) {
     this.group.name = 'Sky';
@@ -197,8 +198,8 @@ export class Sky {
     this.cloudMat = new THREE.ShaderMaterial({
       vertexShader: CLOUD_VERT,
       fragmentShader: CLOUD_FRAG,
-      transparent: true,
-      depthWrite: false,
+      transparent: false,
+      depthWrite: true,
       fog: false,
       uniforms: {
         uLit: { value: new THREE.Color(0xf7efdb) },
@@ -218,13 +219,13 @@ export class Sky {
       const geo = cloudGeometry(rng);
       const mesh = new THREE.Mesh(geo, this.cloudMat);
       const angle = (i / count) * Math.PI * 2 + rng.jitter(0.5);
-      const radius = rng.range(150, 470);
+      const radius = rng.range(250, 570);
       mesh.position.set(
         Math.cos(angle) * radius,
-        rng.range(86, 168),
+        rng.range(104, 186),
         Math.sin(angle) * radius,
       );
-      const s = rng.range(1.1, 2.6);
+      const s = rng.range(0.95, 1.95);
       mesh.scale.setScalar(s);
       mesh.rotation.y = rng.range(0, Math.PI * 2);
       mesh.renderOrder = -900;

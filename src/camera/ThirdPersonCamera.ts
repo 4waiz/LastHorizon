@@ -68,7 +68,7 @@ export class ThirdPersonCamera {
   private initialised = false;
 
   constructor(aspect: number) {
-    this.camera = new THREE.PerspectiveCamera(56, aspect, 0.12, 620);
+    this.camera = new THREE.PerspectiveCamera(56, aspect, 0.12, 1000);
     this.camera.position.set(0, 4, 10);
   }
 
@@ -86,6 +86,10 @@ export class ThirdPersonCamera {
       this.tuning.maxDistance,
     );
     this.camera.updateProjectionMatrix();
+  }
+
+  setDistance(d: number): void {
+    this.wantedDistance = clamp(d, this.tuning.minDistance, this.tuning.maxDistance);
   }
 
   resetBehind(target: THREE.Vector3, facing: number): void {

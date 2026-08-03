@@ -38,9 +38,11 @@ export function naturalHeight(x: number, z: number): number {
   const bank = smoothstep(10, 46, Math.abs(x - z * 0.06));
   h += bank * 4.2;
 
-  // boundary hills — a soft bowl so the map reads as enclosed, not cut off
+  // Boundary hills — a soft bowl so the map reads as enclosed rather than
+  // cut off. Kept low and pushed well out: raise them and they eat the sky,
+  // which is half of what makes the reference frames feel open.
   const r = Math.hypot(x * 0.92, (z + 10) * 0.86);
-  h += smoothstep(112, 190, r) * 42;
+  h += smoothstep(132, 218, r) * 30;
 
   return h;
 }
@@ -120,19 +122,15 @@ export class Terrain {
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const colAttr = new THREE.Float32BufferAttribute(n * n * 3, 3);
 
-    // PlaneGeometry rows run +X then -Z after the rotation; our grid runs
-    // +X then +Z, so the row index has to be mirrored.
+    // After rotateX(-PI/2) a PlaneGeometry's row index runs along +Z, matching
+    // our grid's j exactly — so vertex order and grid order line up 1:1.
+    // (Getting this backwards mirrors the terrain against the road and buries
+    // the carriageway under the hillside.)
     for (let j = 0; j < n; j++) {
       for (let i = 0; i < n; i++) {
-        const vi = j * n + i;
-        const gi = (n - 1 - j) * n + i;
-        pos.setY(vi, this.heights[gi]);
-        colAttr.setXYZ(
-          vi,
-          this.colors[gi * 3],
-          this.colors[gi * 3 + 1],
-          this.colors[gi * 3 + 2],
-        );
+        const k = j * n + i;
+        pos.setY(k, this.heights[k]);
+        colAttr.setXYZ(k, this.colors[k * 3], this.colors[k * 3 + 1], this.colors[k * 3 + 2]);
       }
     }
     pos.needsUpdate = true;
@@ -141,9 +139,7 @@ export class Terrain {
     geo.computeBoundingBox();
     geo.computeBoundingSphere();
 
-    const mat = makeToon(0xffffff);
-    mat.vertexColors = true;
-    mat.needsUpdate = true;
+    const mat = makeToon(0xffffff, { id: 'terrain', vertexColors: true });
 
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.name = 'Terrain';

@@ -32,7 +32,7 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualityPreset> = {
     cloudCount: 9,
     birdCount: 10,
     antialias: false,
-    fogFar: 240,
+    fogFar: 330,
   },
   medium: {
     label: 'Medium',
@@ -46,7 +46,7 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualityPreset> = {
     cloudCount: 14,
     birdCount: 18,
     antialias: true,
-    fogFar: 320,
+    fogFar: 440,
   },
   high: {
     label: 'High',
@@ -60,7 +60,7 @@ export const QUALITY_PRESETS: Record<QualityLevel, QualityPreset> = {
     cloudCount: 20,
     birdCount: 28,
     antialias: true,
-    fogFar: 400,
+    fogFar: 560,
   },
 };
 

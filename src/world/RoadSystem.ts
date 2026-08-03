@@ -315,8 +315,8 @@ function asphaltTexture(): THREE.Texture {
     ctx.fillRect(rng.next() * s, rng.next() * s, rng.range(6, 26), rng.range(6, 26));
   }
   const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; // authored in sRGB, must be declared
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1, 1);
   tex.anisotropy = 4;
   return tex;
 }
@@ -388,16 +388,16 @@ export function buildRoadMeshes(net: RoadNetwork): RoadBuild {
   const group = new THREE.Group();
   group.name = 'Roads';
 
-  const asphaltMat = makeToon(0xffffff, {});
-  asphaltMat.map = asphaltTexture();
-  asphaltMat.needsUpdate = true;
+  const asphaltMat = makeToon(0xffffff, { id: 'asphalt', map: asphaltTexture() });
 
-  const shoulderMat = makeToon(0xcbb98f);
-  const paintMat = makeToon(0xf2ecdd);
+  const shoulderMat = makeToon(0xcbb98f, { id: 'shoulder' });
+
+  const paintMat = makeToon(0xf2ecdd, { id: 'roadpaint' });
   paintMat.polygonOffset = true;
   paintMat.polygonOffsetFactor = -3;
   paintMat.polygonOffsetUnits = -3;
-  const crackMat = makeToon(0x6f7370, { transparent: true, opacity: 0.55 });
+
+  const crackMat = makeToon(0x6f7370, { id: 'crack', transparent: true, opacity: 0.55 });
   crackMat.polygonOffset = true;
   crackMat.polygonOffsetFactor = -2;
   crackMat.polygonOffsetUnits = -2;

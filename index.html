@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#cfe3ee" />
+    <meta
+      name="description"
+      content="LastHorizon — a peaceful stylized third-person exploration game set in a sunny coastal neighbourhood."
+    />
+    <link rel="icon" type="image/png" href="./icon.png" />
+    <link rel="apple-touch-icon" href="./icon.png" />
+    <title>LastHorizon</title>
+  </head>
+  <body>
+    <canvas id="viewport"></canvas>
+
+    <!-- ============================ loading ============================ -->
+    <div id="loading" class="loading">
+      <div class="loading__sky"></div>
+      <div class="loading__hills"></div>
+
+      <div class="loading__stage">
+        <div class="swoosh" aria-hidden="true">
+          <svg viewBox="0 0 320 320">
+            <defs>
+              <linearGradient id="swooshGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#f6d79a" stop-opacity="0" />
+                <stop offset="45%" stop-color="#f3c471" stop-opacity="0.95" />
+                <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+              </linearGradient>
+              <linearGradient id="swooshGrad2" x1="1" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#8fc4e8" stop-opacity="0" />
+                <stop offset="55%" stop-color="#7fb4dd" stop-opacity="0.85" />
+                <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <circle class="swoosh__arc swoosh__arc--a" cx="160" cy="160" r="128"
+                    stroke="url(#swooshGrad)" />
+            <circle class="swoosh__arc swoosh__arc--b" cx="160" cy="160" r="142"
+                    stroke="url(#swooshGrad2)" />
+            <circle class="swoosh__spark" cx="160" cy="32" r="4.5" />
+          </svg>
+        </div>
+
+        <div class="logo">
+          <img id="logoImg" src="./icon.png" alt="LastHorizon" width="180" height="180" />
+          <span class="logo__sheen" aria-hidden="true"></span>
+        </div>
+      </div>
+
+      <h1 class="loading__title"><span>Last</span><span>Horizon</span></h1>
+
+      <div class="loading__bar" role="progressbar" aria-label="Loading">
+        <div id="loadingFill" class="loading__fill"></div>
+      </div>
+      <div class="loading__meta">
+        <span id="loadingPct">0%</span>
+        <span id="loadingMsg">Preparing the afternoon…</span>
+      </div>
+      <button id="startButton" class="loading__start" type="button" hidden>Step outside</button>
+    </div>
+
+    <!-- ============================== hud ============================== -->
+    <div id="hud" class="hud" hidden>
+      <div class="hud__stack" data-ui>
+        <button id="btnSound" class="tile" type="button" title="Sound" aria-label="Toggle sound">
+          <svg viewBox="0 0 24 24" class="tile__icon"><use href="#i-sound-on" /></svg>
+        </button>
+        <button id="btnQuality" class="tile" type="button" title="Graphics quality"
+                aria-label="Graphics quality">
+          <svg viewBox="0 0 24 24" class="tile__icon"><use href="#i-quality" /></svg>
+          <span id="qualityDot" class="tile__pip"></span>
+        </button>
+        <button id="btnTime" class="tile" type="button" title="Time of day"
+                aria-label="Time of day">
+          <svg viewBox="0 0 24 24" class="tile__icon"><use href="#i-sun" /></svg>
+        </button>
+        <button id="btnInfo" class="tile" type="button" title="Information"
+                aria-label="Information">
+          <svg viewBox="0 0 24 24" class="tile__icon"><use href="#i-info" /></svg>
+        </button>
+        <button id="btnFull" class="tile" type="button" title="Fullscreen"
+                aria-label="Fullscreen">
+          <svg viewBox="0 0 24 24" class="tile__icon"><use href="#i-full" /></svg>
+        </button>
+        <div class="counter" title="Keepsakes found">
+          <span id="counterValue">0</span><span class="counter__sep">/</span><span
+            id="counterMax">5</span>
+        </div>
+      </div>
+
+      <div id="toast" class="toast" role="status" aria-live="polite">
+        <span id="toastTitle" class="toast__title"></span>
+        <span id="toastBody" class="toast__body"></span>
+      </div>
+
+      <div id="hint" class="hint">WASD to walk · Shift to run · Space to jump · drag to look</div>
+      <div id="debug" class="debug" hidden></div>
+    </div>
+
+    <!-- ============================ touch UI =========================== -->
+    <div id="touch" class="touch" hidden>
+      <div id="stick" class="stick" data-ui>
+        <div id="stickKnob" class="stick__knob"></div>
+      </div>
+      <button id="btnJump" class="touch__jump" type="button" data-ui aria-label="Jump">
+        <svg viewBox="0 0 24 24"><use href="#i-jump" /></svg>
+      </button>
+      <button id="btnRun" class="touch__run" type="button" data-ui aria-label="Run">RUN</button>
+    </div>
+
+    <div id="rotate" class="rotate" hidden>
+      <svg viewBox="0 0 24 24" class="rotate__icon"><use href="#i-rotate" /></svg>
+      <p>Turn your device sideways for a wider view.</p>
+    </div>
+
+    <!-- ============================== info ============================= -->
+    <div id="info" class="modal" hidden>
+      <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
+        <button id="infoClose" class="modal__close" type="button" aria-label="Close">×</button>
+        <h2 id="infoTitle">LastHorizon</h2>
+        <p class="modal__lede">
+          A quiet afternoon on a coastal road. There is nowhere you need to be — walk up the
+          hill, look around, and see what people left behind.
+        </p>
+
+        <section>
+          <h3>Objective</h3>
+          <p>
+            Five keepsakes are hidden around the neighbourhood. Walk close to one to pick it
+            up. Your progress is saved in this browser.
+          </p>
+        </section>
+
+        <section>
+          <h3>Controls</h3>
+          <dl class="keys">
+            <dt>W A S D <span>/</span> Arrows</dt><dd>Walk</dd>
+            <dt>Shift</dt><dd>Run</dd>
+            <dt>Space</dt><dd>Jump</dd>
+            <dt>Drag mouse</dt><dd>Look around</dd>
+            <dt>Scroll</dt><dd>Zoom</dd>
+            <dt>Esc</dt><dd>Close this panel</dd>
+          </dl>
+          <p class="keys__touch">On a touch screen: joystick on the left, jump and run on the right.</p>
+        </section>
+
+        <section class="settings">
+          <h3>Settings</h3>
+          <div class="row">
+            <span>Audio</span>
+            <button id="setSound" class="pill" type="button">On</button>
+          </div>
+          <div class="row">
+            <span>Graphics</span>
+            <div class="seg" id="setQuality">
+              <button type="button" data-q="low">Low</button>
+              <button type="button" data-q="medium">Medium</button>
+              <button type="button" data-q="high">High</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>Time of day</span>
+            <div class="seg" id="setTime">
+              <button type="button" data-t="cycle">Cycle</button>
+              <button type="button" data-t="day">Day</button>
+              <button type="button" data-t="dusk">Dusk</button>
+              <button type="button" data-t="night">Night</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>Keepsakes</span>
+            <button id="setReset" class="pill pill--warn" type="button">Reset progress</button>
+          </div>
+        </section>
+
+        <section class="credits">
+          <h3>Credits</h3>
+          <p>
+            Design, code, models, animation, shaders and audio created from scratch for this
+            project. Every model in <code>public/assets/models</code> is generated by the
+            Python scripts in <code>scripts/blender</code>; the soundtrack and effects are
+            synthesised in the browser with the Web Audio API. No third-party assets are used.
+          </p>
+          <p class="credits__tech">Three.js · three-mesh-bvh · Vite · TypeScript · Blender</p>
+        </section>
+      </div>
+    </div>
+
+    <!-- ============================= icons ============================= -->
+    <svg style="display: none" aria-hidden="true">
+      <symbol id="i-sound-on" viewBox="0 0 24 24">
+        <path d="M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4z" />
+        <path d="M15.6 8.4a5 5 0 0 1 0 7.2" fill="none" stroke-width="1.9" stroke-linecap="round" />
+        <path d="M18 6a8.4 8.4 0 0 1 0 12" fill="none" stroke-width="1.9" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-sound-off" viewBox="0 0 24 24">
+        <path d="M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4z" />
+        <path d="M16 9.5l5 5M21 9.5l-5 5" fill="none" stroke-width="1.9" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-quality" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="16" height="16" rx="3.4" />
+      </symbol>
+      <symbol id="i-info" viewBox="0 0 24 24">
+        <path d="M11 10.4h2v7.2h-2zM11 6.4h2v2.2h-2z" />
+      </symbol>
+      <symbol id="i-full" viewBox="0 0 24 24">
+        <path
+          d="M4 9V4h5v2H6v3zm11-5h5v5h-2V6h-3zM4 15h2v3h3v2H4zm14 0h2v5h-5v-2h3z" />
+      </symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4.1" />
+        <path
+          d="M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6M5.3 5.3l1.9 1.9M16.8 16.8l1.9 1.9M18.7 5.3l-1.9 1.9M7.2 16.8l-1.9 1.9"
+          fill="none" stroke-width="1.8" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24">
+        <path d="M20 14.4A8.6 8.6 0 0 1 9.6 4a8.6 8.6 0 1 0 10.4 10.4z" />
+      </symbol>
+      <symbol id="i-jump" viewBox="0 0 24 24">
+        <path d="M12 4l5.2 6h-3.4v5.4h-3.6V10H6.8z" />
+        <rect x="5" y="17.6" width="14" height="2.4" rx="1.2" />
+      </symbol>
+      <symbol id="i-rotate" viewBox="0 0 24 24">
+        <rect x="3.4" y="7" width="17.2" height="10" rx="2" fill="none" stroke-width="1.8" />
+        <path d="M9 3.6l1.8 1.8L9 7.2" fill="none" stroke-width="1.8" stroke-linecap="round" />
+      </symbol>
+    </svg>
+
+    <noscript>
+      <div class="noscript">LastHorizon needs JavaScript and WebGL to run.</div>
+    </noscript>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

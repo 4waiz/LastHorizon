@@ -1,0 +1,420 @@
+import { clamp, lerp } from '../utils/MathUtils';
+
+/**
+ * Original soundscape, synthesised in the Web Audio API.
+ *
+ * Nothing is streamed from disk. Every layer — the pad, wind, cicadas, birds,
+ * footsteps, the transformer hum near the poles — is generated from
+ * oscillators and noise buffers at runtime. That sidesteps licensing entirely,
+ * keeps the download at zero bytes, and means there is no "audio file missing"
+ * failure mode to handle: if the AudioContext can't start, the game simply
+ * runs silent.
+ *
+ * Nothing is created until the first user gesture, so autoplay policy is
+ * satisfied by construction.
+ */
+
+type Surface = 'road' | 'grass';
+
+function noiseBuffer(ctx: AudioContext, seconds: number, brown = false): AudioBuffer {
+  const len = Math.floor(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < len; i++) {
+    const white = Math.random() * 2 - 1;
+    if (brown) {
+      last = (last + 0.02 * white) / 1.02;
+      data[i] = last * 3.2;
+    } else {
+      data[i] = white;
+    }
+  }
+  return buf;
+}
+
+/** A calm, slowly rotating chord bed. Four chords, no leading tones. */
+const CHORDS = [
+  [146.83, 220.0, 277.18], // D3  A3  C#4
+  [130.81, 196.0, 246.94], // C3  G3  B3
+  [164.81, 246.94, 329.63], // E3  B3  E4
+  [110.0, 174.61, 220.0], // A2  F3  A3
+];
+
+export class AudioManager {
+  private ctx: AudioContext | null = null;
+  private master: GainNode | null = null;
+  private musicGain: GainNode | null = null;
+  private ambientGain: GainNode | null = null;
+  private sfxGain: GainNode | null = null;
+
+  private windGain: GainNode | null = null;
+  private windFilter: BiquadFilterNode | null = null;
+  private humGain: GainNode | null = null;
+  private humPan: StereoPannerNode | null = null;
+  private insectGain: GainNode | null = null;
+
+  private started = false;
+  private muted = false;
+  private failed = false;
+
+  private padVoices: Array<{ osc: OscillatorNode; gain: GainNode }> = [];
+  private chordIndex = 0;
+  private nextChordAt = 0;
+  private nextBirdAt = 0;
+  private nextInsectAt = 0;
+  private stepPhase = 0;
+  private lastStepAt = -1;
+
+  get available(): boolean {
+    return this.started && !this.failed;
+  }
+
+  /** Call from a click/keypress. Safe to call repeatedly. */
+  start(): void {
+    if (this.started || this.failed) return;
+    try {
+      const Ctor: typeof AudioContext =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) {
+        this.failed = true;
+        return;
+      }
+      const ctx = new Ctor();
+      this.ctx = ctx;
+
+      this.master = ctx.createGain();
+      this.master.gain.value = this.muted ? 0 : 0.0001;
+      this.master.connect(ctx.destination);
+
+      this.musicGain = ctx.createGain();
+      this.musicGain.gain.value = 0.16;
+      this.musicGain.connect(this.master);
+
+      this.ambientGain = ctx.createGain();
+      this.ambientGain.gain.value = 0.5;
+      this.ambientGain.connect(this.master);
+
+      this.sfxGain = ctx.createGain();
+      this.sfxGain.gain.value = 0.75;
+      this.sfxGain.connect(this.master);
+
+      this.buildWind();
+      this.buildHum();
+      this.buildInsects();
+      this.buildPad();
+
+      this.started = true;
+      // Fade in rather than punch in.
+      this.master.gain.setTargetAtTime(this.muted ? 0 : 0.85, ctx.currentTime, 1.4);
+      void ctx.resume();
+    } catch (err) {
+      console.warn('[LastHorizon] audio unavailable', err);
+      this.failed = true;
+    }
+  }
+
+  private buildWind(): void {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(ctx, 4, true);
+    src.loop = true;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 460;
+    filter.Q.value = 0.6;
+
+    const gain = ctx.createGain();
+    gain.gain.value = 0.30;
+
+    src.connect(filter).connect(gain).connect(this.ambientGain!);
+    src.start();
+
+    this.windFilter = filter;
+    this.windGain = gain;
+  }
+
+  private buildHum(): void {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 99;
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = 198;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 340;
+
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    const pan = ctx.createStereoPanner();
+
+    osc.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain).connect(pan).connect(this.ambientGain!);
+    osc.start();
+    osc2.start();
+
+    this.humGain = gain;
+    this.humPan = pan;
+  }
+
+  private buildInsects(): void {
+    const ctx = this.ctx!;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.16;
+    gain.connect(this.ambientGain!);
+    this.insectGain = gain;
+  }
+
+  private buildPad(): void {
+    const ctx = this.ctx!;
+    for (let i = 0; i < 3; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = i === 2 ? 'sine' : 'triangle';
+      osc.frequency.value = CHORDS[0][i];
+      osc.detune.value = (i - 1) * 5;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 900;
+
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      osc.connect(filter).connect(gain).connect(this.musicGain!);
+      osc.start();
+      this.padVoices.push({ osc, gain });
+    }
+  }
+
+  setMuted(m: boolean): void {
+    this.muted = m;
+    if (!this.ctx || !this.master) return;
+    this.master.gain.setTargetAtTime(m ? 0 : 0.85, this.ctx.currentTime, 0.25);
+  }
+
+  /** Pause the graph when the tab is hidden so it doesn't drone in the dark. */
+  setSuspended(suspend: boolean): void {
+    if (!this.ctx) return;
+    if (suspend && this.ctx.state === 'running') void this.ctx.suspend();
+    if (!suspend && this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
+  // ------------------------------------------------------------------ frame
+
+  /**
+   * @param speed          player ground speed, m/s
+   * @param surface        1 = tarmac, 0 = grass
+   * @param nightFactor    0 day, 1 night — swaps cicadas for crickets
+   * @param poleDistance   metres to the nearest utility pole
+   * @param polePan        -1..1 stereo position of that pole
+   * @param moving         whether the player is on the ground and moving
+   */
+  update(
+    dt: number,
+    speed: number,
+    surface: number,
+    nightFactor: number,
+    poleDistance: number,
+    polePan: number,
+    moving: boolean,
+  ): void {
+    if (!this.available || !this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    // wind rises a little with speed, and thins out after dark
+    if (this.windFilter && this.windGain) {
+      const target = 420 + speed * 90 + Math.sin(now * 0.21) * 130;
+      this.windFilter.frequency.setTargetAtTime(target, now, 0.6);
+      this.windGain.gain.setTargetAtTime(lerp(0.30, 0.20, nightFactor), now, 1.2);
+    }
+
+    // transformer hum, gated by proximity to a pole
+    if (this.humGain && this.humPan) {
+      const g = clamp(1 - poleDistance / 11, 0, 1) * 0.11;
+      this.humGain.gain.setTargetAtTime(g, now, 0.25);
+      this.humPan.pan.setTargetAtTime(clamp(polePan, -1, 1), now, 0.3);
+    }
+
+    // slow chord rotation
+    if (now >= this.nextChordAt) {
+      this.nextChordAt = now + 11.5;
+      const chord = CHORDS[this.chordIndex % CHORDS.length];
+      this.chordIndex++;
+      this.padVoices.forEach((v, i) => {
+        v.osc.frequency.setTargetAtTime(chord[i], now, 2.2);
+        v.gain.gain.cancelScheduledValues(now);
+        v.gain.gain.setTargetAtTime(0.22, now, 3.0);
+        v.gain.gain.setTargetAtTime(0.07, now + 7.0, 3.0);
+      });
+    }
+
+    // birdsong by day, crickets by night
+    if (now >= this.nextBirdAt) {
+      this.nextBirdAt = now + 2.4 + Math.random() * 7.5;
+      if (nightFactor < 0.45) this.chirp(now);
+    }
+    if (now >= this.nextInsectAt) {
+      this.nextInsectAt = now + (nightFactor > 0.5 ? 0.42 : 1.5) + Math.random() * 0.9;
+      this.insect(now, nightFactor);
+    }
+
+    this.updateFootsteps(dt, speed, surface, moving);
+  }
+
+  private updateFootsteps(dt: number, speed: number, surface: number, moving: boolean): void {
+    if (!moving || speed < 0.35) {
+      this.stepPhase = 0.62; // land the next step promptly when walking resumes
+      return;
+    }
+    // Cadence rises with speed; roughly two steps per gait cycle.
+    const cadence = clamp(speed * 0.92, 1.1, 3.4);
+    this.stepPhase += dt * cadence;
+    if (this.stepPhase >= 1) {
+      this.stepPhase -= 1;
+      const now = this.ctx!.currentTime;
+      if (now - this.lastStepAt > 0.12) {
+        this.footstep(now, surface, clamp(speed / 4, 0.35, 1));
+        this.lastStepAt = now;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------- sfx
+
+  private footstep(when: number, surface: Surface | number, force: number): void {
+    const ctx = this.ctx!;
+    const hard = typeof surface === 'number' ? surface : surface === 'road' ? 1 : 0;
+
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(ctx, 0.12);
+
+    const filter = ctx.createBiquadFilter();
+    // Tarmac is a bright click; grass is a soft, low swish.
+    filter.type = hard > 0.5 ? 'bandpass' : 'lowpass';
+    filter.frequency.value = lerp(700, 2100, hard) * (0.85 + Math.random() * 0.3);
+    filter.Q.value = lerp(0.7, 2.4, hard);
+
+    const gain = ctx.createGain();
+    const peak = lerp(0.085, 0.13, hard) * force;
+    const decay = lerp(0.115, 0.055, hard);
+    gain.gain.setValueAtTime(0, when);
+    gain.gain.linearRampToValueAtTime(peak, when + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0005, when + decay);
+
+    src.connect(filter).connect(gain).connect(this.sfxGain!);
+    src.start(when);
+    src.stop(when + decay + 0.02);
+  }
+
+  private chirp(when: number): void {
+    const ctx = this.ctx!;
+    const notes = 2 + Math.floor(Math.random() * 3);
+    const base = 2100 + Math.random() * 1500;
+    for (let i = 0; i < notes; i++) {
+      const t = when + i * (0.055 + Math.random() * 0.05);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      const f = base * (1 + (Math.random() - 0.4) * 0.28);
+      osc.frequency.setValueAtTime(f, t);
+      osc.frequency.exponentialRampToValueAtTime(f * 1.35, t + 0.05);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.045, t + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0005, t + 0.09);
+
+      const pan = ctx.createStereoPanner();
+      pan.pan.value = Math.random() * 1.6 - 0.8;
+
+      osc.connect(gain).connect(pan).connect(this.ambientGain!);
+      osc.start(t);
+      osc.stop(t + 0.12);
+    }
+  }
+
+  private insect(when: number, nightFactor: number): void {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(ctx, 0.09);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = nightFactor > 0.5 ? 4600 : 6800;
+    filter.Q.value = 22;
+
+    const gain = ctx.createGain();
+    const peak = 0.05 + nightFactor * 0.05;
+    gain.gain.setValueAtTime(0, when);
+    gain.gain.linearRampToValueAtTime(peak, when + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0005, when + 0.075);
+
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = Math.random() * 1.8 - 0.9;
+
+    src.connect(filter).connect(gain).connect(pan).connect(this.insectGain!);
+    src.start(when);
+    src.stop(when + 0.1);
+  }
+
+  /** Bright arpeggio when a keepsake is found. */
+  playDiscovery(): void {
+    if (!this.available || !this.ctx) return;
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime;
+    const notes = [659.25, 783.99, 987.77, 1318.51];
+    notes.forEach((f, i) => {
+      const t = t0 + i * 0.075;
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = f;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.14, t + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0004, t + 0.85);
+      osc.connect(gain).connect(this.sfxGain!);
+      osc.start(t);
+      osc.stop(t + 0.9);
+    });
+  }
+
+  playJump(): void {
+    if (!this.available || !this.ctx) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(ctx, 0.1);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 900;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.06, t);
+    gain.gain.exponentialRampToValueAtTime(0.0005, t + 0.11);
+    src.connect(filter).connect(gain).connect(this.sfxGain!);
+    src.start(t);
+    src.stop(t + 0.13);
+  }
+
+  playLand(force: number): void {
+    if (!this.available || !this.ctx) return;
+    this.footstep(this.ctx.currentTime, 0.6, clamp(force / 7, 0.5, 1.4));
+  }
+
+  dispose(): void {
+    for (const v of this.padVoices) {
+      try {
+        v.osc.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    this.padVoices = [];
+    void this.ctx?.close();
+    this.ctx = null;
+    this.started = false;
+  }
+}

@@ -16,6 +16,9 @@ import { clamp, lerp, saturate, smoothstep } from '../utils/MathUtils';
 /** Real seconds for one in-game day when the cycle is running. */
 export const DAY_LENGTH_SECONDS = 300;
 
+/** Haze starts this far out. Closer than this and the hills vanish. */
+const FOG_NEAR = 95;
+
 interface Keyframe {
   t: number;
   zenith: number;
@@ -36,8 +39,8 @@ const SCRIPT: Keyframe[] = [
   {
     t: 0.0, // deep night
     zenith: 0x0a1226, horizon: 0x1b2742, sun: 0xb9c9ef,
-    sunIntensity: 0.14, skyFill: 0x2a3a5e, groundFill: 0x14181f,
-    fillIntensity: 0.42, fog: 0x1b2742, fogDensityScale: 1.22,
+    sunIntensity: 0.26, skyFill: 0x35496f, groundFill: 0x1b2029,
+    fillIntensity: 0.60, fog: 0x1b2742, fogDensityScale: 1.22,
     cloudLit: 0x4a5670, cloudShade: 0x2a3247,
   },
   {
@@ -49,21 +52,21 @@ const SCRIPT: Keyframe[] = [
   },
   {
     t: 0.34, // morning
-    zenith: 0x5691d2, horizon: 0xdfe7e4, sun: 0xfff0cf,
+    zenith: 0x4784cf, horizon: 0xdfe7e4, sun: 0xfff0cf,
     sunIntensity: 2.05, skyFill: 0x9fc4e8, groundFill: 0x8e8264,
     fillIntensity: 0.80, fog: 0xd8e4e6, fogDensityScale: 1.0,
     cloudLit: 0xf9f2df, cloudShade: 0xc7cfda,
   },
   {
     t: 0.5, // high afternoon — the reference frame
-    zenith: 0x4e8fd8, horizon: 0xd9e6ec, sun: 0xfff4dc,
+    zenith: 0x4183d4, horizon: 0xd9e6ec, sun: 0xfff4dc,
     sunIntensity: 2.45, skyFill: 0xa8caea, groundFill: 0x9a8f6d,
     fillIntensity: 0.86, fog: 0xd5e3e8, fogDensityScale: 0.92,
     cloudLit: 0xf8f1de, cloudShade: 0xc6cedb,
   },
   {
     t: 0.68, // late afternoon
-    zenith: 0x4f8bcd, horizon: 0xe8dcc4, sun: 0xffe6b4,
+    zenith: 0x4380cb, horizon: 0xe8dcc4, sun: 0xffe6b4,
     sunIntensity: 2.15, skyFill: 0xa6c3e0, groundFill: 0x9c8a62,
     fillIntensity: 0.80, fog: 0xdfdccb, fogDensityScale: 0.96,
     cloudLit: 0xfaeed6, cloudShade: 0xc9c4c8,
@@ -85,14 +88,20 @@ const SCRIPT: Keyframe[] = [
   {
     t: 1.0,
     zenith: 0x0a1226, horizon: 0x1b2742, sun: 0xb9c9ef,
-    sunIntensity: 0.14, skyFill: 0x2a3a5e, groundFill: 0x14181f,
-    fillIntensity: 0.42, fog: 0x1b2742, fogDensityScale: 1.22,
+    sunIntensity: 0.26, skyFill: 0x35496f, groundFill: 0x1b2029,
+    fillIntensity: 0.60, fog: 0x1b2742, fogDensityScale: 1.22,
     cloudLit: 0x4a5670, cloudShade: 0x2a3247,
   },
 ];
 
+/**
+ * Mid-afternoon, not noon. A sun directly overhead flattens every facade and
+ * kills the long raking shadows the whole look depends on.
+ */
+export const DEFAULT_TIME = 0.615;
+
 const TIME_FOR_MODE: Record<Exclude<TimeMode, 'cycle'>, number> = {
-  day: 0.5,
+  day: DEFAULT_TIME,
   dusk: 0.80,
   night: 0.03,
 };
@@ -118,7 +127,7 @@ export class Environment {
   readonly sky: Sky;
 
   /** 0..1, 0.5 = noon. */
-  time = 0.5;
+  time = DEFAULT_TIME;
   private mode: TimeMode = 'cycle';
 
   readonly sunDirection = new THREE.Vector3(0.45, 0.72, 0.52);
@@ -157,7 +166,7 @@ export class Environment {
     this.sky = new Sky(preset.cloudCount);
     this.group.add(this.sky.group);
 
-    this.fog = new THREE.Fog(0xd5e3e8, 42, preset.fogFar);
+    this.fog = new THREE.Fog(0xd5e3e8, FOG_NEAR, preset.fogFar);
     scene.fog = this.fog;
     scene.add(this.group);
 
@@ -209,7 +218,7 @@ export class Environment {
 
   /** Human-readable clock, for the info panel. */
   get clockLabel(): string {
-    const hours = (this.time * 24 + 12) % 24;
+    const hours = (this.time * 24) % 24;
     const h = Math.floor(hours);
     const m = Math.floor((hours - h) * 60);
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
@@ -243,13 +252,14 @@ export class Environment {
     const f = this.interpolate(this.time);
     const { blendA: a, blendB: b, k } = f;
 
-    // Sun arc: rises in the east, sets in the west, tilted so shadows rake
-    // across the road the way they do in the reference frames.
+    // Sun arc: rises in the east, sets in the west. The vertical component is
+    // compressed so even "noon" sits around 50 degrees and facades keep a
+    // clear lit side and shadow side.
     const angle = (this.time - 0.25) * Math.PI * 2;
     const elevation = Math.sin(angle);
     const azimuth = Math.cos(angle);
     this.sunDirection
-      .set(azimuth * 0.86, Math.max(elevation, -0.35), azimuth * 0.30 + 0.46)
+      .set(azimuth * 1.05, Math.max(elevation, -0.35) * 0.80, azimuth * 0.34 + 0.52)
       .normalize();
 
     this.dayFactor = saturate(smoothstep(-0.10, 0.16, elevation));
@@ -268,7 +278,7 @@ export class Environment {
 
     sampleColor(a.fog, b.fog, k, this.tmpColor);
     this.fog.color.copy(this.tmpColor);
-    this.fog.near = 40 / f.fogDensityScale;
+    this.fog.near = FOG_NEAR / f.fogDensityScale;
 
     sampleColor(a.zenith, b.zenith, k, this.params.zenith);
     sampleColor(a.horizon, b.horizon, k, this.params.horizon);

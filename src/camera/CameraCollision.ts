@@ -28,7 +28,6 @@ export class CameraCollision {
   private readonly dir = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
-  private readonly probe = new THREE.Vector3();
   private readonly ray = new THREE.Raycaster();
 
   /** Materials currently faded, mapped to their target fade value. */

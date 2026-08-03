@@ -1,0 +1,618 @@
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { Terrain, WORLD_SIZE } from './Terrain';
+import { RoadNetwork, buildRoadMeshes, ROAD_HALF_WIDTH, SHOULDER_WIDTH } from './RoadSystem';
+import { naturalHeight } from './Terrain';
+import { Vegetation, VegetationPrototypes, Keepout } from './Vegetation';
+import { Birds } from './Birds';
+import { Collectibles, CollectibleDef } from './Collectibles';
+import { CollisionWorld } from '../physics/CollisionWorld';
+import { makeToon, toonFromImported } from '../graphics/ToonMaterial';
+import { QualityPreset } from '../core/Settings';
+import { Rng } from '../utils/MathUtils';
+import { AssetBundle } from '../core/AssetManager';
+
+/**
+ * Assembles the neighbourhood.
+ *
+ * Layout is authored by hand (see PLACEMENTS) rather than generated, because
+ * composition is the whole point: the road has to read as a place someone
+ * lives, with sightlines that work from every angle a third-person camera
+ * can find.
+ */
+
+interface Placement {
+  model: string;
+  x: number;
+  z: number;
+  /** Radians about +Y. Models face +Z at 0. */
+  yaw: number;
+  /** Collision box: half-extents plus a local centre offset. */
+  collider?: { hx: number; hy: number; hz: number; oy?: number; oz?: number };
+  /** Radius vegetation must stay out of. */
+  keepout?: number;
+  /** Sunk into the ground by this much, to seat on a slope. */
+  sink?: number;
+}
+
+const HALF_PI = Math.PI / 2;
+
+const PLACEMENTS: Placement[] = [
+  // ---- west side of the main road, the hero row ------------------------
+  { model: 'HouseLarge', x: -15.8, z: 62, yaw: HALF_PI,
+    collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5, sink: 0.25 },
+  { model: 'HouseSolar', x: -16.6, z: 43, yaw: HALF_PI + 0.06,
+    collider: { hx: 3.1, hy: 2.4, hz: 3.7, oy: 1.6 }, keepout: 8.5, sink: 0.2 },
+  { model: 'Shed', x: -15.2, z: 31.5, yaw: HALF_PI - 0.22,
+    collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5, sink: 0.15 },
+
+  // ---- east side ---------------------------------------------------------
+  { model: 'HouseSmall', x: 14.8, z: 34, yaw: -HALF_PI,
+    collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.0, sink: 0.2 },
+  { model: 'PorchHouse', x: 16.4, z: 6, yaw: -HALF_PI - 0.05,
+    collider: { hx: 2.4, hy: 2.0, hz: 3.9, oy: 1.6, oz: 0.9 }, keepout: 8.5, sink: 0.18 },
+  { model: 'HouseSmall', x: 18.6, z: -24, yaw: -HALF_PI + 0.14,
+    collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.0, sink: 0.2 },
+
+  // ---- along the side road ----------------------------------------------
+  { model: 'HouseLarge', x: 52, z: -22, yaw: Math.PI * 0.86,
+    collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5, sink: 0.25 },
+  { model: 'Shed', x: 66, z: -40, yaw: Math.PI * 0.72,
+    collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5, sink: 0.15 },
+];
+
+/** Retaining walls cut into the embankment, as in the reference frames. */
+const WALLS: Array<{ x: number; z: number; yaw: number }> = [
+  { x: -13.6, z: 22, yaw: 0 },
+  { x: -13.9, z: 16, yaw: 0.02 },
+  { x: -14.2, z: 10, yaw: 0.04 },
+  { x: 15.6, z: -44, yaw: Math.PI },
+  { x: 15.9, z: -50, yaw: Math.PI - 0.03 },
+];
+
+const FENCES: Array<{ x: number; z: number; yaw: number }> = [
+  { x: 27.5, z: 12, yaw: 0 },
+  { x: 27.6, z: 8, yaw: 0 },
+  { x: 27.7, z: 4, yaw: 0 },
+];
+
+export interface WorldStats {
+  vegetation: number;
+  grass: number;
+  colliderTris: number;
+  buildings: number;
+}
+
+export class World {
+  readonly group = new THREE.Group();
+  readonly terrain: Terrain;
+  readonly road: RoadNetwork;
+  readonly collision = new CollisionWorld();
+  vegetation!: Vegetation;
+  birds!: Birds;
+  collectibles!: Collectibles;
+
+  /** Lamp heads that get a real point light after dark. */
+  private lampPositions: THREE.Vector3[] = [];
+  private lampLights: THREE.PointLight[] = [];
+  private lampPools: THREE.InstancedMesh | null = null;
+
+  readonly spawn = new THREE.Vector3();
+  spawnFacing = 0;
+
+  private keepouts: Keepout[] = [];
+  private colliderMeshes: THREE.Mesh[] = [];
+  private buildingCount = 0;
+
+  constructor(
+    private readonly assets: AssetBundle,
+    private readonly preset: QualityPreset,
+  ) {
+    this.group.name = 'World';
+    this.road = new RoadNetwork(WORLD_SIZE, naturalHeight);
+    this.terrain = new Terrain(this.road);
+  }
+
+  build(): void {
+    const terrainMesh = this.terrain.build();
+    this.group.add(terrainMesh);
+    this.colliderMeshes.push(terrainMesh);
+
+    const roads = buildRoadMeshes(this.road);
+    this.group.add(roads.group);
+
+    this.placeBuildings();
+    this.placeStreetFurniture();
+    this.buildVegetation();
+    this.buildBirds();
+    this.buildCollectibles();
+
+    this.collision.build(this.colliderMeshes);
+
+    // Spawn on the road, facing up the hill toward the barrier.
+    const p = this.road.pointOnMain(0.60);
+    this.spawn.set(p.pos.x, this.terrain.heightAt(p.pos.x, p.pos.z) + 0.05, p.pos.z);
+    this.spawnFacing = Math.PI;
+  }
+
+  // ------------------------------------------------------------------ props
+
+  private instantiate(model: string): THREE.Object3D | null {
+    const proto = this.assets.props.get(model) ?? this.assets.buildings.get(model);
+    if (!proto) return null;
+    const obj = proto.clone(true);
+    obj.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      const m = mesh.material;
+      mesh.material = Array.isArray(m)
+        ? m.map((mm) => toonFromImported(mm, model))
+        : toonFromImported(m as THREE.Material, model);
+    });
+    return obj;
+  }
+
+  private addCollider(
+    x: number,
+    y: number,
+    z: number,
+    yaw: number,
+    hx: number,
+    hy: number,
+    hz: number,
+  ): void {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(hx * 2, hy * 2, hz * 2),
+      new THREE.MeshBasicMaterial({ visible: false }),
+    );
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = yaw;
+    mesh.updateMatrixWorld(true);
+    this.colliderMeshes.push(mesh);
+  }
+
+  private placeBuildings(): void {
+    for (const p of PLACEMENTS) {
+      const obj = this.instantiate(p.model);
+      if (!obj) continue;
+      const y = this.terrain.heightAt(p.x, p.z) - (p.sink ?? 0);
+      obj.position.set(p.x, y, p.z);
+      obj.rotation.y = p.yaw;
+      obj.updateMatrixWorld(true);
+      this.group.add(obj);
+      this.buildingCount++;
+
+      if (p.keepout) this.keepouts.push({ x: p.x, z: p.z, radius: p.keepout });
+      if (p.collider) {
+        const c = p.collider;
+        const oz = c.oz ?? 0;
+        this.addCollider(
+          p.x + Math.sin(p.yaw) * oz,
+          y + (c.oy ?? c.hy),
+          p.z + Math.cos(p.yaw) * oz,
+          p.yaw,
+          c.hx,
+          c.hy,
+          c.hz,
+        );
+      }
+    }
+
+    for (const w of WALLS) {
+      const obj = this.instantiate('RetainWall');
+      if (!obj) continue;
+      const y = this.terrain.heightAt(w.x, w.z) - 0.4;
+      obj.position.set(w.x, y, w.z);
+      obj.rotation.y = w.yaw + HALF_PI;
+      obj.updateMatrixWorld(true);
+      this.group.add(obj);
+      this.addCollider(w.x, y + 1.2, w.z, w.yaw + HALF_PI, 0.32, 1.3, 3.0);
+      this.keepouts.push({ x: w.x, z: w.z, radius: 3.4 });
+    }
+
+    for (const f of FENCES) {
+      const obj = this.instantiate('FenceSection');
+      if (!obj) continue;
+      const y = this.terrain.heightAt(f.x, f.z);
+      obj.position.set(f.x, y, f.z);
+      obj.rotation.y = f.yaw + HALF_PI;
+      obj.updateMatrixWorld(true);
+      this.group.add(obj);
+      this.addCollider(f.x, y + 0.8, f.z, f.yaw + HALF_PI, 0.16, 0.85, 2.0);
+    }
+
+    // Culvert set into the bank opposite the solar house.
+    const cul = this.instantiate('Culvert');
+    if (cul) {
+      cul.position.set(13.4, this.terrain.heightAt(13.4, 44) - 0.25, 44);
+      cul.rotation.y = Math.PI;
+      cul.updateMatrixWorld(true);
+      this.group.add(cul);
+      this.keepouts.push({ x: 13.4, z: 44, radius: 3.0 });
+    }
+
+    // The road-closed barrier that caps the far end of the climb.
+    const barrierZ = -118;
+    const bp = this.nearestRoadPoint(barrierZ);
+    const barrier = this.instantiate('Barrier');
+    if (barrier) {
+      barrier.position.set(bp.x, this.terrain.heightAt(bp.x, bp.z), bp.z);
+      barrier.rotation.y = bp.yaw;
+      barrier.updateMatrixWorld(true);
+      this.group.add(barrier);
+      this.addCollider(bp.x, this.terrain.heightAt(bp.x, bp.z) + 0.75, bp.z, bp.yaw, 3.4, 0.8, 0.3);
+    }
+  }
+
+  private nearestRoadPoint(z: number): { x: number; z: number; yaw: number; index: number } {
+    const pts = this.road.main.pts;
+    let best = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const d = Math.abs(pts[i].z - z);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    const t = this.road.main.tangents[best];
+    return { x: pts[best].x, z: pts[best].z, yaw: Math.atan2(t.x, t.y) + HALF_PI, index: best };
+  }
+
+  /** Streetlights, utility poles, the cables between them, bench and mailbox. */
+  private placeStreetFurniture(): void {
+    const rng = new Rng(606060);
+    const main = this.road.main;
+    const lampTops: THREE.Vector3[] = [];
+    const poleTops: THREE.Vector3[] = [];
+
+    const step = 15; // polyline indices between lamps (~26 m)
+    let side = 1;
+    for (let i = 12; i < main.pts.length - 14; i += step) {
+      const p = main.pts[i];
+      const t = main.tangents[i];
+      const off = side * (ROAD_HALF_WIDTH + SHOULDER_WIDTH + 0.7);
+      const x = p.x + -t.y * off;
+      const z = p.z + t.x * off;
+      const y = this.terrain.heightAt(x, z);
+
+      const lamp = this.instantiate('Streetlight');
+      if (lamp) {
+        lamp.position.set(x, y, z);
+        // Arms sweep over the carriageway.
+        lamp.rotation.y = Math.atan2(-t.y, t.x) + (side > 0 ? Math.PI : 0);
+        lamp.updateMatrixWorld(true);
+        this.group.add(lamp);
+        this.addCollider(x, y + 2.2, z, 0, 0.22, 2.2, 0.22);
+        const tip = new THREE.Vector3(x, y + 6.9, z);
+        lampTops.push(tip);
+        this.lampPositions.push(
+          new THREE.Vector3(x - -t.y * side * 2.0, y + 6.75, z - t.x * side * 2.0),
+        );
+      }
+      side *= -1;
+    }
+
+    // Utility poles run down one side only, carrying the overhead cables.
+    for (let i = 6; i < main.pts.length - 8; i += 22) {
+      const p = main.pts[i];
+      const t = main.tangents[i];
+      const off = -(ROAD_HALF_WIDTH + SHOULDER_WIDTH + 2.6);
+      const x = p.x + -t.y * off;
+      const z = p.z + t.x * off;
+      const y = this.terrain.heightAt(x, z);
+      const pole = this.instantiate('UtilityPole');
+      if (!pole) continue;
+      pole.position.set(x, y, z);
+      pole.rotation.y = Math.atan2(t.x, t.y);
+      pole.updateMatrixWorld(true);
+      this.group.add(pole);
+      this.addCollider(x, y + 2.4, z, 0, 0.24, 2.4, 0.24);
+      poleTops.push(new THREE.Vector3(x, y + 8.35, z));
+      poleTops.push(new THREE.Vector3(x, y + 7.35, z));
+      this.keepouts.push({ x, z, radius: 2.2 });
+    }
+
+    this.buildCables(poleTops, lampTops);
+    this.buildLampPools();
+
+    // Bench and mailbox, placed against specific buildings.
+    const bench = this.instantiate('Bench');
+    if (bench) {
+      bench.position.set(11.4, this.terrain.heightAt(11.4, 20), 20);
+      bench.rotation.y = -HALF_PI;
+      bench.updateMatrixWorld(true);
+      this.group.add(bench);
+      this.addCollider(11.4, this.terrain.heightAt(11.4, 20) + 0.35, 20, -HALF_PI, 0.9, 0.35, 0.3);
+    }
+    for (const [x, z] of [[-10.2, 60], [10.6, 33], [12.4, -22]] as Array<[number, number]>) {
+      const mb = this.instantiate('Mailbox');
+      if (!mb) continue;
+      mb.position.set(x, this.terrain.heightAt(x, z), z);
+      mb.rotation.y = x < 0 ? HALF_PI : -HALF_PI;
+      mb.updateMatrixWorld(true);
+      this.group.add(mb);
+    }
+    for (let i = 0; i < 6; i++) {
+      const b = this.instantiate('Bollard');
+      if (!b) continue;
+      const idx = 30 + i * 9;
+      if (idx >= main.pts.length) break;
+      const p = main.pts[idx];
+      const t = main.tangents[idx];
+      const off = ROAD_HALF_WIDTH + SHOULDER_WIDTH + 0.3;
+      const x = p.x + -t.y * off + rng.jitter(0.2);
+      const z = p.z + t.x * off;
+      b.position.set(x, this.terrain.heightAt(x, z), z);
+      b.updateMatrixWorld(true);
+      this.group.add(b);
+    }
+  }
+
+  /** Catenary cables strung between pole tops and lamp heads. */
+  private buildCables(poleTops: THREE.Vector3[], lampTops: THREE.Vector3[]): void {
+    const parts: THREE.BufferGeometry[] = [];
+
+    const span = (a: THREE.Vector3, b: THREE.Vector3, sag: number) => {
+      const pts: THREE.Vector3[] = [];
+      const seg = 10;
+      for (let i = 0; i <= seg; i++) {
+        const t = i / seg;
+        const p = a.clone().lerp(b, t);
+        // parabolic approximation of a catenary — visually identical at this scale
+        p.y -= sag * 4 * t * (1 - t);
+        pts.push(p);
+      }
+      const curve = new THREE.CatmullRomCurve3(pts);
+      parts.push(new THREE.TubeGeometry(curve, seg, 0.035, 4, false));
+    };
+
+    // Poles were pushed in pairs (upper and lower crossarm).
+    for (let i = 0; i + 3 < poleTops.length; i += 2) {
+      span(poleTops[i], poleTops[i + 2], 0.85);
+      span(poleTops[i + 1], poleTops[i + 3], 0.95);
+      // a third, slightly offset line for visual density
+      span(
+        poleTops[i].clone().add(new THREE.Vector3(0.55, -0.35, 0)),
+        poleTops[i + 2].clone().add(new THREE.Vector3(0.55, -0.35, 0)),
+        1.05,
+      );
+    }
+    // Service drops toward the lamp columns.
+    for (let i = 0; i + 1 < lampTops.length; i += 2) {
+      span(lampTops[i], lampTops[i + 1], 1.25);
+    }
+
+    if (!parts.length) return;
+    const merged = mergeGeometries(parts, false);
+    parts.forEach((p) => p.dispose());
+    if (!merged) return;
+    const cables = new THREE.Mesh(merged, makeToon(0x3a3a38));
+    cables.name = 'Cables';
+    cables.castShadow = true;
+    cables.receiveShadow = false;
+    this.group.add(cables);
+  }
+
+  /** Soft additive pools under each lamp, cheaper than a light per column. */
+  private buildLampPools(): void {
+    if (!this.lampPositions.length) return;
+    // A flat disc reads as a painted circle. The falloff texture is what
+    // makes it read as light spilling onto the road.
+    const size = 128;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    const ctx = cv.getContext('2d')!;
+    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.32, 'rgba(255,255,255,0.55)');
+    grad.addColorStop(0.62, 'rgba(255,255,255,0.16)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    const falloff = new THREE.CanvasTexture(cv);
+    falloff.colorSpace = THREE.SRGBColorSpace;
+
+    const geo = new THREE.PlaneGeometry(13, 13);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      map: falloff,
+      color: 0xffca7e,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: true,
+    });
+    const inst = new THREE.InstancedMesh(geo, mat, this.lampPositions.length);
+    inst.name = 'LampPools';
+    inst.renderOrder = 3;
+    inst.frustumCulled = false;
+    const m = new THREE.Matrix4();
+    this.lampPositions.forEach((p, i) => {
+      m.makeTranslation(p.x, this.terrain.heightAt(p.x, p.z) + 0.06, p.z);
+      inst.setMatrixAt(i, m);
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    this.lampPools = inst;
+    this.group.add(inst);
+
+    // A small pool of real point lights, reassigned to whichever lamps are
+    // nearest the player — 20 live lights would tank the forward renderer.
+    const liveLights = this.preset.shadowsEnabled ? 4 : 2;
+    for (let i = 0; i < liveLights; i++) {
+      const l = new THREE.PointLight(0xffcf8c, 0, 17, 1.7);
+      l.castShadow = false;
+      l.visible = false;
+      this.lampLights.push(l);
+      this.group.add(l);
+    }
+  }
+
+  // ------------------------------------------------------------ vegetation
+
+  private buildVegetation(): void {
+    const proto = {} as VegetationPrototypes;
+    for (const key of [
+      'TreeBig', 'TreeMed', 'TreeSmall', 'Palm', 'DeadTree',
+      'BushA', 'BushB', 'RockA', 'RockB', 'RockC', 'GrassTuft',
+    ] as const) {
+      const o = this.assets.nature.get(key);
+      if (o) proto[key] = o;
+    }
+    if (!proto.TreeBig) return;
+
+    this.vegetation = new Vegetation(
+      proto,
+      { terrain: this.terrain, road: this.road, keepouts: this.keepouts },
+      this.preset.vegetationDensity,
+      this.preset.grassDensity,
+    );
+    this.vegetation.build();
+    this.group.add(this.vegetation.group);
+    this.colliderMeshes.push(...this.vegetation.propColliders);
+  }
+
+  private buildBirds(): void {
+    this.birds = new Birds(this.preset.birdCount);
+    this.group.add(this.birds.mesh);
+  }
+
+  // ----------------------------------------------------------- collectibles
+
+  private collectibleDefs(): CollectibleDef[] {
+    const h = (x: number, z: number, up: number) =>
+      new THREE.Vector3(x, this.terrain.heightAt(x, z) + up, z);
+    return [
+      {
+        id: 'paper-plane',
+        model: 'PaperPlane',
+        label: 'Paper aeroplane',
+        found: 'A paper aeroplane, nose-down in the grass.',
+        position: h(21.6, 9.5, 0.95),
+        scale: 1.0,
+        spin: true,
+      },
+      {
+        id: 'toy-boat',
+        model: 'ToyBoat',
+        label: 'Toy boat',
+        found: 'Someone sailed this as far as the culvert.',
+        position: h(12.2, 46.5, 0.55),
+        scale: 1.0,
+        spin: true,
+      },
+      {
+        id: 'wind-chime',
+        model: 'WindChime',
+        label: 'Wind chime',
+        found: 'Wind chime, still faintly ringing.',
+        position: h(-11.6, 62.5, 1.35),
+        scale: 1.0,
+        spin: false,
+      },
+      {
+        id: 'old-camera',
+        model: 'OldCamera',
+        label: 'Old camera',
+        found: 'An old camera, left on the bench.',
+        position: h(11.4, 20.0, 0.62),
+        scale: 1.0,
+        spin: true,
+      },
+      {
+        id: 'star-ornament',
+        model: 'StarOrnament',
+        label: 'Star ornament',
+        found: 'A little brass star, right at the end of the road.',
+        position: h(-6.0, -112.0, 0.85),
+        scale: 1.0,
+        spin: true,
+      },
+    ];
+  }
+
+  private buildCollectibles(): void {
+    this.collectibles = new Collectibles(
+      this.collectibleDefs(),
+      this.assets.collectibles,
+      { onFound: (def, count, total) => this.onCollect?.(def, count, total) },
+    );
+    this.group.add(this.collectibles.group);
+  }
+
+  onCollect: ((def: CollectibleDef, count: number, total: number) => void) | null = null;
+
+  // ------------------------------------------------------------------ frame
+
+  update(dt: number, elapsed: number, player: THREE.Vector3, cameraPos: THREE.Vector3,
+         lampFactor: number): void {
+    this.birds?.update(dt, elapsed, cameraPos);
+    this.collectibles?.update(dt, player);
+    this.updateLamps(player, lampFactor);
+  }
+
+  private updateLamps(player: THREE.Vector3, lampFactor: number): void {
+    if (this.lampPools) {
+      const mat = this.lampPools.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.42 * lampFactor;
+      this.lampPools.visible = lampFactor > 0.02;
+    }
+    if (!this.lampLights.length) return;
+
+    if (lampFactor < 0.05) {
+      for (const l of this.lampLights) l.visible = false;
+      return;
+    }
+
+    // Assign the light pool to the nearest lamp columns each frame.
+    const ranked = this.lampPositions
+      .map((p, i) => ({ i, d: p.distanceToSquared(player) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, this.lampLights.length);
+
+    this.lampLights.forEach((light, n) => {
+      const pick = ranked[n];
+      if (!pick || pick.d > 62 * 62) {
+        light.visible = false;
+        return;
+      }
+      light.position.copy(this.lampPositions[pick.i]);
+      light.visible = true;
+      light.intensity = 16 * lampFactor;
+    });
+  }
+
+  applyQuality(preset: QualityPreset): void {
+    this.birds?.setCount(preset.birdCount);
+  }
+
+  /** Surface under a point: 1 = tarmac, 0 = grass. */
+  surfaceHardness(x: number, z: number): number {
+    return this.road.surfaceHardness(x, z);
+  }
+
+  inBounds = (x: number, z: number): boolean => this.terrain.isInside(x, z, 4);
+
+  get stats(): WorldStats {
+    const v = this.vegetation?.stats ?? { instances: 0, grass: 0 };
+    return {
+      vegetation: v.instances,
+      grass: v.grass,
+      colliderTris: this.collision.triangleCount,
+      buildings: this.buildingCount,
+    };
+  }
+
+  dispose(): void {
+    this.vegetation?.dispose();
+    this.birds?.dispose();
+    this.collectibles?.dispose();
+    this.collision.dispose();
+    this.lampPools?.geometry.dispose();
+    (this.lampPools?.material as THREE.Material | undefined)?.dispose();
+    this.group.removeFromParent();
+  }
+}

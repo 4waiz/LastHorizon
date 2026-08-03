@@ -20,6 +20,8 @@ export interface MotorConfig {
   radius: number;
   height: number;
   gravity: number;
+  /** Reduced downward force while in contact, m/s^2. */
+  groundStick: number;
   maxSlopeDot: number;
   stepHeight: number;
   maxSubstep: number;
@@ -30,6 +32,7 @@ export const DEFAULT_MOTOR: MotorConfig = {
   radius: 0.30,
   height: 1.34,
   gravity: -21.5,
+  groundStick: -3.2,
   // cos(50 deg): anything steeper is a wall, not a walkable slope
   maxSlopeDot: Math.cos(THREE.MathUtils.degToRad(50)),
   stepHeight: 0.42,
@@ -95,7 +98,13 @@ export class CharacterMotor {
     const wasGrounded = this.grounded;
 
     for (let s = 0; s < steps; s++) {
-      this.velocity.y = Math.max(cfg.terminalVelocity, this.velocity.y + cfg.gravity * h);
+      // While grounded, apply only a light hold-down force. Full gravity
+      // drives the capsule a few millimetres into the slope every substep,
+      // and the push-out that corrects it has a horizontal component — which
+      // shows up as the character slowly sliding downhill while standing
+      // still. A gentler force keeps contact without the creep.
+      const g = this.grounded && this.velocity.y <= 0 ? cfg.groundStick : cfg.gravity;
+      this.velocity.y = Math.max(cfg.terminalVelocity, this.velocity.y + g * h);
       this.position.addScaledVector(this.velocity, h);
 
       this.writeSegment();
