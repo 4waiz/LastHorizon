@@ -180,6 +180,15 @@ export class Collectibles {
     return this.store.total;
   }
 
+  /** Positions and found-state, for the radar. */
+  get markers(): Array<{ x: number; z: number; found: boolean }> {
+    return this.items.map((it) => ({
+      x: it.def.position.x,
+      z: it.def.position.z,
+      found: it.collected,
+    }));
+  }
+
   /** Nearest un-found item, for the "something nearby" hint. */
   nearestDistance(p: THREE.Vector3): number {
     let best = Infinity;

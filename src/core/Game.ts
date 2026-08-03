@@ -15,6 +15,7 @@ import { INTERIOR_ORIGIN } from '../world/Interiors';
 import { setToonPlayer, updateToonTime } from '../graphics/ToonMaterial';
 import { HUD } from '../ui/HUD';
 import { LoadingScreen } from '../ui/LoadingScreen';
+import { Minimap } from '../ui/Minimap';
 import { clamp } from '../utils/MathUtils';
 
 /**
@@ -43,6 +44,7 @@ export class Game {
   private contact!: ContactShadow;
   private portal!: WindowPortal;
   private hud!: HUD;
+  private minimap!: Minimap;
 
   private readonly input = new InputManager();
   private readonly audio = new AudioManager();
@@ -127,8 +129,14 @@ export class Game {
         this.hud.setCounter(0, this.world.collectibles.total);
       },
       onInteract: () => this.input.queueInteract(),
+      onOutfit: (patch) => {
+        this.player.setOutfit(patch);
+        this.hud.syncOutfit(this.player.outfit);
+      },
     });
+    this.hud.syncOutfit(this.player.outfit);
     this.hud.setCounter(this.world.collectibles.count, this.world.collectibles.total);
+    this.minimap = new Minimap(this.world.mapData, () => this.world.keepsakeMarkers);
 
     this.post.setEnabled(this.settings.current.quality === 'high');
     this.applyViewport();
@@ -245,7 +253,8 @@ export class Game {
   }
 
   private update(dt: number): void {
-    const uiBlocking = this.hud.infoOpen || this.sleeping || this.transitioning;
+    const uiBlocking =
+      this.hud.infoOpen || this.hud.wardrobeOpen || this.sleeping || this.transitioning;
     if (uiBlocking) this.input.releaseAll();
 
     // 1. character
@@ -299,10 +308,16 @@ export class Game {
       0.35 + this.env.dayFactor * 0.65,
     );
 
-    // 6. interactables
+    // 6. radar — hidden indoors, where it has nothing useful to show
+    this.minimap.setVisible(!this.indoors);
+    if (!this.indoors) {
+      this.minimap.update(dt, this.player.position, this.player.controller.facing);
+    }
+
+    // 7. interactables
     this.updateInteraction();
 
-    // 7. audio
+    // 8. audio
     this.updateAudio(dt);
   }
 
@@ -313,7 +328,18 @@ export class Game {
    * a bed you're standing beside still counts.
    */
   private updateInteraction(): void {
-    if (this.sleeping || this.transitioning) return;
+    if (this.sleeping || this.transitioning || this.hud.wardrobeOpen) return;
+
+    // Seated, the only thing on offer is getting back up — and any attempt to
+    // walk counts as asking for that too.
+    if (this.player.isSitting) {
+      this.hud.setPrompt('Stand up');
+      this.activeInteractable = null;
+      if (this.input.consumeInteract() || this.input.anyMovement) {
+        this.sit(false);
+      }
+      return;
+    }
 
     let best: Interactable | null = null;
     let bestDist = Infinity;
@@ -338,10 +364,38 @@ export class Game {
       void this.sleep();
     } else if (best?.kind === 'enter') {
       void this.enterInterior();
+    } else if (best?.kind === 'sit') {
+      this.sit(true);
+    } else if (best?.kind === 'wardrobe') {
+      this.hud.openWardrobe(true);
     } else if (this.indoors) {
       // Any interact indoors that isn't the bed means "let me out". Gating
       // this on a proximity radius is how you strand someone in a room.
       void this.exitInterior();
+    }
+  }
+
+  /**
+   * Take the chair, or leave it.
+   *
+   * Sitting snaps onto the seat rather than blending, because a spring toward
+   * the seat with collision still running just wedges the capsule in the desk.
+   */
+  private sit(on: boolean): void {
+    const room = this.world.interiors;
+    if (on) {
+      this.player.motor.teleport(room.chair.x, room.chair.y, room.chair.z);
+      this.player.controller.facing = Math.PI;
+      this.player.setSitting(true);
+      this.camera.resetBehind(this.player.lookTarget, Math.PI * 0.35);
+      this.camera.setDistance(2.6);
+      this.hud.setPrompt('Stand up');
+    } else {
+      this.player.setSitting(false);
+      // Step clear of the seat so the sit prompt doesn't fire again instantly.
+      this.player.motor.teleport(room.chair.x + 0.85, room.chair.y, room.chair.z + 0.55);
+      this.camera.setDistance(2.3);
+      this.hud.setPrompt(null);
     }
   }
 
@@ -414,9 +468,12 @@ export class Game {
 
     const room = this.world.interiors;
 
-    // Lie down on the mattress and frame it from the side.
-    this.player.motor.teleport(room.bed.x, room.bed.y - 0.18, room.bed.z);
-    this.player.controller.facing = -Math.PI / 2;
+    // Lie down on the mattress and frame it from the side. `sleepSpot` is the
+    // *feet* position: tipping onto the back swings the head 1.36 m along -Z,
+    // so facing must stay at 0 for the head to land on the pillow.
+    const bed = room.sleepSpot;
+    this.player.motor.teleport(bed.x, bed.y, bed.z);
+    this.player.controller.facing = 0;
     this.player.setLying(true);
     this.camera.resetBehind(this.player.lookTarget, Math.PI * 0.62);
     this.camera.setMinDistance(1.15);
@@ -445,7 +502,10 @@ export class Game {
 
   private updateAudio(dt: number): void {
     const p = this.player.position;
-    const surface = this.world.surfaceHardness(p.x, p.z);
+    // The road field is a 2D lookup with no notion of the interior cell, and
+    // the room sits directly above the main road in x/z — so indoors it would
+    // report tarmac. Floorboards are closer to grass than asphalt.
+    const surface = this.indoors ? 0.3 : this.world.surfaceHardness(p.x, p.z);
     const moving = this.player.motor.grounded && this.player.speed > 0.3;
 
     this.audio.update(

@@ -19,6 +19,24 @@ export const SHOULDER_WIDTH = 1.9;
 /** Distance over which terrain blends from road level back to natural. */
 export const ROAD_BLEND = 13.0;
 
+/** How far the terrain corridor is cut below the graded centreline. */
+export const ROAD_CUT = 0.012;
+
+/**
+ * Ribbon heights above the *finished terrain*, not above the centreline.
+ *
+ * The ribbons are strips with no sides, so anything between them and the
+ * ground is a void you see straight through at a grazing angle and the deck
+ * reads as floating — which it did, at a uniform 7 cm. Keep these in the low
+ * millimetres: enough to clear the terrain grid's interpolation, not enough to
+ * cast a visible lip.
+ */
+export const ASPHALT_LIFT = 0.02;
+/** Shoulder, a touch under the carriageway it tucks beneath. */
+export const SHOULDER_LIFT = 0.014;
+/** Painted markings, clear of the asphalt and offset in depth as well. */
+export const PAINT_LIFT = 0.032;
+
 const FIELD_CELL = 1.0;
 const FIELD_MAX = ROAD_HALF_WIDTH + SHOULDER_WIDTH + ROAD_BLEND + 6;
 
@@ -84,6 +102,54 @@ function buildPolyline(
   return { pts, tangents, halfWidth, lengths };
 }
 
+/**
+ * Weld a subordinate line's profile onto the primary one near their crossing.
+ *
+ * Each line is graded independently, so where they meet their smoothed
+ * profiles disagree — here by 15 cm. The road field takes whichever centreline
+ * happens to be nearer, so that disagreement becomes a step in the tarmac and
+ * a cliff in the terrain corridor the field flattens. Pulling the side road
+ * onto the main one over a generous radius removes both at once, which is also
+ * how a real junction is built: the minor road is graded to meet the major.
+ */
+function weldJunction(primary: Polyline, secondary: Polyline, radius: number): void {
+  const targets = secondary.pts.map((p) => {
+    let bestD = Infinity;
+    let bestY = p.y;
+    for (const q of primary.pts) {
+      const d = Math.hypot(p.x - q.x, p.z - q.z);
+      if (d < bestD) {
+        bestD = d;
+        bestY = q.y;
+      }
+    }
+    return { d: bestD, y: bestY };
+  });
+
+  for (let i = 0; i < secondary.pts.length; i++) {
+    const { d, y } = targets[i];
+    if (d >= radius) continue;
+    secondary.pts[i].y = lerp(y, secondary.pts[i].y, smoothstep(0, radius, d));
+  }
+
+  // Re-smooth so the graft doesn't leave a kink where the weight runs out.
+  const ys = secondary.pts.map((p) => p.y);
+  const K = 6;
+  for (let pass = 0; pass < 2; pass++) {
+    const src = ys.slice();
+    for (let i = 0; i < ys.length; i++) {
+      let acc = 0;
+      for (let k = -K; k <= K; k++) acc += src[clamp(i + k, 0, ys.length - 1)];
+      ys[i] = acc / (K * 2 + 1);
+    }
+  }
+  // The weld itself must survive the smoothing, so re-apply it afterwards.
+  for (let i = 0; i < secondary.pts.length; i++) {
+    const { d, y } = targets[i];
+    secondary.pts[i].y = d >= radius ? ys[i] : lerp(y, ys[i], smoothstep(0, radius, d));
+  }
+}
+
 export class RoadNetwork {
   readonly main: Polyline;
   readonly side: Polyline;
@@ -126,23 +192,39 @@ export class RoadNetwork {
       3.7,
       heightFn,
     );
+    weldJunction(this.main, this.side, 34);
     this.lines = [this.main, this.side];
     this.rasterise();
   }
 
-  /** Splat each centreline sample into nearby cells, keeping the minimum. */
+  /**
+   * Splat each centreline into cells: nearest distance, blended elevation.
+   *
+   * Distance is a plain minimum, but elevation cannot be. Taking the nearest
+   * line's height draws a Voronoi seam between the two roads, and across that
+   * seam the height jumps by however much their grades differ — a fault line
+   * through the middle of the junction that the terrain then flattens itself
+   * onto. Each line gets its own pass, and the results are combined with an
+   * inverse-square weight: away from the junction the near line outweighs the
+   * far one thousands to one and nothing changes, while at the crossing the
+   * two grades meet in a smooth saddle.
+   */
   private rasterise(): void {
     const half = this.size / 2;
     this.cols = Math.ceil(this.size / FIELD_CELL) + 1;
     this.rows = this.cols;
-    this.field = new Float32Array(this.cols * this.rows * 2);
-    for (let i = 0; i < this.cols * this.rows; i++) {
-      this.field[i * 2] = FIELD_MAX;
-      this.field[i * 2 + 1] = 0;
-    }
+    const cells = this.cols * this.rows;
+    this.field = new Float32Array(cells * 2);
+
+    const perLine = this.lines.map(() => {
+      const f = new Float32Array(cells * 2);
+      for (let i = 0; i < cells; i++) f[i * 2] = FIELD_MAX;
+      return f;
+    });
 
     const reach = Math.ceil(FIELD_MAX / FIELD_CELL);
-    for (const line of this.lines) {
+    this.lines.forEach((line, li) => {
+      const f = perLine[li];
       for (let s = 0; s < line.pts.length - 1; s++) {
         const a = line.pts[s];
         const b = line.pts[s + 1];
@@ -163,13 +245,38 @@ export class RoadNetwork {
             const d = Math.hypot(px - qx, pz - qz);
             if (d >= FIELD_MAX) continue;
             const idx = (gz * this.cols + gx) * 2;
-            if (d < this.field[idx]) {
-              this.field[idx] = d;
-              this.field[idx + 1] = lerp(a.y, b.y, t);
+            if (d < f[idx]) {
+              f[idx] = d;
+              f[idx + 1] = lerp(a.y, b.y, t);
             }
           }
         }
       }
+    });
+
+    // lines[0] is the main road, and it owns the junction outright: a minor
+    // road ends *at* the major one, so within a few metres of the main
+    // carriageway the side road gets no say in the height at all. Without
+    // that, its frozen endpoint elevation fights the main road's grade and
+    // pulls the surface out from under the ribbon by several centimetres.
+    for (let i = 0; i < cells; i++) {
+      const dMain = perLine[0][i * 2];
+      let best = FIELD_MAX;
+      let sumW = 0;
+      let sumWY = 0;
+      for (let li = 0; li < perLine.length; li++) {
+        const d = perLine[li][i * 2];
+        if (d >= FIELD_MAX) continue;
+        best = Math.min(best, d);
+        const authority = li === 0 ? 1 : smoothstep(2, 12, dMain);
+        if (authority <= 0) continue;
+        // +0.4 keeps the weight finite right on a centreline.
+        const w = authority / ((d + 0.4) * (d + 0.4));
+        sumW += w;
+        sumWY += w * perLine[li][i * 2 + 1];
+      }
+      this.field[i * 2] = best;
+      this.field[i * 2 + 1] = sumW > 0 ? sumWY / sumW : 0;
     }
   }
 
@@ -220,28 +327,56 @@ interface RibbonOpts {
   lift: number;
 }
 
-/** Build a triangle strip between two lateral offsets along a polyline. */
-function ribbon(line: Polyline, o: RibbonOpts, range?: [number, number]): THREE.BufferGeometry {
-  const i0 = range ? range[0] : 0;
-  const i1 = range ? range[1] : line.pts.length - 1;
+/** Lateral vertex spacing. Must stay finer than the terrain grid (~2.05 m). */
+export const RIBBON_STEP = 0.95;
+
+/**
+ * Build a strip between two lateral offsets along a polyline.
+ *
+ * Height comes from the finished ground, not from the polyline. A ribbon that
+ * carries its own y drifts away from the terrain wherever anything else has a
+ * say in the ground — the junction blend, a building pad — and at the junction
+ * that drift reached 13 cm, enough for the terrain to swallow the side road's
+ * tarmac whole. Reading the ground and adding a few millimetres makes the two
+ * agree by construction.
+ *
+ * The cross-section is tessellated as well. Two vertices spanning 9.4 m draw a
+ * straight chord under a surface that curves, and the middle of that chord
+ * sinks below the ground it is supposed to cover; stepping finer than the
+ * terrain's own grid keeps the strip within a millimetre of it.
+ */
+function ribbon(
+  groundAt: (x: number, z: number) => number,
+  line: Polyline,
+  o: RibbonOpts,
+): THREE.BufferGeometry {
+  const span = Math.abs(o.to - o.from);
+  const cols = Math.max(2, Math.ceil(span / RIBBON_STEP) + 1);
   const pos: number[] = [];
   const idx: number[] = [];
   const uv: number[] = [];
-  let row = 0;
-  for (let i = i0; i <= i1; i++) {
+
+  for (let i = 0; i < line.pts.length; i++) {
     const p = line.pts[i];
     const t = line.tangents[i];
     const nx = -t.y;
     const nz = t.x;
-    pos.push(p.x + nx * o.from, p.y + o.lift, p.z + nz * o.from);
-    pos.push(p.x + nx * o.to, p.y + o.lift, p.z + nz * o.to);
     const v = line.lengths[i] * 0.12;
-    uv.push(0, v, 1, v);
-    if (row > 0) {
-      const b = (row - 1) * 2;
-      idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+    for (let c = 0; c < cols; c++) {
+      const f = c / (cols - 1);
+      const off = lerp(o.from, o.to, f);
+      const x = p.x + nx * off;
+      const z = p.z + nz * off;
+      pos.push(x, groundAt(x, z) + o.lift, z);
+      uv.push(f, v);
     }
-    row++;
+    if (i > 0) {
+      const a = (i - 1) * cols;
+      const b = i * cols;
+      for (let c = 0; c < cols - 1; c++) {
+        idx.push(a + c, a + c + 1, b + c, a + c + 1, b + c + 1, b + c);
+      }
+    }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -251,8 +386,9 @@ function ribbon(line: Polyline, o: RibbonOpts, range?: [number, number]): THREE.
   return g;
 }
 
-/** A flat quad lying on the road at parameter index `i`, offset laterally. */
+/** A marking quad lying on the road at parameter index `i`, offset laterally. */
 function roadQuad(
+  groundAt: (x: number, z: number) => number,
   line: Polyline,
   i: number,
   lateral: number,
@@ -268,13 +404,17 @@ function roadQuad(
   const hl = length / 2;
   const cx = p.x + nx * lateral;
   const cz = p.z + nz * lateral;
-  const y = p.y + lift;
-  return [
-    cx - nx * hw - t.x * hl, y, cz - nz * hw - t.y * hl,
-    cx + nx * hw - t.x * hl, y, cz + nz * hw - t.y * hl,
-    cx + nx * hw + t.x * hl, y, cz + nz * hw + t.y * hl,
-    cx - nx * hw + t.x * hl, y, cz - nz * hw + t.y * hl,
-  ];
+  const out: number[] = [];
+  for (const [ox, oz] of [
+    [-nx * hw - t.x * hl, -nz * hw - t.y * hl],
+    [nx * hw - t.x * hl, nz * hw - t.y * hl],
+    [nx * hw + t.x * hl, nz * hw + t.y * hl],
+    [-nx * hw + t.x * hl, -nz * hw + t.y * hl],
+  ]) {
+    // Per-corner height, so a dash on a warped junction lies flat on it.
+    out.push(cx + ox, groundAt(cx + ox, cz + oz) + lift, cz + oz);
+  }
+  return out;
 }
 
 function quadsToGeometry(quads: number[][]): THREE.BufferGeometry {
@@ -328,7 +468,10 @@ export interface RoadBuild {
   colliders: THREE.Mesh[];
 }
 
-export function buildRoadMeshes(net: RoadNetwork): RoadBuild {
+export function buildRoadMeshes(
+  net: RoadNetwork,
+  groundAt: (x: number, z: number) => number,
+): RoadBuild {
   const group = new THREE.Group();
   group.name = 'Roads';
 
@@ -345,17 +488,22 @@ export function buildRoadMeshes(net: RoadNetwork): RoadBuild {
   for (const [name, line] of [['Main', net.main], ['Side', net.side]] as const) {
     const hw = line.halfWidth;
 
-    const road = new THREE.Mesh(ribbon(line, { from: -hw, to: hw, lift: 0.02 }), asphaltMat);
+    const road = new THREE.Mesh(
+      ribbon(groundAt, line, { from: -hw, to: hw, lift: ASPHALT_LIFT }),
+      asphaltMat,
+    );
     road.name = `Asphalt${name}`;
     road.receiveShadow = true;
     group.add(road);
 
     for (const s of [-1, 1]) {
       const sh = new THREE.Mesh(
-        ribbon(line, {
-          from: s * hw,
+        ribbon(groundAt, line, {
+          // Overlap the carriageway slightly. Butting the two strips edge to
+          // edge at different heights leaves a hairline you can see through.
+          from: s * (hw - 0.08),
           to: s * (hw + SHOULDER_WIDTH),
-          lift: 0.012,
+          lift: SHOULDER_LIFT,
         }),
         shoulderMat,
       );
@@ -367,7 +515,7 @@ export function buildRoadMeshes(net: RoadNetwork): RoadBuild {
     // continuous edge lines
     for (const s of [-1, 1]) {
       const edge = new THREE.Mesh(
-        ribbon(line, { from: s * (hw - 0.62), to: s * (hw - 0.44), lift: 0.032 }),
+        ribbon(groundAt, line, { from: s * (hw - 0.62), to: s * (hw - 0.44), lift: PAINT_LIFT }),
         paintMat,
       );
       edge.name = `Edge${name}${s}`;
@@ -381,7 +529,7 @@ export function buildRoadMeshes(net: RoadNetwork): RoadBuild {
     for (let d = 6; d < total - 6; d += period) {
       let i = 0;
       while (i < line.lengths.length - 1 && line.lengths[i] < d) i++;
-      dashes.push(roadQuad(line, i, 0, 0.17, 3.4, 0.032));
+      dashes.push(roadQuad(groundAt, line, i, 0, 0.17, 3.4, PAINT_LIFT));
     }
     const dash = new THREE.Mesh(quadsToGeometry(dashes), paintMat);
     dash.name = `Dashes${name}`;
@@ -394,7 +542,7 @@ export function buildRoadMeshes(net: RoadNetwork): RoadBuild {
   for (const at of [0.545, 0.30]) {
     const i = Math.round(at * (net.main.pts.length - 1));
     for (let b = -3; b <= 3; b++) {
-      bars.push(roadQuad(net.main, i, b * 1.24, 0.78, 6.2, 0.034));
+      bars.push(roadQuad(groundAt, net.main, i, b * 1.24, 0.78, 6.2, PAINT_LIFT));
     }
   }
   const zebra = new THREE.Mesh(quadsToGeometry(bars), paintMat);

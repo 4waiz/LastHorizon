@@ -307,9 +307,10 @@ def build_parts():
         ], "skin")
         parts.append((hand, ["hand." + tag, "lowerarm." + tag]))
 
-    # ---- shorts -----------------------------------------------------------
-    # A single flared tube reads as a skirt. Build a hip block that splits
-    # into two separate legs, each with its own cuff.
+    # ---- trousers ---------------------------------------------------------
+    # A hip block that splits into two full-length legs. Running the hem all
+    # the way to the ankle also retires the mid-thigh seam, which was where
+    # the cuff and the bare leg kept fighting each other.
     hips = loft_z("shorts_hip", [
         (0.634, 0, 0.000, 0.122, 0.087, 0.62),
         (0.580, 0, 0.000, 0.128, 0.092, 0.62),
@@ -318,28 +319,34 @@ def build_parts():
     parts.append((hips, ["hips", "spine", "thigh.L", "thigh.R"]))
 
     for s, tag in ((1, "L"), (-1, "R")):
-        leg = loft_z("shorts_leg." + tag, [
-            (0.532, s * 0.055, 0.000, 0.080, 0.098, 0.86),
+        leg = loft_z("trouser_leg." + tag, [
+            (0.534, s * 0.055, 0.000, 0.081, 0.099, 0.86),
             (0.470, s * 0.065, 0.000, 0.078, 0.088, 0.86),
-            (0.412, s * 0.072, 0.000, 0.076, 0.082, 0.86),
-            (0.364, s * 0.076, 0.000, 0.074, 0.079, 0.86),
+            (0.404, s * 0.072, 0.000, 0.073, 0.079, 0.86),
+            (0.336, s * 0.077, 0.001, 0.067, 0.073, 0.86),
+            (0.256, s * 0.079, 0.000, 0.061, 0.067, 0.86),
+            (0.176, s * 0.080, -0.002, 0.056, 0.061, 0.86),
+            (0.112, s * 0.080, -0.004, 0.053, 0.058, 0.86),
         ], "shorts", cap_bottom=False, cap_top=False)
-        parts.append((leg, ["thigh." + tag, "hips"]))
-        # turn-up at the hem
+        parts.append((leg, ["thigh." + tag, "shin." + tag, "hips"]))
+        # Turn-up at the ankle. It overlaps the top of the shoe, so the hem
+        # never leaves a visible ring for the bare leg to show through.
         cuff = loft_z("cuff." + tag, [
-            (0.376, s * 0.0755, 0.000, 0.081, 0.086, 0.86),
-            (0.350, s * 0.0765, 0.000, 0.080, 0.085, 0.86),
+            (0.124, s * 0.0800, -0.004, 0.059, 0.064, 0.86),
+            (0.086, s * 0.0800, -0.005, 0.058, 0.063, 0.86),
         ], "shorts", cap_bottom=False, cap_top=False)
-        parts.append((cuff, ["thigh." + tag]))
+        parts.append((cuff, ["shin." + tag, "foot." + tag]))
 
     # ---- legs -------------------------------------------------------------
     for s, tag, bones in ((1, "L", LEG_L), (-1, "R", LEG_R)):
+        # Only the ankle remains bare. The trouser and the skin leg are skinned
+        # from different bone sets, so under a bent knee they deform apart and
+        # the leg surfaces through the cloth however much clearance it has.
+        # Removing the skin the trousers cover makes that impossible rather
+        # than unlikely — and drops a few hundred triangles.
         leg = loft_z("leg." + tag, [
-            (0.452, s * 0.073, 0.000, 0.046, 0.047, 0.88),
-            (0.360, s * 0.076, 0.000, 0.041, 0.042, 0.88),
-            (0.320, s * 0.078, 0.002, 0.038, 0.040, 0.88),
-            (0.240, s * 0.079, 0.000, 0.035, 0.037, 0.88),
-            (0.150, s * 0.080, -0.002, 0.031, 0.033, 0.88),
+            (0.185, s * 0.080, -0.002, 0.033, 0.035, 0.88),
+            (0.130, s * 0.080, -0.003, 0.030, 0.032, 0.88),
             (0.086, s * 0.080, -0.004, 0.028, 0.029, 0.88),
         ], "skin", cap_top=False)
         parts.append((leg, bones))
@@ -640,6 +647,29 @@ def anim_fall(arm):
     return act
 
 
+def anim_sit(arm):
+    """Static seated pose: thighs forward, knees down, hands on the lap."""
+    _clear_pose(arm)
+    act = new_action(arm, "Sit")
+    for f in (1, 30):
+        drift = 0.0 if f == 1 else 1.4
+        set_pose(arm, "hips", f, rx=-6, loc=(0, 0, -0.075))
+        set_pose(arm, "spine", f, rx=7 + drift * 0.3)
+        set_pose(arm, "chest", f, rx=5 + drift * 0.4)
+        set_pose(arm, "neck", f, rx=-3)
+        set_pose(arm, "head", f, rx=-4 - drift * 0.3)
+        for sgn, tag in ((1, "L"), (-1, "R")):
+            set_pose(arm, "thigh." + tag, f, rx=-84, ry=sgn * -5)
+            set_pose(arm, "shin." + tag, f, rx=82)
+            set_pose(arm, "foot." + tag, f, rx=4)
+            set_pose(arm, "shoulder." + tag, f, rx=-4)
+            set_pose(arm, "upperarm." + tag, f, rx=-26 - drift, ry=sgn * -7)
+            set_pose(arm, "lowerarm." + tag, f, rx=-46 + drift, ry=sgn * -4)
+            set_pose(arm, "hand." + tag, f, rx=-8)
+    finalize(act)
+    return act
+
+
 def anim_land(arm):
     _clear_pose(arm)
     act = new_action(arm, "Land")
@@ -700,7 +730,7 @@ def build():
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode="POSE")
     clips = [anim_idle(arm), anim_walk(arm), anim_run(arm),
-             anim_jump(arm), anim_fall(arm), anim_land(arm)]
+             anim_jump(arm), anim_fall(arm), anim_land(arm), anim_sit(arm)]
     _clear_pose(arm)
     bpy.ops.object.mode_set(mode="OBJECT")
     arm.animation_data.action = None

@@ -4,6 +4,7 @@ import { makeToon } from '../graphics/ToonMaterial';
 import {
   RoadNetwork,
   ROAD_BLEND,
+  ROAD_CUT,
   ROAD_HALF_WIDTH,
   SHOULDER_WIDTH,
 } from './RoadSystem';
@@ -96,7 +97,7 @@ export class Terrain {
     const { dist, elevation } = this.road.sample(x, z);
     const flatTo = ROAD_HALF_WIDTH + SHOULDER_WIDTH;
     const w = smoothstep(flatTo, flatTo + ROAD_BLEND, dist);
-    return lerp(elevation - 0.05, nat, w);
+    return lerp(elevation - ROAD_CUT, nat, w);
   }
 
   /** Level of the pad a building sits on, in world units. */

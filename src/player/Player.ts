@@ -5,7 +5,33 @@ import { CharacterMotor, DEFAULT_MOTOR } from '../physics/CharacterMotor';
 import { PlayerAnimator } from './PlayerAnimator';
 import { PlayerController } from './PlayerController';
 import { PlayerState, PlayerStateMachine } from './PlayerStateMachine';
-import { toonFromImported } from '../graphics/ToonMaterial';
+import { makeToon, toonFromImported } from '../graphics/ToonMaterial';
+
+/** Wardrobe slots, keyed by the Blender material name they came from. */
+const OUTFIT_SLOTS: Record<string, OutfitSlot> = {
+  shirt: 'shirt',
+  shorts: 'trousers',
+  hat_straw: 'hat',
+  hat_band: 'hatBand',
+};
+
+export type OutfitSlot = 'shirt' | 'trousers' | 'hat' | 'hatBand';
+
+export interface Outfit {
+  shirt: string;
+  trousers: string;
+  hat: string;
+  hatOn: boolean;
+}
+
+export const DEFAULT_OUTFIT: Outfit = {
+  shirt: '#efede2',
+  trousers: '#9b8fc7',
+  hat: '#dcc177',
+  hatOn: true,
+};
+
+const OUTFIT_KEY = 'lasthorizon.outfit.v1';
 
 /** The playable character: model, rig, motor, controller and state machine. */
 export class Player {
@@ -19,9 +45,14 @@ export class Player {
   readonly lookTarget = new THREE.Vector3();
 
   private model: THREE.Object3D | null = null;
+  /** Player-only material instances, so recolouring cannot leak elsewhere. */
+  private readonly slots = new Map<OutfitSlot, THREE.MeshToonMaterial>();
+  readonly outfit: Outfit = { ...DEFAULT_OUTFIT };
+  private sitting = false;
 
   constructor(gltfScene: THREE.Object3D | null, clips: THREE.AnimationClip[], input: InputManager) {
     this.root.name = 'Player';
+    this.loadOutfit();
     this.motor = new CharacterMotor({ ...DEFAULT_MOTOR });
     this.controller = new PlayerController(this.motor, input);
 
@@ -33,15 +64,23 @@ export class Player {
           mesh.castShadow = true;
           mesh.receiveShadow = true;
           mesh.frustumCulled = false; // skinned bounds lag behind the pose
+          const convert = (src: THREE.Material): THREE.Material => {
+            const slot = OUTFIT_SLOTS[src.name];
+            if (!slot) return toonFromImported(src, 'player');
+            // Unique instance per slot: the shared cache would otherwise
+            // repaint every prop that happens to use the same colour.
+            const base = (src as THREE.MeshStandardMaterial).color?.getHex() ?? 0xffffff;
+            const mat = makeToon(base, { id: 'outfit_' + slot });
+            this.slots.set(slot, mat);
+            return mat;
+          };
           const m = mesh.material;
-          if (Array.isArray(m)) {
-            mesh.material = m.map((mm) => toonFromImported(mm, 'player'));
-          } else if (m) {
-            mesh.material = toonFromImported(m, 'player');
-          }
+          if (Array.isArray(m)) mesh.material = m.map(convert);
+          else if (m) mesh.material = convert(m);
         }
       });
       this.root.add(this.model);
+      this.applyOutfit();
       this.animator = new PlayerAnimator(this.model, clips);
       this.animator.play('idle', true);
     } else {
@@ -53,6 +92,59 @@ export class Player {
       this.root.add(mesh);
       this.animator = null;
     }
+  }
+
+  /** Recolour a slot and persist the whole outfit. */
+  setOutfit(patch: Partial<Outfit>): void {
+    Object.assign(this.outfit, patch);
+    this.applyOutfit();
+    try {
+      localStorage.setItem(OUTFIT_KEY, JSON.stringify(this.outfit));
+    } catch {
+      /* private browsing — the outfit just won't survive the session */
+    }
+  }
+
+  private loadOutfit(): void {
+    try {
+      const raw = localStorage.getItem(OUTFIT_KEY);
+      if (raw) Object.assign(this.outfit, JSON.parse(raw) as Partial<Outfit>);
+    } catch {
+      /* fall back to the default outfit */
+    }
+  }
+
+  private applyOutfit(): void {
+    this.slots.get('shirt')?.color.set(this.outfit.shirt);
+    this.slots.get('trousers')?.color.set(this.outfit.trousers);
+    const hat = this.slots.get('hat');
+    const band = this.slots.get('hatBand');
+    if (hat) {
+      hat.color.set(this.outfit.hat);
+      hat.transparent = !this.outfit.hatOn;
+      hat.opacity = this.outfit.hatOn ? 1 : 0;
+      hat.depthWrite = this.outfit.hatOn;
+      hat.needsUpdate = true;
+    }
+    if (band) {
+      band.transparent = !this.outfit.hatOn;
+      band.opacity = this.outfit.hatOn ? 1 : 0;
+      band.depthWrite = this.outfit.hatOn;
+      band.needsUpdate = true;
+    }
+  }
+
+  /** Freeze the character into the seated pose (or release it). */
+  setSitting(on: boolean): void {
+    this.sitting = on;
+    if (on) {
+      this.motor.velocity.set(0, 0, 0);
+      this.states.reset('sit');
+    }
+  }
+
+  get isSitting(): boolean {
+    return this.sitting;
   }
 
   get position(): THREE.Vector3 {
@@ -109,6 +201,13 @@ export class Player {
     camRight: THREE.Vector3,
     inBounds: (x: number, z: number) => boolean,
   ): void {
+    if (this.sitting) {
+      this.motor.velocity.set(0, 0, 0);
+      this.animator?.update(dt, 'sit', 0);
+      this.syncTransform();
+      return;
+    }
+
     this.controller.update(dt, world, camForward, camRight, inBounds);
 
     const motor = this.motor;

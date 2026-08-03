@@ -185,10 +185,21 @@ export class Environment {
     cam.near = 1;
     cam.far = r * 4.6;
     cam.updateProjectionMatrix();
-    // Bias tuned against the 1.7 m terrain cells: enough to kill acne on the
-    // road without detaching contact shadows from the character's feet.
-    s.bias = -0.0006;
-    s.normalBias = 0.035;
+
+    // Normal bias has to scale with the shadow texel, not sit at a fixed
+    // number. At 3.5 cm texels a 3.5 cm offset is one texel — nowhere near
+    // enough for a wall lit near its terminator, which is how the buildings
+    // ended up wearing black bands of self-shadowing under their eaves. Eight
+    // texels clears it, and at that size the character still keeps a contact
+    // shadow at their feet.
+    const texel = (r * 2) / preset.shadowMapSize;
+    s.bias = -0.0005;
+    s.normalBias = Math.max(0.12, texel * 8);
+
+    // Shadows darken rather than erase. Zeroing the sun leaves a shaded face
+    // lit by nothing but the hemisphere fill, which reads as flat black next
+    // to a toon ramp whose darkest band is still more than half lit.
+    s.intensity = 0.62;
     this.shadowRadius = r;
   }
 

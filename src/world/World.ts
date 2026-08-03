@@ -44,7 +44,7 @@ interface Placement {
 
 const HALF_PI = Math.PI / 2;
 
-const PLACEMENTS: Placement[] = [
+export const PLACEMENTS: Placement[] = [
   // ---- west side of the main road, the hero row ------------------------
   { model: 'HouseLarge', x: -15.8, z: 62, yaw: HALF_PI,
     door: { x: 1.35, z: 4.0 }, skirt: 2.5,
@@ -65,7 +65,9 @@ const PLACEMENTS: Placement[] = [
     door: { x: -0.55, z: 3.4 }, skirt: 2.5,
     collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.5,
     pad: { hx: 3.2, hz: 3.9, blend: 2.6 } },
-  { model: 'PorchHouse', x: 16.4, z: 6, yaw: -HALF_PI - 0.05,
+  // Was at z=6, which put it 5.4 m from the side road's centreline — its pad
+  // cut into the carriageway. Moved south, clear of the junction.
+  { model: 'PorchHouse', x: 17.6, z: -2, yaw: -HALF_PI - 0.05,
     door: { x: 0.55, z: 1.9 }, skirt: 2.5,
     collider: { hx: 2.4, hy: 2.0, hz: 3.9, oy: 1.6, oz: 0.9 }, keepout: 8.5,
     pad: { hx: 3.0, hz: 4.4, blend: 2.6 } },
@@ -75,11 +77,13 @@ const PLACEMENTS: Placement[] = [
     pad: { hx: 3.2, hz: 3.9, blend: 2.6 } },
 
   // ---- along the side road ----------------------------------------------
-  { model: 'HouseLarge', x: 52, z: -22, yaw: Math.PI * 0.86,
+  // Both of these had their backs to the side road. Models face +Z, so the
+  // yaw has to point local +Z at the carriageway, not away from it.
+  { model: 'HouseLarge', x: 52, z: -22, yaw: 0.62,
     door: { x: 1.35, z: 4.0 }, skirt: 2.5,
     collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5,
     pad: { hx: 3.9, hz: 4.7, blend: 2.8 } },
-  { model: 'Shed', x: 66, z: -40, yaw: Math.PI * 0.72,
+  { model: 'Shed', x: 66, z: -40, yaw: 0.60,
     door: { x: 0, z: 2.5 }, skirt: 2.0,
     collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5,
     pad: { hx: 2.3, hz: 3.0, blend: 3.0 } },
@@ -89,7 +93,7 @@ const PLACEMENTS: Placement[] = [
 export interface Interactable {
   position: THREE.Vector3;
   radius: number;
-  kind: 'sleep' | 'enter' | 'exit';
+  kind: 'sleep' | 'enter' | 'exit' | 'sit' | 'wardrobe';
   prompt: string;
 }
 
@@ -136,6 +140,7 @@ export class World {
   private keepouts: Keepout[] = [];
   private colliderMeshes: THREE.Mesh[] = [];
   private buildingCount = 0;
+  private activePreset: QualityPreset;
 
   readonly interactables: Interactable[] = [];
 
@@ -147,6 +152,7 @@ export class World {
     private readonly preset: QualityPreset,
   ) {
     this.group.name = 'World';
+    this.activePreset = preset;
     this.road = new RoadNetwork(WORLD_SIZE, naturalHeight);
     // Pads must exist before the terrain grid is computed — they are what
     // stops buildings hanging off the downhill side of a slope.
@@ -168,7 +174,7 @@ export class World {
     this.group.add(terrainMesh);
     this.colliderMeshes.push(terrainMesh);
 
-    const roads = buildRoadMeshes(this.road);
+    const roads = buildRoadMeshes(this.road, (x, z) => this.terrain.heightAt(x, z));
     this.group.add(roads.group);
 
     this.placeBuildings();
@@ -193,8 +199,20 @@ export class World {
       kind: 'sleep',
       prompt: 'Sleep until morning',
     });
+    this.interactables.push({
+      position: this.interiors.chair.clone().setY(this.interiors.chair.y + 0.9),
+      radius: 1.9,
+      kind: 'sit',
+      prompt: 'Sit down',
+    });
+    this.interactables.push({
+      position: this.interiors.wardrobe.clone(),
+      radius: 2.3,
+      kind: 'wardrobe',
+      prompt: 'Open the wardrobe',
+    });
 
-    this.collision.build(this.colliderMeshes);
+    this.rebuildCollision();
 
     // Spawn on the road, facing up the hill toward the barrier.
     const p = this.road.pointOnMain(0.60);
@@ -280,12 +298,24 @@ export class World {
       // cell, so a levelled pad can still alias by a few centimetres at the
       // corners; a block extending down from the pad guarantees the building
       // never reads as floating, whatever the ground does.
-      if (p.skirt && p.pad) {
+      //
+      // Size it off the collider — that is the building's own box. The pad is
+      // deliberately larger, and a skirt cut to the pad juts out past the walls
+      // as a ledge. Both half-extents are in the placement's local frame, so
+      // hx is the box's X and hz its Z; the mesh then takes the same yaw.
+      if (p.skirt && (p.collider || p.pad)) {
+        const hx = p.collider ? p.collider.hx + 0.1 : p.pad!.hx * 0.97;
+        const hz = p.collider ? p.collider.hz + 0.1 : p.pad!.hz * 0.97;
         const skirt = new THREE.Mesh(
-          new THREE.BoxGeometry(p.pad.hz * 1.94, p.skirt, p.pad.hx * 1.94),
+          new THREE.BoxGeometry(hx * 2, p.skirt, hz * 2),
           makeToon(0xb4a892, { id: 'foundation' }),
         );
-        skirt.position.set(p.x, y - p.skirt / 2 + 0.12, p.z);
+        const soz = p.collider?.oz ?? 0;
+        skirt.position.set(
+          p.x + Math.sin(p.yaw) * soz,
+          y - p.skirt / 2 + 0.12,
+          p.z + Math.cos(p.yaw) * soz,
+        );
         skirt.rotation.y = p.yaw;
         skirt.receiveShadow = true;
         skirt.updateMatrixWorld(true);
@@ -570,12 +600,11 @@ export class World {
     this.vegetation = new Vegetation(
       proto,
       { terrain: this.terrain, road: this.road, keepouts: this.keepouts },
-      this.preset.vegetationDensity,
-      this.preset.grassDensity,
+      this.activePreset.vegetationDensity,
+      this.activePreset.grassDensity,
     );
     this.vegetation.build();
     this.group.add(this.vegetation.group);
-    this.colliderMeshes.push(...this.vegetation.propColliders);
   }
 
   private buildBirds(): void {
@@ -621,7 +650,7 @@ export class World {
         model: 'OldCamera',
         label: 'Old camera',
         found: 'An old camera, left on the bench.',
-        position: h(11.4, 20.0, 0.62),
+        position: h(11.4, 20.0, 0.80),
         scale: 1.0,
         spin: true,
       },
@@ -688,8 +717,52 @@ export class World {
     });
   }
 
+  /** Static colliders plus whatever vegetation currently contributes. */
+  private rebuildCollision(): void {
+    this.collision.build([
+      ...this.colliderMeshes,
+      ...(this.vegetation?.propColliders ?? []),
+    ]);
+  }
+
   applyQuality(preset: QualityPreset): void {
     this.birds?.setCount(preset.birdCount);
+
+    const densityChanged =
+      preset.vegetationDensity !== this.activePreset.vegetationDensity ||
+      preset.grassDensity !== this.activePreset.grassDensity;
+    this.activePreset = preset;
+    if (!densityChanged || !this.vegetation) return;
+
+    // Re-instancing the whole vegetation set costs a beat, but it is the only
+    // way the density slider means anything without a reload. Rebuilding the
+    // BVH afterwards matters too: trunk and boulder proxies come with it.
+    this.vegetation.group.removeFromParent();
+    this.vegetation.dispose();
+    this.buildVegetation();
+    this.rebuildCollision();
+  }
+
+  /** Thinned road centrelines and building footprints, for the radar. */
+  get mapData(): {
+    roads: Array<Array<{ x: number; z: number }>>;
+    buildings: Array<{ x: number; z: number; r: number }>;
+  } {
+    const thin = (pts: THREE.Vector3[], step: number) =>
+      pts.filter((_, i) => i % step === 0 || i === pts.length - 1).map((p) => ({ x: p.x, z: p.z }));
+    return {
+      roads: [thin(this.road.main.pts, 6), thin(this.road.side.pts, 6)],
+      buildings: PLACEMENTS.map((p) => ({
+        x: p.x,
+        z: p.z,
+        r: Math.max(p.pad?.hx ?? 3, p.pad?.hz ?? 3) * 0.82,
+      })),
+    };
+  }
+
+  /** Keepsake positions and whether each has been found. */
+  get keepsakeMarkers(): Array<{ x: number; z: number; found: boolean }> {
+    return this.collectibles.markers;
   }
 
   /** Surface under a point: 1 = tarmac, 0 = grass. */

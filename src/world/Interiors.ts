@@ -65,8 +65,21 @@ export const ROOM_SPAWN_FACING = Math.PI;
 /** Where the exit prompt sits, and where the bed is. */
 export const ROOM_EXIT = new THREE.Vector3(0, 1.0, HD - 0.55);
 export const ROOM_BED = new THREE.Vector3(2.89, 0.72, -1.89);
-/** Standing spot beside the bed, used when waking up. */
-export const ROOM_BEDSIDE = new THREE.Vector3(1.45, 0.02, -1.60);
+/**
+ * Where the character's *feet* go when lying down. The root is at the soles,
+ * and lying rotates the body's height along -Z, so the head ends up 1.04 m
+ * further back — putting it on the pillow, whose centre is at z = -2.83.
+ */
+export const ROOM_SLEEP = new THREE.Vector3(2.89, 0.56, -1.79);
+/** Desk chair: root on the floor under the seat, facing the desk. */
+export const ROOM_CHAIR = new THREE.Vector3(-1.60, 0.02, -1.60);
+export const ROOM_WARDROBE = new THREE.Vector3(-3.60, 1.05, 2.04);
+/**
+ * Where you stand on waking. Deliberately outside the bed's own interact
+ * radius, or the next press of E puts you straight back to sleep instead of
+ * doing what you meant.
+ */
+export const ROOM_BEDSIDE = new THREE.Vector3(0.80, 0.02, 0.20);
 
 export class Interiors {
   readonly group = new THREE.Group();
@@ -78,6 +91,9 @@ export class Interiors {
   readonly exit = new THREE.Vector3();
   readonly bed = new THREE.Vector3();
   readonly bedside = new THREE.Vector3();
+  readonly sleepSpot = new THREE.Vector3();
+  readonly chair = new THREE.Vector3();
+  readonly wardrobe = new THREE.Vector3();
 
   constructor(prototype: THREE.Object3D | undefined, portalMaterial?: THREE.Material) {
     this.group.name = 'Interior';
@@ -132,6 +148,9 @@ export class Interiors {
     this.exit.copy(ROOM_EXIT).add(INTERIOR_ORIGIN);
     this.bed.copy(ROOM_BED).add(INTERIOR_ORIGIN);
     this.bedside.copy(ROOM_BEDSIDE).add(INTERIOR_ORIGIN);
+    this.sleepSpot.copy(ROOM_SLEEP).add(INTERIOR_ORIGIN);
+    this.chair.copy(ROOM_CHAIR).add(INTERIOR_ORIGIN);
+    this.wardrobe.copy(ROOM_WARDROBE).add(INTERIOR_ORIGIN);
 
     this.setVisible(false);
   }

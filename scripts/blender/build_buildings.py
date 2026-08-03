@@ -610,10 +610,11 @@ def room_furniture():
                      (dx0 + 0.72 + (i - 1) * 0.03, dy0 + 0.10, 0.98),
                      ["boat_red", "leaf_teal", "hat_band"][i]))
 
-    # chair
+    # Chair, drawn up to the desk. The backrest goes on the side *away* from
+    # the desk (-Y): with it at +Y it stood between the sitter and the desk.
     cx2, cy2 = dx0, dy0 - 1.08
     o.append(box("cseat", (0.56, 0.54, 0.08), (cx2, cy2, 0.46), "wood_light"))
-    o.append(box("cback", (0.56, 0.09, 0.60), (cx2, cy2 + 0.23, 0.78), "wood_light"))
+    o.append(box("cback", (0.56, 0.09, 0.60), (cx2, cy2 - 0.23, 0.78), "wood_light"))
     for dx, dy in ((-0.22, -0.21), (0.22, -0.21), (-0.22, 0.21), (0.22, 0.21)):
         o.append(box("cleg%d%d" % (int(dx * 10), int(dy * 10)), (0.06, 0.06, 0.46),
                      (cx2 + dx, cy2 + dy, 0.23), "wood_pole"))

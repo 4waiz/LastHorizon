@@ -14,32 +14,116 @@
     <link rel="icon" type="image/png" href="./icon.png" />
     <link rel="apple-touch-icon" href="./icon.png" />
     <title>LastHorizon</title>
-    <script type="module" crossorigin src="./assets/index-BXIdF87S.js"></script>
+    <script type="module" crossorigin src="./assets/index-3i0NoeOm.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/three-CJHDAnEv.js">
     <link rel="modulepreload" crossorigin href="./assets/gsap-SFc2wnMY.js">
     <link rel="modulepreload" crossorigin href="./assets/bvh-8pLLNdVe.js">
-    <link rel="stylesheet" crossorigin href="./assets/index-CEYFpDz7.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-BYs0KfDM.css">
   </head>
   <body>
     <canvas id="viewport"></canvas>
 
     <!-- ============================ loading ============================ -->
     <div id="loading" class="loading">
-      <div class="loading__sky"></div>
-      <div class="loading__hills"></div>
+      <!-- Painted intro scene: sky, horizon glow, clouds, layered hills.
+           All vector and gradient, so it paints before any asset loads. -->
+      <div class="sky"></div>
+      <div class="sunglow"></div>
+
+      <svg class="scenery" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice"
+           aria-hidden="true">
+        <defs>
+          <linearGradient id="h1" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#cfe0c6" /><stop offset="100%" stop-color="#b8cfa8" />
+          </linearGradient>
+          <linearGradient id="h2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#b6d0a2" /><stop offset="100%" stop-color="#9cc086" />
+          </linearGradient>
+          <linearGradient id="h3" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#9bc084" /><stop offset="100%" stop-color="#7fae66" />
+          </linearGradient>
+          <linearGradient id="h4" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#7fae66" /><stop offset="100%" stop-color="#639a4e" />
+          </linearGradient>
+          <linearGradient id="h5" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#639a4e" /><stop offset="100%" stop-color="#4a8440" />
+          </linearGradient>
+          <filter id="soft" x="-30%" y="-60%" width="160%" height="260%">
+            <feGaussianBlur stdDeviation="9" />
+          </filter>
+        </defs>
+
+        <g class="clouds" filter="url(#soft)" fill="#ffffff">
+          <g class="cloud cloud--a" opacity="0.92">
+            <ellipse cx="250" cy="250" rx="120" ry="38" />
+            <ellipse cx="196" cy="236" rx="66" ry="32" />
+            <ellipse cx="302" cy="232" rx="78" ry="36" />
+          </g>
+          <g class="cloud cloud--b" opacity="0.8">
+            <ellipse cx="1330" cy="300" rx="150" ry="40" />
+            <ellipse cx="1256" cy="282" rx="80" ry="34" />
+            <ellipse cx="1400" cy="284" rx="92" ry="36" />
+          </g>
+          <g class="cloud cloud--c" opacity="0.55">
+            <ellipse cx="760" cy="170" rx="110" ry="28" />
+            <ellipse cx="830" cy="160" rx="70" ry="26" />
+          </g>
+          <g class="cloud cloud--d" opacity="0.5">
+            <ellipse cx="1120" cy="470" rx="170" ry="34" />
+            <ellipse cx="1040" cy="458" rx="90" ry="28" />
+          </g>
+          <g class="cloud cloud--e" opacity="0.45">
+            <ellipse cx="330" cy="470" rx="180" ry="32" />
+          </g>
+        </g>
+
+        <g class="birds" stroke="#8fa39c" stroke-width="2.4" fill="none"
+           stroke-linecap="round" opacity="0.5">
+          <path d="M1290 262 q9 -7 18 0 q9 -7 18 0" />
+          <path d="M1352 300 q7 -6 14 0 q7 -6 14 0" />
+          <path d="M1230 322 q6 -5 12 0 q6 -5 12 0" />
+          <path d="M886 196 q7 -6 14 0 q7 -6 14 0" />
+        </g>
+
+        <path class="hill hill--1" fill="url(#h1)"
+          d="M0,556 C210,516 380,586 600,552 C826,518 1002,592 1252,550 C1424,521 1522,566 1600,546 L1600,900 L0,900 Z" />
+        <path class="hill hill--2" fill="url(#h2)"
+          d="M0,614 C186,576 344,644 566,614 C806,582 986,652 1226,610 C1406,578 1524,622 1600,602 L1600,900 L0,900 Z" />
+        <path class="hill hill--3" fill="url(#h3)"
+          d="M0,676 C164,636 404,706 644,672 C866,640 1086,712 1326,668 C1466,642 1544,676 1600,662 L1600,900 L0,900 Z" />
+        <path class="hill hill--4" fill="url(#h4)"
+          d="M0,748 C224,704 424,778 704,742 C946,710 1164,786 1404,742 C1504,723 1562,746 1600,736 L1600,900 L0,900 Z" />
+        <path class="hill hill--5" fill="url(#h5)"
+          d="M0,826 C264,786 524,852 824,816 C1064,787 1304,856 1600,816 L1600,900 L0,900 Z" />
+
+        <g class="blades" fill="#3f7738" opacity="0.8" transform="translate(0,26) scale(1,0.62) translate(0,340)">
+          <path d="M40 900 q10 -70 -4 -104 q26 32 22 104 z" />
+          <path d="M84 900 q4 -58 18 -86 q-2 40 -6 86 z" />
+          <path d="M126 900 q14 -80 2 -112 q28 40 20 112 z" />
+          <path d="M1470 900 q-12 -74 2 -108 q-28 36 -20 108 z" />
+          <path d="M1524 900 q-6 -62 -20 -90 q4 42 8 90 z" />
+          <path d="M1566 900 q-16 -84 -2 -116 q-30 42 -22 116 z" />
+        </g>
+      </svg>
+
+      <div class="motes" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span>
+      </div>
 
       <div class="loading__stage">
+        <div class="halo" aria-hidden="true"></div>
         <div class="swoosh" aria-hidden="true">
           <svg viewBox="0 0 320 320">
             <defs>
               <linearGradient id="swooshGrad" x1="0" y1="0" x2="1" y2="1">
                 <stop offset="0%" stop-color="#f6d79a" stop-opacity="0" />
-                <stop offset="45%" stop-color="#f3c471" stop-opacity="0.95" />
+                <stop offset="45%" stop-color="#eab866" stop-opacity="0.9" />
                 <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
               </linearGradient>
               <linearGradient id="swooshGrad2" x1="1" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#8fc4e8" stop-opacity="0" />
-                <stop offset="55%" stop-color="#7fb4dd" stop-opacity="0.85" />
+                <stop offset="0%" stop-color="#ffe9b8" stop-opacity="0" />
+                <stop offset="55%" stop-color="#f3d08a" stop-opacity="0.8" />
                 <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
               </linearGradient>
             </defs>
@@ -103,6 +187,7 @@
         <span id="toastBody" class="toast__body"></span>
       </div>
 
+      <canvas id="minimap" class="minimap" width="320" height="320" aria-hidden="true"></canvas>
       <div id="prompt" class="prompt"><kbd>E</kbd><span id="promptText"></span></div>
       <div id="hint" class="hint">WASD to walk · Shift to run · Space to jump · drag to look</div>
       <div id="debug" class="debug" hidden></div>
@@ -118,6 +203,28 @@
       </button>
       <button id="btnRun" class="touch__run" type="button" data-ui aria-label="Run">RUN</button>
       <button id="btnAct" class="touch__act" type="button" data-ui aria-label="Interact" hidden>USE</button>
+    </div>
+
+    <div id="wardrobe" class="modal" hidden>
+      <div class="modal__card modal__card--outfit" role="dialog" aria-modal="true"
+           aria-labelledby="wardrobeTitle">
+        <button id="wardrobeClose" class="modal__close" type="button" aria-label="Close">×</button>
+        <h2 id="wardrobeTitle">Wardrobe</h2>
+        <p class="modal__lede">Pick something for the afternoon.</p>
+
+        <section>
+          <h3>Shirt</h3>
+          <div class="swatches" id="swShirt"></div>
+        </section>
+        <section>
+          <h3>Trousers</h3>
+          <div class="swatches" id="swTrousers"></div>
+        </section>
+        <section>
+          <h3>Hat</h3>
+          <div class="swatches" id="swHat"></div>
+        </section>
+      </div>
     </div>
 
     <div id="fade" class="fade"></div>
@@ -155,6 +262,9 @@
             <dt>Drag mouse</dt><dd>Look around</dd>
             <dt>Scroll</dt><dd>Zoom</dd>
             <dt>Esc</dt><dd>Close this panel</dd>
+          </dl>
+          <p class="keys__touch">The radar, bottom left, rotates with you: roads in grey, houses in clay, keepsakes still to find as pulsing gold.</p>
+          <dl class="keys" hidden>
           </dl>
           <p class="keys__touch">On a touch screen: joystick on the left, jump and run on the right.</p>
         </section>

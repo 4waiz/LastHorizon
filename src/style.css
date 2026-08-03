@@ -76,31 +76,130 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0;
   overflow: hidden;
-  background: linear-gradient(180deg, #9cc7e4 0%, var(--sky) 44%, #e8dfc8 78%, var(--cream) 100%);
+  background: #eef4f6;
 }
 
-.loading__sky {
+/* ---- painted scene ---------------------------------------------------- */
+
+.sky {
   position: absolute;
   inset: 0;
+  background: linear-gradient(
+    180deg,
+    #5d9ed6 0%,
+    #8bc0e4 20%,
+    #bcdaeb 40%,
+    #e6dfc6 62%,
+    #f6ecd0 76%,
+    #f2e8d0 100%
+  );
+}
+
+/* Warm horizon bloom sitting behind the logo. */
+.sunglow {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  width: 92vmax;
+  height: 58vmax;
+  transform: translate(-50%, -50%);
   background:
-    radial-gradient(ellipse 60% 34% at 78% 16%, rgba(255, 255, 255, 0.75), transparent 70%),
-    radial-gradient(ellipse 44% 24% at 22% 26%, rgba(255, 255, 255, 0.55), transparent 70%);
+    radial-gradient(closest-side, rgba(255, 247, 220, 0.92), rgba(255, 238, 194, 0.34) 38%,
+      rgba(255, 234, 186, 0) 70%);
   pointer-events: none;
 }
 
-/* A soft hill silhouette so the loader already feels like the game. */
-.loading__hills {
+.scenery {
   position: absolute;
-  left: -5%;
-  right: -5%;
-  bottom: -2%;
-  height: 34%;
-  background: linear-gradient(180deg, #b9cf9e 0%, #9dbb85 100%);
-  border-radius: 50% 42% 0 0 / 78% 96% 0 0;
-  opacity: 0.62;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.cloud {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: drift 90s linear infinite;
+}
+.cloud--b { animation-duration: 130s; animation-direction: reverse; }
+.cloud--c { animation-duration: 110s; }
+.cloud--d { animation-duration: 150s; animation-direction: reverse; }
+.cloud--e { animation-duration: 170s; }
+
+@keyframes drift {
+  from { transform: translateX(-9vw); }
+  to   { transform: translateX(9vw); }
+}
+
+.birds { animation: drift 200s linear infinite; }
+
+.blades {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: sway 7s ease-in-out infinite;
+}
+
+@keyframes sway {
+  0%, 100% { transform: skewX(0deg); }
+  50%      { transform: skewX(-2.2deg); }
+}
+
+/* ---- drifting light motes --------------------------------------------- */
+
+.motes {
+  position: absolute;
+  inset: 0;
   pointer-events: none;
+}
+
+.motes span {
+  position: absolute;
+  bottom: -6%;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 246, 214, 0.9);
+  box-shadow: 0 0 8px rgba(255, 232, 170, 0.85);
+  animation: rise linear infinite;
+}
+
+.motes span:nth-child(1) { left: 12%; animation-duration: 19s; animation-delay: -2s; }
+.motes span:nth-child(2) { left: 24%; animation-duration: 25s; animation-delay: -9s; width: 3px; height: 3px; }
+.motes span:nth-child(3) { left: 37%; animation-duration: 22s; animation-delay: -14s; }
+.motes span:nth-child(4) { left: 49%; animation-duration: 28s; animation-delay: -5s; width: 4px; height: 4px; }
+.motes span:nth-child(5) { left: 61%; animation-duration: 20s; animation-delay: -17s; }
+.motes span:nth-child(6) { left: 72%; animation-duration: 26s; animation-delay: -3s; width: 3px; height: 3px; }
+.motes span:nth-child(7) { left: 83%; animation-duration: 23s; animation-delay: -11s; }
+.motes span:nth-child(8) { left: 91%; animation-duration: 30s; animation-delay: -20s; width: 4px; height: 4px; }
+.motes span:nth-child(9) { left: 5%;  animation-duration: 27s; animation-delay: -7s; width: 3px; height: 3px; }
+
+@keyframes rise {
+  0%   { transform: translateY(0) translateX(0); opacity: 0; }
+  12%  { opacity: 0.95; }
+  85%  { opacity: 0.7; }
+  100% { transform: translateY(-108vh) translateX(28px); opacity: 0; }
+}
+
+/* Concentric warm halo behind the icon. */
+.halo {
+  position: absolute;
+  width: 340px;
+  height: 340px;
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, rgba(255, 249, 231, 0) 52%, rgba(255, 240, 202, 0.55) 60%,
+      rgba(255, 240, 202, 0) 64%),
+    radial-gradient(closest-side, rgba(255, 252, 240, 0) 68%, rgba(255, 234, 186, 0.4) 76%,
+      rgba(255, 234, 186, 0) 80%),
+    radial-gradient(closest-side, rgba(255, 246, 219, 0.6), rgba(255, 240, 205, 0) 70%);
+  animation: breathe 9s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50%      { transform: scale(1.06); opacity: 1; }
 }
 
 .loading__stage {
@@ -145,13 +244,14 @@ body {
 
 .logo {
   position: relative;
-  width: 180px;
-  height: 180px;
-  border-radius: 34px;
+  width: 204px;
+  height: 204px;
+  border-radius: 38px;
   overflow: hidden;
   box-shadow:
-    0 4px 10px rgba(60, 55, 40, 0.18),
-    0 18px 44px rgba(60, 55, 40, 0.26);
+    0 0 0 1px rgba(255, 252, 242, 0.6),
+    0 6px 14px rgba(74, 66, 46, 0.22),
+    0 22px 54px rgba(74, 66, 46, 0.30);
   opacity: 0;
   will-change: transform, opacity;
 }
@@ -896,4 +996,77 @@ body {
 
 .touch__act:active {
   transform: scale(0.93);
+}
+
+/* ============================== radar ================================== */
+
+.minimap {
+  position: absolute;
+  left: calc(18px + var(--safe-l));
+  bottom: calc(18px + var(--safe-b));
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(70, 60, 45, 0.18))
+          drop-shadow(0 8px 18px rgba(70, 60, 45, 0.16));
+}
+
+@media (max-width: 560px) {
+  .minimap {
+    width: 96px;
+    height: 96px;
+    left: calc(12px + var(--safe-l));
+    bottom: calc(12px + var(--safe-b));
+  }
+}
+
+/* The touch joystick lives bottom-left too; lift the radar clear of it. */
+body:has(#touch:not([hidden])) .minimap {
+  bottom: calc(168px + var(--safe-b));
+}
+
+/* ============================= wardrobe ================================ */
+
+.modal__card--outfit {
+  width: min(430px, 100%);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.swatch {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 11px;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(70, 60, 45, 0.16), 0 1px 3px rgba(70, 60, 45, 0.16);
+  transition: transform 0.14s ease;
+  padding: 0;
+}
+
+.swatch:hover {
+  transform: translateY(-2px);
+}
+
+.swatch.is-on::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 14px;
+  border: 2px solid var(--accent);
+}
+
+.swatch--none {
+  display: grid;
+  place-items: center;
+  background: var(--paper-dim);
+  font: 600 10px/1 inherit;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
 }

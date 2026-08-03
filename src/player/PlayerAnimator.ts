@@ -21,6 +21,7 @@ const CLIP_FOR: Record<PlayerState, string> = {
   jump: 'JumpStart',
   fall: 'Fall',
   land: 'Land',
+  sit: 'Sit',
 };
 
 const LOOPING: Record<PlayerState, boolean> = {
@@ -30,6 +31,7 @@ const LOOPING: Record<PlayerState, boolean> = {
   jump: false,
   fall: true,
   land: false,
+  sit: true,
 };
 
 /** Per-target crossfade, seconds. Snappy into jump, soft back into idle. */
@@ -40,6 +42,7 @@ const FADE_TO: Record<PlayerState, number> = {
   jump: 0.07,
   fall: 0.16,
   land: 0.08,
+  sit: 0.28,
 };
 
 /** Seconds between blinks, and how long one takes. */

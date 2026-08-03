@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Rng } from '../utils/MathUtils';
 
 /**
@@ -132,9 +132,11 @@ function cloudGeometry(rng: Rng): THREE.BufferGeometry {
   const spread = rng.range(18, 32);
   for (let i = 0; i < lobes; i++) {
     const r = rng.range(8, 15);
-    const g = new THREE.IcosahedronGeometry(r, 1);
-    // Squash and jitter so no lobe reads as a sphere — but gently: heavy
-    // per-vertex noise on a low subdivision reads as broken geometry.
+    // IcosahedronGeometry comes out non-indexed: every triangle owns its own
+    // three vertices. Jittering that directly moves each corner independently
+    // and tears the shell into loose triangles with sky showing through the
+    // seams. Weld it first so shared corners move together.
+    const g = mergeVertices(new THREE.IcosahedronGeometry(r, 1));
     const pos = g.attributes.position as THREE.BufferAttribute;
     for (let v = 0; v < pos.count; v++) {
       pos.setXYZ(
@@ -144,6 +146,7 @@ function cloudGeometry(rng: Rng): THREE.BufferGeometry {
         pos.getZ(v) * rng.range(0.94, 1.14) + rng.jitter(r * 0.055),
       );
     }
+    pos.needsUpdate = true;
     g.translate(
       rng.jitter(spread),
       Math.max(0, rng.jitter(5)) - 1,

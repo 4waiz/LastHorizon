@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
-import { RoadNetwork, ROAD_HALF_WIDTH, SHOULDER_WIDTH } from '../src/world/RoadSystem';
+import {
+  ASPHALT_LIFT,
+  RoadNetwork,
+  ROAD_BLEND,
+  PAINT_LIFT,
+  RIBBON_STEP,
+  ROAD_HALF_WIDTH,
+  SHOULDER_LIFT,
+  SHOULDER_WIDTH,
+} from '../src/world/RoadSystem';
+import { PLACEMENTS } from '../src/world/World';
 import { Terrain, naturalHeight, WORLD_SIZE } from '../src/world/Terrain';
 import { CollisionWorld } from '../src/physics/CollisionWorld';
 import { CharacterMotor, DEFAULT_MOTOR } from '../src/physics/CharacterMotor';
@@ -89,8 +99,12 @@ describe('Terrain', () => {
   });
 
   it('blends back to natural ground away from the road', () => {
+    // Step out from the main road until the *field* agrees we are clear of
+    // everything — 40 m east of the main road at mid-course lands on the side
+    // road's shoulder, which is not what this is meant to be measuring.
     const { pos } = road.pointOnMain(0.5);
-    const x = pos.x + ROAD_HALF_WIDTH + SHOULDER_WIDTH + 40;
+    let x = pos.x + ROAD_HALF_WIDTH + SHOULDER_WIDTH + 40;
+    while (road.sample(x, pos.z).dist < ROAD_HALF_WIDTH + SHOULDER_WIDTH + ROAD_BLEND) x += 4;
     expect(terrain.heightAt(x, pos.z)).toBeCloseTo(naturalHeight(x, pos.z), 0);
   });
 
@@ -228,5 +242,140 @@ describe('CharacterMotor against a BVH', () => {
     stepFor(motor, world, 3);
     expect(motor.airTime).toBe(0);
     world.dispose();
+  });
+});
+
+describe('road deck seating', () => {
+  /**
+   * The ribbons are flat strips with no sides. If the terrain corridor is cut
+   * much below them you can see straight under the deck at a grazing angle and
+   * the whole road reads as floating — which is exactly what it used to do at
+   * 7 cm. Anything under ~2.5 cm is invisible in practice.
+   */
+  /**
+   * Walk each ribbon's cross-section exactly as the builder lays it out, and
+   * check the chord between neighbouring vertices never dips under the ground
+   * it is meant to cover. Two vertices across 9.4 m used to sink far enough
+   * for the terrain to erupt through the tarmac in patches.
+   */
+  it('never lets the terrain break through a ribbon', () => {
+    let worst = -Infinity;
+    let where = '';
+    for (const line of [road.main, road.side]) {
+      const half = line.halfWidth + SHOULDER_WIDTH;
+      const cols = Math.max(2, Math.ceil((half * 2) / RIBBON_STEP) + 1);
+      for (let i = 0; i < line.pts.length; i += 2) {
+        const p = line.pts[i];
+        const t = line.tangents[i];
+        for (let c = 0; c < cols - 1; c++) {
+          const oa = -half + (c / (cols - 1)) * half * 2;
+          const ob = -half + ((c + 1) / (cols - 1)) * half * 2;
+          const ax = p.x + -t.y * oa;
+          const az = p.z + t.x * oa;
+          const bx = p.x + -t.y * ob;
+          const bz = p.z + t.x * ob;
+          const chord =
+            (terrain.heightAt(ax, az) + terrain.heightAt(bx, bz)) / 2 + SHOULDER_LIFT;
+          const under = terrain.heightAt((ax + bx) / 2, (az + bz) / 2) - chord;
+          if (under > worst) {
+            worst = under;
+            where = `(${p.x.toFixed(0)}, ${p.z.toFixed(0)})`;
+          }
+        }
+      }
+    }
+    expect(worst, `terrain pokes through at ${where}`).toBeLessThan(0);
+  });
+
+  it('lifts the carriageway only a few millimetres off the ground', () => {
+    // Nothing in the corridor may sit a visible height above the terrain.
+    expect(ASPHALT_LIFT).toBeGreaterThan(0);
+    expect(ASPHALT_LIFT).toBeLessThan(0.03);
+    expect(SHOULDER_LIFT).toBeGreaterThan(0);
+    expect(SHOULDER_LIFT).toBeLessThan(ASPHALT_LIFT);
+    expect(PAINT_LIFT).toBeGreaterThan(ASPHALT_LIFT);
+    // Finer than the terrain grid, or the chord test above means nothing.
+    expect(RIBBON_STEP).toBeLessThan(WORLD_SIZE / 176);
+  });
+
+  /**
+   * Cross-slope, not grade. A road may climb as steeply as the hill demands,
+   * but every cross-section has to stay level — and it did not at the
+   * junction, where the field snapped between two centrelines whose smoothed
+   * profiles disagreed by 15 cm and left a fault through the tarmac.
+   */
+  it('keeps every cross-section level, including through the junction', () => {
+    let worst = 0;
+    let where = '';
+    for (const line of [road.main, road.side]) {
+      for (let i = 4; i < line.pts.length - 4; i += 3) {
+        const p = line.pts[i];
+        const t = line.tangents[i];
+        const heights: number[] = [];
+        for (let o = -line.halfWidth; o <= line.halfWidth; o += 0.6) {
+          heights.push(terrain.heightAt(p.x + -t.y * o, p.z + t.x * o));
+        }
+        const spread = Math.max(...heights) - Math.min(...heights);
+        if (spread > worst) {
+          worst = spread;
+          where = `(${p.x.toFixed(0)}, ${p.z.toFixed(0)})`;
+        }
+      }
+    }
+    expect(worst, `worst cross-slope at ${where}`).toBeLessThan(0.14);
+  });
+});
+
+describe('building layout', () => {
+  /** Nearest point on either centreline, and the distance to it. */
+  function nearestRoad(x: number, z: number) {
+    let best = { d: Infinity, x: 0, z: 0, halfWidth: 0 };
+    for (const line of [road.main, road.side]) {
+      for (const q of line.pts) {
+        const d = Math.hypot(q.x - x, q.z - z);
+        if (d < best.d) best = { d, x: q.x, z: q.z, halfWidth: line.halfWidth };
+      }
+    }
+    return best;
+  }
+
+  it('keeps every footprint off the tarmac', () => {
+    for (const p of PLACEMENTS) {
+      const pad = p.pad!;
+      const corner = Math.hypot(pad.hx, pad.hz);
+      const near = nearestRoad(p.x, p.z);
+      const clearance = near.d - corner - near.halfWidth - SHOULDER_WIDTH;
+      expect(clearance, `${p.model} at (${p.x}, ${p.z})`).toBeGreaterThan(0.5);
+    }
+  });
+
+  it('turns every front door toward a road', () => {
+    for (const p of PLACEMENTS) {
+      // three.js rotation.y = yaw sends local +Z to (sin yaw, cos yaw).
+      const fx = Math.sin(p.yaw);
+      const fz = Math.cos(p.yaw);
+      let best = -1;
+      for (const line of [road.main, road.side]) {
+        for (const q of line.pts) {
+          const dx = q.x - p.x;
+          const dz = q.z - p.z;
+          const L = Math.hypot(dx, dz);
+          if (L > 34) continue;
+          best = Math.max(best, (fx * dx + fz * dz) / L);
+        }
+      }
+      expect(best, `${p.model} at (${p.x}, ${p.z})`).toBeGreaterThan(0.6);
+    }
+  });
+
+  it('leaves the doorway itself standing on open ground', () => {
+    for (const p of PLACEMENTS) {
+      if (!p.door) continue;
+      const c = Math.cos(p.yaw);
+      const s = Math.sin(p.yaw);
+      const dx = p.x + p.door.x * c + p.door.z * s;
+      const dz = p.z - p.door.x * s + p.door.z * c;
+      expect(road.sample(dx, dz).dist, `${p.model} door`).toBeGreaterThan(ROAD_HALF_WIDTH);
+    }
   });
 });

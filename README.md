@@ -46,6 +46,9 @@ Then open <http://localhost:5173>.
 | Scroll wheel | Zoom, within limits |
 | `Esc` | Close the info panel / release pointer lock |
 
+A radar sits bottom-left: it rotates with you, showing roads, houses and any
+keepsakes you have not found yet. It hides while you are indoors.
+
 On a touch screen: joystick bottom-left, jump and run bottom-right, drag
 anywhere else to look. Push the stick past ~78% to run without using the
 button.
@@ -169,7 +172,7 @@ exec(open("scripts/blender/build_all.py").read())
 
 | Script | Output | Contents |
 | --- | --- | --- |
-| `build_character.py` | `player.glb` | The explorer: 4.9k tris, 20 bones, 6 clips |
+| `build_character.py` | `player.glb` | The explorer: 5.0k tris, 20 bones, 6 clips, blink morph |
 | `build_buildings.py` | `buildings.glb` | HouseLarge, HouseSmall, HouseSolar, PorchHouse, Shed, HouseOpen (full interior) |
 | `build_props.py` | `props.glb` | Streetlight, UtilityPole, Barrier, Bench, Mailbox, FenceSection, RetainWall, Culvert, Bollard |
 | `build_nature.py` | `nature.glb` | TreeBig/Med/Small, Palm, DeadTree, BushA/B, RockA/B/C, GrassTuft |
@@ -236,6 +239,9 @@ Quality presets control pixel ratio, shadow map size and distance, vegetation
 and grass density, cloud and bird counts, anti-aliasing, the post-processing
 pass and fog distance. The starting preset is chosen from device memory, core
 count, touch capability and screen size, and can always be overridden.
+
+Changing quality re-instances vegetation and grass live and rebuilds the
+collision BVH with it, since trunk and boulder proxies come along.
 
 Terrain resolution is deliberately **not** a quality setting: the same grid
 feeds the visible mesh and the collision BVH, so changing it at runtime would

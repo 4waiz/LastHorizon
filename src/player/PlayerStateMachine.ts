@@ -5,7 +5,7 @@
  * animator maps whatever state comes out of here onto a clip.
  */
 
-export type PlayerState = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'land';
+export type PlayerState = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'land' | 'sit';
 
 export interface StateInput {
   grounded: boolean;

@@ -1,6 +1,12 @@
 import { QualityLevel, Settings, TimeMode } from '../core/Settings';
 import { InputManager } from '../core/InputManager';
 import { clamp } from '../utils/MathUtils';
+import type { Outfit } from '../player/Player';
+
+/** Wardrobe palettes. Muted enough that any pick still fits the world. */
+const SHIRT_COLOURS = ['#efede2', '#e6d3b8', '#cfd9e4', '#d8c3c8', '#c9d8c2', '#b9c4d6'];
+const TROUSER_COLOURS = ['#9b8fc7', '#8a9455', '#7f8a9c', '#b08b6a', '#5f6b7a', '#c2a2a8'];
+const HAT_COLOURS = ['#dcc177', '#c9584b', '#7f9ec4', '#8fae7a', '#e3ded0'];
 
 /**
  * Minimal interface: a column of warm off-white tiles, a keepsake counter, a
@@ -16,6 +22,7 @@ export interface HUDCallbacks {
   onTimeMode: (mode: TimeMode) => void;
   onResetProgress: () => void;
   onInteract: () => void;
+  onOutfit: (patch: Partial<Outfit>) => void;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
@@ -38,6 +45,7 @@ export class HUD {
   private promptText = $('promptText');
   private fade = $('fade');
   private btnAct = $<HTMLButtonElement>('btnAct');
+  private wardrobe = $('wardrobe');
 
   private btnSound = $<HTMLButtonElement>('btnSound');
   private btnQuality = $<HTMLButtonElement>('btnQuality');
@@ -67,6 +75,7 @@ export class HUD {
 
     this.wireTiles();
     this.wireInfoPanel();
+    this.wireWardrobe();
     if (this.isTouch) this.wireTouch();
     this.syncAll();
     this.checkOrientation();
@@ -192,6 +201,79 @@ export class HUD {
       this.cb.onResetProgress();
       this.showToast('Progress', 'Keepsakes put back where they were.');
     });
+  }
+
+  /** Build the swatch rows once and keep their selected state in sync. */
+  private wireWardrobe(): void {
+    $('wardrobeClose').addEventListener('click', () => this.openWardrobe(false));
+    this.wardrobe.addEventListener('pointerdown', (e) => {
+      if (e.target === this.wardrobe) this.openWardrobe(false);
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !this.wardrobe.hidden) this.openWardrobe(false);
+    });
+
+    const row = (
+      id: string,
+      colours: string[],
+      key: 'shirt' | 'trousers' | 'hat',
+      withNone = false,
+    ) => {
+      const host = $(id);
+      for (const col of colours) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'swatch';
+        b.dataset.value = col;
+        b.style.background = col;
+        b.setAttribute('aria-label', `${key} ${col}`);
+        b.addEventListener('click', () => {
+          this.cb.onOutfit(key === 'hat' ? { hat: col, hatOn: true } : { [key]: col });
+        });
+        host.appendChild(b);
+      }
+      if (withNone) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'swatch swatch--none';
+        b.dataset.value = 'none';
+        b.textContent = 'OFF';
+        b.addEventListener('click', () => this.cb.onOutfit({ hatOn: false }));
+        host.appendChild(b);
+      }
+    };
+    row('swShirt', SHIRT_COLOURS, 'shirt');
+    row('swTrousers', TROUSER_COLOURS, 'trousers');
+    row('swHat', HAT_COLOURS, 'hat', true);
+  }
+
+  /** Highlight whichever swatch matches the outfit currently worn. */
+  syncOutfit(outfit: Outfit): void {
+    const mark = (id: string, value: string) => {
+      for (const b of $(id).querySelectorAll<HTMLButtonElement>('.swatch')) {
+        b.classList.toggle('is-on', b.dataset.value === value);
+      }
+    };
+    mark('swShirt', outfit.shirt);
+    mark('swTrousers', outfit.trousers);
+    mark('swHat', outfit.hatOn ? outfit.hat : 'none');
+  }
+
+  openWardrobe(open: boolean): void {
+    if (open) {
+      this.wardrobe.hidden = false;
+      requestAnimationFrame(() => this.wardrobe.classList.add('is-on'));
+      this.input.releaseAll();
+    } else {
+      this.wardrobe.classList.remove('is-on');
+      window.setTimeout(() => {
+        this.wardrobe.hidden = true;
+      }, 240);
+    }
+  }
+
+  get wardrobeOpen(): boolean {
+    return !this.wardrobe.hidden;
   }
 
   private openInfo(open: boolean): void {
