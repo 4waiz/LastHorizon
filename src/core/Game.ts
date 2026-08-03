@@ -10,6 +10,8 @@ import { Player } from '../player/Player';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera';
 import { ContactShadow } from '../graphics/StylizedShadows';
 import { PostProcessing } from '../graphics/PostProcessing';
+import { WindowPortal } from '../graphics/WindowPortal';
+import { INTERIOR_ORIGIN } from '../world/Interiors';
 import { setToonPlayer, updateToonTime } from '../graphics/ToonMaterial';
 import { HUD } from '../ui/HUD';
 import { LoadingScreen } from '../ui/LoadingScreen';
@@ -39,6 +41,7 @@ export class Game {
   private world!: World;
   private player!: Player;
   private contact!: ContactShadow;
+  private portal!: WindowPortal;
   private hud!: HUD;
 
   private readonly input = new InputManager();
@@ -59,6 +62,7 @@ export class Game {
   private activeInteractable: Interactable | null = null;
   private sleeping = false;
   private transitioning = false;
+  private indoors = false;
   private readonly returnPoint = new THREE.Vector3();
   private returnFacing = 0;
 
@@ -84,7 +88,9 @@ export class Game {
     this.env = new Environment(this.scene, preset);
     this.env.setMode(this.settings.current.timeMode);
 
+    this.portal = new WindowPortal(window.innerWidth, window.innerHeight);
     this.world = new World(assets, preset);
+    this.world.portalMaterial = this.portal.material;
     this.world.build();
     this.scene.add(this.world.group);
 
@@ -98,6 +104,12 @@ export class Game {
 
     this.contact = new ContactShadow(0.66);
     this.scene.add(this.contact.mesh);
+
+    // Where the room appears to sit when you look out of it: on the east
+    // verge, so the back window frames the road climbing toward the hill.
+    const view = new THREE.Vector3(12.5, 0, 30);
+    view.y = this.world.terrain.heightAt(view.x, view.z);
+    this.portal.setAnchor(INTERIOR_ORIGIN, view, 0);
 
     this.world.onCollect = (def, count, total) => {
       this.hud.setCounter(count, total);
@@ -151,6 +163,7 @@ export class Game {
     const { width, height } = this.renderer.size;
     this.camera.applyViewport(width, height);
     this.post.resize(width, height, this.renderer.renderer.getPixelRatio());
+    this.portal.resize(width, height);
   }
 
   private onResize = (): void => {
@@ -174,6 +187,7 @@ export class Game {
     this.env.applyQuality(preset);
     this.world.applyQuality(preset);
     this.post.setEnabled(this.settings.current.quality === 'high');
+    this.portal.setQuality(preset.antialias ? 0.5 : 0.34);
     this.applyViewport();
   }
 
@@ -317,13 +331,17 @@ export class Game {
       this.hud.setPrompt(best ? best.prompt : null);
     }
 
-    if (best && this.input.consumeInteract()) {
-      if (best.kind === 'sleep') void this.sleep();
-      else if (best.kind === 'enter') void this.enterInterior();
-      else if (best.kind === 'exit') void this.exitInterior();
-    } else if (!best) {
-      // Drop a press aimed at nothing so it can't fire later.
-      this.input.consumeInteract();
+    // Consume unconditionally so a press aimed at nothing can't fire later.
+    if (!this.input.consumeInteract()) return;
+
+    if (best?.kind === 'sleep') {
+      void this.sleep();
+    } else if (best?.kind === 'enter') {
+      void this.enterInterior();
+    } else if (this.indoors) {
+      // Any interact indoors that isn't the bed means "let me out". Gating
+      // this on a proximity radius is how you strand someone in a room.
+      void this.exitInterior();
     }
   }
 
@@ -342,6 +360,8 @@ export class Game {
     await this.hud.setFade(true, outMs);
 
     this.world.interiors.setVisible(indoors);
+    this.indoors = indoors;
+    this.audio.setZone(indoors ? 'indoor' : 'outdoor');
     // The kill plane and world bounds only make sense outdoors — the interior
     // cell sits 600 m up and outside the terrain footprint.
     this.player.controller.boundsEnabled = !indoors;
@@ -437,8 +457,33 @@ export class Game {
     );
   }
 
+  /**
+   * Draw the outdoor world into the window texture.
+   *
+   * Only while indoors, and only for the interior windows. The interior
+   * itself, the player and their contact shadow are suppressed for the pass —
+   * they live in the room, not out on the street.
+   */
+  private renderPortal(): void {
+    if (!this.indoors) return;
+    this.portal.render(
+      this.renderer.renderer,
+      this.scene,
+      this.camera.camera,
+      [this.world.interiors.group, this.player.root, this.contact.mesh],
+      (cam) => {
+        // The sky dome rides the main camera, which is 600 m up. Move it onto
+        // the portal camera or the window would look out at a tiny ball.
+        this.env.sky.anchorDome(cam.position);
+      },
+    );
+    // Put the dome back where the main camera can see it.
+    this.env.sky.anchorDome(this.camera.camera.position);
+  }
+
   private render(): void {
     this.renderer.beginFrame();
+    this.renderPortal();
     this.post.setDaylight(this.env.dayFactor);
     this.post.setCamera(this.camera.camera);
     this.post.render();
@@ -470,6 +515,7 @@ export class Game {
     this.env?.dispose();
     this.contact?.dispose();
     this.post?.dispose();
+    this.portal?.dispose();
     this.renderer?.dispose();
   }
 }

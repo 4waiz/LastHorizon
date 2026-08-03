@@ -79,7 +79,7 @@ export class Interiors {
   readonly bed = new THREE.Vector3();
   readonly bedside = new THREE.Vector3();
 
-  constructor(prototype: THREE.Object3D | undefined) {
+  constructor(prototype: THREE.Object3D | undefined, portalMaterial?: THREE.Material) {
     this.group.name = 'Interior';
     this.group.position.copy(INTERIOR_ORIGIN);
 
@@ -91,9 +91,12 @@ export class Interiors {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         const m = mesh.material;
-        mesh.material = Array.isArray(m)
-          ? m.map((mm) => toonFromImported(mm, 'RoomInterior'))
-          : toonFromImported(m as THREE.Material, 'RoomInterior');
+        const convert = (src: THREE.Material): THREE.Material => {
+          // The window panes become live portals onto the outdoor world.
+          if (portalMaterial && src.name?.includes('portal_glass')) return portalMaterial;
+          return toonFromImported(src, 'RoomInterior');
+        };
+        mesh.material = Array.isArray(m) ? m.map(convert) : convert(m as THREE.Material);
       });
       this.group.add(room);
     }
@@ -110,9 +113,9 @@ export class Interiors {
 
     // Warm practicals: the pendant and the two bedside/desk lamps.
     for (const [x, y, z, colour, power] of [
-      [0.6, ROOM_H - 0.95, 0.4, 0xffe0ad, 22],
-      [1.34, 0.95, -2.84, 0xffd39a, 9],
-      [-2.22, 1.25, -2.66, 0xffcf94, 8],
+      [0.6, ROOM_H - 0.95, 0.4, 0xffe0ad, 13],
+      [1.34, 0.95, -2.84, 0xffd39a, 5.5],
+      [-2.22, 1.25, -2.66, 0xffcf94, 5],
     ] as Array<[number, number, number, number, number]>) {
       const l = new THREE.PointLight(colour, power, 11, 1.8);
       l.position.set(x, y, z);
@@ -120,7 +123,7 @@ export class Interiors {
       this.lights.push(l);
     }
     // A cool fill from the windows so the far corners aren't black.
-    const win = new THREE.PointLight(0xd7e6f2, 7, 12, 1.6);
+    const win = new THREE.PointLight(0xd7e6f2, 4.5, 12, 1.6);
     win.position.set(-1.4, 2.0, -3.0);
     this.group.add(win);
     this.lights.push(win);

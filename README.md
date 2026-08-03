@@ -134,6 +134,12 @@ removes the problem and lets one room be worth detailing. Pressing `E` at the
 bed lays the character down, holds the shot for a beat, then fades the clock
 round to dawn.
 
+**The interior windows are real.** `WindowPortal` renders the outdoor world
+into a half-resolution target from a camera that mirrors yours through the
+rigid room-to-world transform, sampled in screen space. Because both cameras
+share a projection matrix the result is geometrically exact — the view
+parallaxes as you move, the way a window does.
+
 **Day and night.** A single scalar (`time`, 0..1) drives a colour script that
 produces the sun angle and colour, ambient fill, fog, sky gradient, cloud tint
 and street-lamp glow. Lamps get an emissive material and a soft ground pool
@@ -256,8 +262,8 @@ make the player sink or float.
 - The camera fades foliage and trunks that block the character, but buildings
   are deliberately left solid — walking behind a house hides you briefly.
 - All eight doors lead to the same room; there is one interior, not eight.
-- The interior cell has no windows onto the real world — the view through its
-  window frames is a painted panel, not the neighbourhood.
+- The interior windows are live portals onto the outdoor world, rendered at
+  half resolution only while you are indoors.
 - Vitest prints a "Multiple instances of Three.js" warning from its node
   module resolution. The production bundle is deduped and ships one copy.
 - Shadows come from a single directional light rather than true cascades, so

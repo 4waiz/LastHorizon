@@ -311,36 +311,36 @@ def build_parts():
     # A single flared tube reads as a skirt. Build a hip block that splits
     # into two separate legs, each with its own cuff.
     hips = loft_z("shorts_hip", [
-        (0.632, 0, 0.000, 0.121, 0.086, 0.62),
-        (0.578, 0, 0.000, 0.126, 0.090, 0.62),
-        (0.536, 0, 0.000, 0.129, 0.092, 0.62),
+        (0.634, 0, 0.000, 0.122, 0.087, 0.62),
+        (0.580, 0, 0.000, 0.128, 0.092, 0.62),
+        (0.522, 0, 0.000, 0.133, 0.095, 0.64),
     ], "shorts", cap_top=False)
     parts.append((hips, ["hips", "spine", "thigh.L", "thigh.R"]))
 
     for s, tag in ((1, "L"), (-1, "R")):
         leg = loft_z("shorts_leg." + tag, [
-            (0.548, s * 0.060, 0.000, 0.064, 0.088, 0.72),
-            (0.496, s * 0.068, 0.000, 0.063, 0.070, 0.80),
-            (0.446, s * 0.073, 0.000, 0.062, 0.066, 0.85),
-            (0.408, s * 0.075, 0.000, 0.060, 0.064, 0.88),
+            (0.532, s * 0.055, 0.000, 0.080, 0.098, 0.86),
+            (0.470, s * 0.065, 0.000, 0.078, 0.088, 0.86),
+            (0.412, s * 0.072, 0.000, 0.076, 0.082, 0.86),
+            (0.364, s * 0.076, 0.000, 0.074, 0.079, 0.86),
         ], "shorts", cap_bottom=False, cap_top=False)
         parts.append((leg, ["thigh." + tag, "hips"]))
         # turn-up at the hem
         cuff = loft_z("cuff." + tag, [
-            (0.418, s * 0.0745, 0.000, 0.065, 0.069, 0.88),
-            (0.396, s * 0.0755, 0.000, 0.064, 0.068, 0.88),
-        ], "shorts", cap_bottom=False)
+            (0.376, s * 0.0755, 0.000, 0.081, 0.086, 0.86),
+            (0.350, s * 0.0765, 0.000, 0.080, 0.085, 0.86),
+        ], "shorts", cap_bottom=False, cap_top=False)
         parts.append((cuff, ["thigh." + tag]))
 
     # ---- legs -------------------------------------------------------------
     for s, tag, bones in ((1, "L", LEG_L), (-1, "R", LEG_R)):
         leg = loft_z("leg." + tag, [
-            (0.430, s * 0.074, 0.000, 0.045, 0.046),
-            (0.360, s * 0.076, 0.000, 0.041, 0.042),
-            (0.320, s * 0.078, 0.002, 0.038, 0.040),
-            (0.240, s * 0.079, 0.000, 0.035, 0.037),
-            (0.150, s * 0.080, -0.002, 0.031, 0.033),
-            (0.086, s * 0.080, -0.004, 0.028, 0.029),
+            (0.452, s * 0.073, 0.000, 0.046, 0.047, 0.88),
+            (0.360, s * 0.076, 0.000, 0.041, 0.042, 0.88),
+            (0.320, s * 0.078, 0.002, 0.038, 0.040, 0.88),
+            (0.240, s * 0.079, 0.000, 0.035, 0.037, 0.88),
+            (0.150, s * 0.080, -0.002, 0.031, 0.033, 0.88),
+            (0.086, s * 0.080, -0.004, 0.028, 0.029, 0.88),
         ], "skin", cap_top=False)
         parts.append((leg, bones))
 
@@ -655,6 +655,33 @@ def anim_land(arm):
 # Build
 # --------------------------------------------------------------------------
 
+def add_blink_shape(mesh):
+    """A 'Blink' morph target that squashes the eyes to a closed lash line.
+
+    A morph target rather than eyelid bones: the animation clips never touch
+    it, so the runtime can drive blinking on top of any locomotion state, and
+    there is no bone-space maths to get wrong.
+    """
+    mesh.shape_key_add(name="Basis", from_mix=False)
+    key = mesh.shape_key_add(name="Blink", from_mix=False)
+
+    # Everything that makes up an eye: the dark oval and its highlight.
+    # The brows sit above 1.175 and are deliberately left alone.
+    LID_Z = 1.150
+    moved = 0
+    for i, v in enumerate(mesh.data.vertices):
+        co = v.co
+        if 0.028 < abs(co.x) < 0.082 and co.y < -0.070 and 1.095 < co.z < 1.174:
+            kp = key.data[i]
+            kp.co = co.copy()
+            kp.co.z = LID_Z + (co.z - LID_Z) * 0.06
+            # Ease the lid forward a hair so it never z-fights the cheek.
+            kp.co.y = co.y - 0.004
+            moved += 1
+    key.value = 0.0
+    return moved
+
+
 def build():
     reset_scene()
     bpy.context.scene.render.fps = FPS
@@ -665,6 +692,7 @@ def build():
     skin_parts(parts, arm)
 
     mesh = join_objects([p[0] for p in parts], "PlayerMesh")
+    add_blink_shape(mesh)
     mesh.parent = arm
     mod = mesh.modifiers.new("Armature", "ARMATURE")
     mod.object = arm

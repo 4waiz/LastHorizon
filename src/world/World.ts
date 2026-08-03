@@ -22,16 +22,6 @@ import { AssetBundle } from '../core/AssetManager';
  * can find.
  */
 
-/** A collision box in a building's own local frame (x right, y up, z fore). */
-interface LocalBox {
-  x: number;
-  y: number;
-  z: number;
-  hx: number;
-  hy: number;
-  hz: number;
-}
-
 interface Placement {
   model: string;
   x: number;
@@ -40,8 +30,6 @@ interface Placement {
   yaw: number;
   /** Simple one-box collider: half-extents plus a local centre offset. */
   collider?: { hx: number; hy: number; hz: number; oy?: number; oz?: number };
-  /** Detailed colliders, used where the player can go inside. */
-  boxes?: LocalBox[];
   /** Radius vegetation must stay out of. */
   keepout?: number;
   /** Footprint levelled flat under the building, half-extents in local space. */
@@ -55,39 +43,6 @@ interface Placement {
 }
 
 const HALF_PI = Math.PI / 2;
-
-// ---- HouseOpen room shell ------------------------------------------------
-// The Blender model faces -Y, which the exporter maps to +Z, so Blender +Y
-// becomes local -Z here. Wall thickness 0.22, doorway 1.20 wide centred at
-// local x = -1.35.
-const OPEN_W = 7.4;
-const OPEN_D = 6.2;
-const OPEN_H = 2.92;
-const OPEN_T = 0.22;
-
-function houseOpenBoxes(): LocalBox[] {
-  const hw = OPEN_W / 2;
-  const hd = OPEN_D / 2;
-  const t = OPEN_T / 2;
-  const wy = OPEN_H / 2;
-  const dl = -1.95;
-  const dr = -0.75;
-  return [
-    // floor deck — a 6 cm lip the capsule steps over at the threshold
-    { x: 0, y: -0.045, z: 0, hx: hw - OPEN_T, hy: 0.055, hz: hd - OPEN_T },
-    // back wall (Blender +Y)
-    { x: 0, y: wy, z: -(hd - t), hx: hw, hy: wy, hz: t },
-    // side walls
-    { x: -(hw - t), y: wy, z: 0, hx: t, hy: wy, hz: hd },
-    { x: hw - t, y: wy, z: 0, hx: t, hy: wy, hz: hd },
-    // front wall, split around the doorway
-    { x: (-hw + dl) / 2, y: wy, z: hd - t, hx: (dl + hw) / 2, hy: wy, hz: t },
-    { x: (dr + hw) / 2, y: wy, z: hd - t, hx: (hw - dr) / 2, hy: wy, hz: t },
-    // furniture the player should bump into
-    { x: -2.43, y: 0.37, z: -1.73, hx: 0.95, hy: 0.37, hz: 1.05 },  // bed
-    { x: 1.5, y: 0.40, z: 0.5, hx: 0.70, hy: 0.40, hz: 0.55 },      // table
-  ];
-}
 
 const PLACEMENTS: Placement[] = [
   // ---- west side of the main road, the hero row ------------------------
@@ -106,10 +61,10 @@ const PLACEMENTS: Placement[] = [
 
   // ---- east side ---------------------------------------------------------
   // The one you can walk into.
-  { model: 'HouseOpen', x: 15.6, z: 33, yaw: -HALF_PI,
-    door: { x: -1.35, z: 4.0 }, skirt: 2.5,
-    boxes: houseOpenBoxes(), keepout: 9.5, lift: 0.05,
-    pad: { hx: 4.3, hz: 3.8, blend: 3.0 } },
+  { model: 'HouseSmall', x: 15.6, z: 33, yaw: -HALF_PI,
+    door: { x: -0.55, z: 3.4 }, skirt: 2.5,
+    collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.5,
+    pad: { hx: 3.2, hz: 3.9, blend: 2.6 } },
   { model: 'PorchHouse', x: 16.4, z: 6, yaw: -HALF_PI - 0.05,
     door: { x: 0.55, z: 1.9 }, skirt: 2.5,
     collider: { hx: 2.4, hy: 2.0, hz: 3.9, oy: 1.6, oz: 0.9 }, keepout: 8.5,
@@ -184,6 +139,9 @@ export class World {
 
   readonly interactables: Interactable[] = [];
 
+  /** Set before build() so the interior windows become live portals. */
+  portalMaterial: THREE.Material | undefined;
+
   constructor(
     private readonly assets: AssetBundle,
     private readonly preset: QualityPreset,
@@ -220,12 +178,12 @@ export class World {
     this.buildCollectibles();
 
     // The interior cell shares the one static BVH — it just lives 600 m up.
-    this.interiors = new Interiors(this.assets.buildings.get('RoomInterior'));
+    this.interiors = new Interiors(this.assets.buildings.get('RoomInterior'), this.portalMaterial);
     this.group.add(this.interiors.group);
     this.colliderMeshes.push(...this.interiors.colliders);
     this.interactables.push({
       position: this.interiors.exit.clone(),
-      radius: 2.4,
+      radius: 5.4,
       kind: 'exit',
       prompt: 'Step back outside',
     });
@@ -304,12 +262,7 @@ export class World {
 
       if (p.keepout) this.keepouts.push({ x: p.x, z: p.z, radius: p.keepout });
 
-      if (p.boxes) {
-        for (const b of p.boxes) {
-          const [wx, wz] = this.localToWorld(p, b.x, b.z);
-          this.addCollider(wx, y + b.y, wz, p.yaw, b.hx, b.hy, b.hz);
-        }
-      } else if (p.collider) {
+      if (p.collider) {
         const c = p.collider;
         const oz = c.oz ?? 0;
         this.addCollider(

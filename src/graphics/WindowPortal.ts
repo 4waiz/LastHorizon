@@ -28,13 +28,17 @@ precision highp float;
 uniform sampler2D tPortal;
 uniform vec3 uTint;
 uniform float uHaze;
+uniform float uExposure;
 varying vec4 vScreen;
 
 void main() {
   // Perspective divide to screen UV — the same pixel the main camera would
   // have drawn had the wall not been there.
   vec2 uv = (vScreen.xy / vScreen.w) * 0.5 + 0.5;
-  vec3 col = texture2D(tPortal, clamp(uv, 0.0, 1.0)).rgb;
+  // The target holds linear, untonemapped radiance. Looking straight at a
+  // sunlit sky that is far brighter than anything else in the room, so pull
+  // it down before the main pass tone-maps the whole frame.
+  vec3 col = texture2D(tPortal, clamp(uv, 0.0, 1.0)).rgb * uExposure;
   // A breath of glass: slight tint and haze so it still reads as a pane.
   col = mix(col, uTint, uHaze);
   gl_FragColor = vec4(col, 1.0);
@@ -62,7 +66,8 @@ export class WindowPortal {
       uniforms: {
         tPortal: { value: this.target.texture },
         uTint: { value: new THREE.Color(0xdfeaf0) },
-        uHaze: { value: 0.10 },
+        uHaze: { value: 0.14 },
+        uExposure: { value: 0.46 },
       },
       fog: false,
     });
@@ -133,26 +138,37 @@ export class WindowPortal {
     this.camera.projectionMatrix.copy(main.projectionMatrix);
     this.camera.projectionMatrixInverse.copy(main.projectionMatrixInverse);
 
+    // Decompose into TRS and let three build the matrices itself. Writing
+    // matrixWorld directly and disabling matrixWorldAutoUpdate looks tidier
+    // but leaves the renderer's frustum out of step, and nothing draws.
     main.updateMatrixWorld();
-    this.camera.matrixWorld.multiplyMatrices(this.offset, main.matrixWorld);
-    this.camera.matrixWorld.decompose(
-      this.camera.position,
-      this.camera.quaternion,
-      this.camera.scale,
-    );
-    this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
-    this.camera.matrixWorldAutoUpdate = false;
+    this.tmp.multiplyMatrices(this.offset, main.matrixWorld);
+    this.tmp.decompose(this.camera.position, this.camera.quaternion, this.camera.scale);
+    this.camera.updateMatrixWorld(true);
 
     onCameraReady?.(this.camera);
 
     const restore = hidden.map((o) => o.visible);
     for (const o of hidden) o.visible = false;
 
+    // EffectComposer sets autoClear = false on the renderer and manages
+    // clearing itself. Left that way, this pass draws into an uncleared
+    // target; force it back for the duration and restore afterwards.
     const prevTarget = renderer.getRenderTarget();
+    const prevAutoClear = renderer.autoClear;
+    const prevShadowAuto = renderer.shadowMap.autoUpdate;
+    renderer.autoClear = true;
+    // The shadow map is already correct for this frame; regenerating it from
+    // a second camera is pure cost.
+    renderer.shadowMap.autoUpdate = false;
+
     renderer.setRenderTarget(this.target);
-    renderer.clear();
+    renderer.clear(true, true, false);
     renderer.render(scene, this.camera);
+
     renderer.setRenderTarget(prevTarget);
+    renderer.autoClear = prevAutoClear;
+    renderer.shadowMap.autoUpdate = prevShadowAuto;
 
     hidden.forEach((o, i) => {
       o.visible = restore[i];

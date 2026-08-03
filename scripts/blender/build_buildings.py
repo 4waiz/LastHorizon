@@ -38,7 +38,7 @@ def window(name, w, h, pos, facing="y", frame="window_frame",
     x, y, z = pos
     out = []
     if facing == "y":
-        out.append(box(name + "_f", (w + 0.14, depth, h + 0.14), (x, y, z), frame))
+        out.append(box(name + "_f", (w + 0.16, depth * 1.9, h + 0.16), (x, y + depth * 0.35, z), frame))
         out.append(box(name + "_g", (w, depth * 0.5, h), (x, y - depth * 0.34, z), glass))
         for i in range(1, panes):
             mx = x - w / 2 + w * i / panes
@@ -47,7 +47,7 @@ def window(name, w, h, pos, facing="y", frame="window_frame",
         out.append(box(name + "_s", (w + 0.20, depth * 1.5, 0.06),
                        (x, y - depth * 0.20, z - h / 2 - 0.08), frame))
     else:
-        out.append(box(name + "_f", (depth, w + 0.14, h + 0.14), (x, y, z), frame))
+        out.append(box(name + "_f", (depth * 1.9, w + 0.16, h + 0.16), (x + depth * 0.35, y, z), frame))
         out.append(box(name + "_g", (depth * 0.5, w, h), (x - depth * 0.34, y, z), glass))
         for i in range(1, panes):
             my = y - w / 2 + w * i / panes
@@ -76,14 +76,14 @@ def door(name, w, h, pos, colour="door_navy", facing="y"):
     x, y, z = pos
     out = []
     if facing == "y":
-        out.append(box(name + "_f", (w + 0.16, 0.12, h + 0.10), (x, y, z), "window_frame"))
+        out.append(box(name + "_f", (w + 0.18, 0.30, h + 0.12), (x, y + 0.10, z), "window_frame"))
         out.append(box(name + "_p", (w, 0.10, h), (x, y - 0.05, z), colour))
         out.append(box(name + "_h", (0.05, 0.10, 0.16),
                        (x + w * 0.34, y - 0.11, z), "metal_light"))
         out.append(box(name + "_step", (w + 0.44, 0.34, 0.10),
                        (x, y - 0.24, z - h / 2 + 0.05), "concrete"))
     else:
-        out.append(box(name + "_f", (0.12, w + 0.16, h + 0.10), (x, y, z), "window_frame"))
+        out.append(box(name + "_f", (0.30, w + 0.18, h + 0.12), (x + 0.10, y, z), "window_frame"))
         out.append(box(name + "_p", (0.10, w, h), (x - 0.05, y, z), colour))
     return out
 
@@ -353,11 +353,12 @@ def house_open():
     o.append(box("dstep", (DOOR_W + 0.7, 0.5, 0.10), (DOOR_CX, -hd - 0.24, -0.05), "concrete"))
 
     # the door itself, standing open against the inside wall
-    leaf = box("leaf", (DOOR_W - 0.05, 0.07, DOOR_H - 0.06),
-               (0, 0, (DOOR_H - 0.06) / 2), "door_navy")
-    rotate_verts(leaf, (0, 0, math.radians(78)), (-(DOOR_W - 0.05) / 2, 0, 0))
+    lw = DOOR_W - 0.05
+    leaf = box("leaf", (lw, 0.07, DOOR_H - 0.06),
+               (lw / 2, 0, (DOOR_H - 0.06) / 2), "door_navy")
+    rotate_verts(leaf, (0, 0, math.radians(78)), (0, 0, 0))
     for v in leaf.data.vertices:
-        v.co.x += dl + 0.03
+        v.co.x += dl + 0.04
         v.co.y += -hd + T / 2
     o.append(leaf)
 
@@ -490,12 +491,16 @@ def room_interior():
                      (sx, -hd + T / 2, (ROOM_DOOR_H + 0.16) / 2), "window_frame"))
     o.append(box("rhead", (ROOM_DOOR_W + 0.36, T + 0.12, 0.16),
                  (0, -hd + T / 2, ROOM_DOOR_H + 0.08), "window_frame"))
-    leaf = box("rleaf", (ROOM_DOOR_W - 0.06, 0.07, ROOM_DOOR_H - 0.07),
-               (0, 0, (ROOM_DOOR_H - 0.07) / 2), "door_navy")
-    rotate_verts(leaf, (0, 0, math.radians(72)), (-(ROOM_DOOR_W - 0.06) / 2, 0, 0))
+    # Build the leaf with its hinge edge on the origin, swing it, then set the
+    # hinge on the jamb. Rotating a centred box about its own edge and then
+    # translating by half a width leaves the door floating beside the opening.
+    lw = ROOM_DOOR_W - 0.06
+    leaf = box("rleaf", (lw, 0.07, ROOM_DOOR_H - 0.07),
+               (lw / 2, 0, (ROOM_DOOR_H - 0.07) / 2), "door_navy")
+    rotate_verts(leaf, (0, 0, math.radians(74)), (0, 0, 0))
     for v in leaf.data.vertices:
-        v.co.x += dl + 0.03
-        v.co.y += -hd + T / 2 + 0.10
+        v.co.x += dl + 0.05
+        v.co.y += -hd + T / 2
     o.append(leaf)
     o.append(cylinder("rknob", 0.045, 0.09, 8, (dr - 0.24, -hd + 0.02, 1.05), "chime_metal"))
 
@@ -507,15 +512,33 @@ def room_interior():
     o.append(box("rceil", (W, D, 0.16), (0, 0, H + 0.08), "trim_white"))
     o.append(box("rbeam", (W, 0.24, 0.20), (0, 0.4, H - 0.10), "wood_pole"))
 
-    # ---- windows: bright panes plus curtains -------------------------------
-    for cx, cy, cz, sw, vertical in ((-1.6, hd - T / 2, 1.72, 2.10, False),
-                                     (-hw + T / 2, 1.1, 1.74, 1.90, True)):
-        size = (T + 0.10, sw, 1.36) if vertical else (sw, T + 0.10, 1.40)
-        o.append(box("rwfrm%d" % int(cx * 10), size, (cx, cy, cz), "window_frame"))
-        glass = (T + 0.02, sw - 0.24, 1.12) if vertical else (sw - 0.24, T + 0.02, 1.16)
-        o.append(box("rglass%d" % int(cx * 10), glass, (cx, cy, cz), "portal_glass"))
-        bar = (T + 0.04, 0.06, 1.12) if vertical else (0.06, T + 0.04, 1.16)
-        o.append(box("rbar%d" % int(cx * 10), bar, (cx, cy, cz), "window_frame"))
+    # ---- windows: open pane in a hollow frame ------------------------------
+    # The frame has to be built as four bars around the opening. A solid frame
+    # box with the glass centred inside it swallows the glass completely —
+    # the pane is then never visible from either side.
+    for i, (cx, cy, cz, sw, sh, vertical) in enumerate((
+        (-1.6, hd - T / 2, 1.72, 2.10, 1.35, False),
+        (-hw + T / 2, 1.1, 1.74, 1.90, 1.30, True),
+    )):
+        d = T + 0.12          # frame depth, straddling the wall
+        b = 0.10              # bar thickness
+        pane = (0.05, sw, sh) if vertical else (sw, 0.05, sh)
+        o.append(box("rglass%d" % i, pane, (cx, cy, cz), "portal_glass"))
+
+        # sill and head
+        for dz in (sh / 2 + b / 2, -(sh / 2 + b / 2)):
+            size = (d, sw + b * 2, b) if vertical else (sw + b * 2, d, b)
+            o.append(box("rwh%d_%d" % (i, int(dz * 100)), size,
+                         (cx, cy, cz + dz), "window_frame"))
+        # jambs
+        for s in (-1, 1):
+            off = s * (sw / 2 + b / 2)
+            size = (d, b, sh) if vertical else (b, d, sh)
+            pos = (cx, cy + off, cz) if vertical else (cx + off, cy, cz)
+            o.append(box("rwj%d_%d" % (i, s), size, pos, "window_frame"))
+        # centre mullion, sitting just proud of the glass
+        mull = (d * 0.6, 0.07, sh) if vertical else (0.07, d * 0.6, sh)
+        o.append(box("rwm%d" % i, mull, (cx, cy, cz), "window_frame"))
         # curtains either side
         for s in (-1, 1):
             off = s * (sw / 2 - 0.10)

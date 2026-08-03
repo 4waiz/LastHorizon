@@ -264,6 +264,12 @@ export class Sky {
     (c.uSunDir.value as THREE.Vector3).copy(p.sunDirection);
   }
 
+  /** Park the dome on an arbitrary camera, e.g. during a portal pass. */
+  anchorDome(pos: THREE.Vector3): void {
+    this.dome.position.copy(pos);
+    this.dome.updateMatrix();
+  }
+
   update(dt: number, elapsed: number, cameraPos: THREE.Vector3): void {
     this.skyMat.uniforms.uTime.value = elapsed;
 

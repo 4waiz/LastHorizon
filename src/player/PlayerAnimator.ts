@@ -42,16 +42,36 @@ const FADE_TO: Record<PlayerState, number> = {
   land: 0.08,
 };
 
+/** Seconds between blinks, and how long one takes. */
+export const BLINK_INTERVAL = 5.0;
+const BLINK_CLOSE = 0.06;
+const BLINK_HOLD = 0.03;
+const BLINK_OPEN = 0.09;
+const BLINK_TOTAL = BLINK_CLOSE + BLINK_HOLD + BLINK_OPEN;
+
 export class PlayerAnimator {
   readonly mixer: THREE.AnimationMixer;
   private actions = new Map<string, THREE.AnimationAction>();
   private currentState: PlayerState | null = null;
   private current: THREE.AnimationAction | null = null;
 
+  /** Meshes carrying the "Blink" morph target, with its index. */
+  private blinkTargets: Array<{ mesh: THREE.Mesh; index: number }> = [];
+  private blinkClock = 0;
+
   readonly missing: string[] = [];
 
   constructor(root: THREE.Object3D, clips: THREE.AnimationClip[]) {
     this.mixer = new THREE.AnimationMixer(root);
+    // The glTF splits the body by material, so the morph lands on whichever
+    // primitives contain eye vertices. Drive every one that has it.
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      const dict = mesh.morphTargetDictionary;
+      if (mesh.isMesh && dict && 'Blink' in dict) {
+        this.blinkTargets.push({ mesh, index: dict.Blink });
+      }
+    });
     for (const clip of clips) {
       const action = this.mixer.clipAction(clip);
       action.enabled = true;
@@ -114,6 +134,35 @@ export class PlayerAnimator {
     }
 
     this.mixer.update(dt);
+    this.updateBlink(dt);
+  }
+
+  /**
+   * Blink on a fixed cadence, independent of whatever clip is playing.
+   *
+   * The animation clips never touch the morph, so this can just be written
+   * after `mixer.update` without anything overwriting it.
+   */
+  private updateBlink(dt: number): void {
+    if (!this.blinkTargets.length) return;
+    this.blinkClock = (this.blinkClock + dt) % BLINK_INTERVAL;
+
+    let amount = 0;
+    const t = this.blinkClock;
+    if (t < BLINK_CLOSE) {
+      amount = t / BLINK_CLOSE;
+    } else if (t < BLINK_CLOSE + BLINK_HOLD) {
+      amount = 1;
+    } else if (t < BLINK_TOTAL) {
+      amount = 1 - (t - BLINK_CLOSE - BLINK_HOLD) / BLINK_OPEN;
+    }
+    // Ease so the lid decelerates as it meets the lower lash line.
+    amount = amount * amount * (3 - 2 * amount);
+
+    for (const { mesh, index } of this.blinkTargets) {
+      const inf = mesh.morphTargetInfluences;
+      if (inf) inf[index] = amount;
+    }
   }
 
   dispose(): void {
