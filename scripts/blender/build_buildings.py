@@ -22,7 +22,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__))
                 "C:/Users/awaiz/OneDrive/Desktop/LastHorizon/scripts/blender")
 from lh_common import (  # noqa: E402
     reset_scene, box, wedge, gable_roof, cylinder, rotate_verts, boolean_diff,
-    bevel, join_objects, export_glb, tri_count,
+    ico_blob, bevel, join_objects, export_glb, tri_count,
 )
 
 import math  # noqa: E402
@@ -444,10 +444,227 @@ def interior_furniture():
     return o
 
 
+# --------------------------------------------------------------------------
+# RoomInterior — the shared interior cell
+# --------------------------------------------------------------------------
+# Every front door in the world teleports into this one room. Because it lives
+# far off the terrain rather than inside a building shell, it never has to
+# fight the heightfield: no pad aliasing, no floor buried under a hillside.
+# It is the only interior the player ever sees, so it is worth detailing.
+
+ROOM_W, ROOM_D, ROOM_H = 8.4, 7.0, 3.05
+ROOM_T = 0.16
+ROOM_DOOR_W, ROOM_DOOR_H = 1.25, 2.30
+
+
+def room_interior():
+    W, D, H, T = ROOM_W, ROOM_D, ROOM_H, ROOM_T
+    hw, hd = W / 2, D / 2
+    o = []
+
+    # ---- floor: boards with a visible seam every plank --------------------
+    o.append(box("rfloor", (W, D, 0.20), (0, 0, -0.10), "wood_plank"))
+    for i in range(16):
+        px = -hw + W * (i + 0.5) / 16
+        o.append(box("rpl%d" % i, (W / 16 * 0.09, D, 0.21), (px, 0, -0.095), "wood_pole"))
+
+    # ---- shell -------------------------------------------------------------
+    back = box("rwb", (W, T, H), (0, hd - T / 2, H / 2), "wall_cream")
+    boolean_diff(back, [box("rcb", (2.10, 1.0, 1.35), (-1.6, hd - T / 2, 1.72))])
+    o.append(back)
+
+    left = box("rwl", (T, D, H), (-hw + T / 2, 0, H / 2), "wall_cream")
+    boolean_diff(left, [box("rcl", (1.0, 1.90, 1.30), (-hw + T / 2, 1.1, 1.74))])
+    o.append(left)
+
+    o.append(box("rwr", (T, D, H), (hw - T / 2, 0, H / 2), "wall_cream"))
+
+    # front wall with the doorway back out
+    dl, dr = -ROOM_DOOR_W / 2, ROOM_DOOR_W / 2
+    o.append(box("rwf_l", (dl + hw, T, H), ((-hw + dl) / 2, -hd + T / 2, H / 2), "wall_cream"))
+    o.append(box("rwf_r", (hw - dr, T, H), ((dr + hw) / 2, -hd + T / 2, H / 2), "wall_cream"))
+    o.append(box("rwf_t", (ROOM_DOOR_W, T, H - ROOM_DOOR_H),
+                 (0, -hd + T / 2, (H + ROOM_DOOR_H) / 2), "wall_cream"))
+    for sx in (dl - 0.07, dr + 0.07):
+        o.append(box("rjamb%d" % int(sx * 100), (0.14, T + 0.12, ROOM_DOOR_H + 0.16),
+                     (sx, -hd + T / 2, (ROOM_DOOR_H + 0.16) / 2), "window_frame"))
+    o.append(box("rhead", (ROOM_DOOR_W + 0.36, T + 0.12, 0.16),
+                 (0, -hd + T / 2, ROOM_DOOR_H + 0.08), "window_frame"))
+    leaf = box("rleaf", (ROOM_DOOR_W - 0.06, 0.07, ROOM_DOOR_H - 0.07),
+               (0, 0, (ROOM_DOOR_H - 0.07) / 2), "door_navy")
+    rotate_verts(leaf, (0, 0, math.radians(72)), (-(ROOM_DOOR_W - 0.06) / 2, 0, 0))
+    for v in leaf.data.vertices:
+        v.co.x += dl + 0.03
+        v.co.y += -hd + T / 2 + 0.10
+    o.append(leaf)
+    o.append(cylinder("rknob", 0.045, 0.09, 8, (dr - 0.24, -hd + 0.02, 1.05), "chime_metal"))
+
+    # skirting, ceiling and a beam
+    for sy, sd in ((hd - T, T), (-hd + T, T)):
+        o.append(box("rskb%d" % int(sy * 10), (W, sd + 0.05, 0.14), (0, sy, 0.07), "wood_light"))
+    for sx in (-hw + T, hw - T):
+        o.append(box("rskl%d" % int(sx * 10), (T + 0.05, D, 0.14), (sx, 0, 0.07), "wood_light"))
+    o.append(box("rceil", (W, D, 0.16), (0, 0, H + 0.08), "trim_white"))
+    o.append(box("rbeam", (W, 0.24, 0.20), (0, 0.4, H - 0.10), "wood_pole"))
+
+    # ---- windows: bright panes plus curtains -------------------------------
+    for cx, cy, cz, sw, vertical in ((-1.6, hd - T / 2, 1.72, 2.10, False),
+                                     (-hw + T / 2, 1.1, 1.74, 1.90, True)):
+        size = (T + 0.10, sw, 1.36) if vertical else (sw, T + 0.10, 1.40)
+        o.append(box("rwfrm%d" % int(cx * 10), size, (cx, cy, cz), "window_frame"))
+        glass = (T + 0.02, sw - 0.24, 1.12) if vertical else (sw - 0.24, T + 0.02, 1.16)
+        o.append(box("rglass%d" % int(cx * 10), glass, (cx, cy, cz), "portal_glass"))
+        bar = (T + 0.04, 0.06, 1.12) if vertical else (0.06, T + 0.04, 1.16)
+        o.append(box("rbar%d" % int(cx * 10), bar, (cx, cy, cz), "window_frame"))
+        # curtains either side
+        for s in (-1, 1):
+            off = s * (sw / 2 - 0.10)
+            cur = (0.10, 0.34, 1.62) if vertical else (0.34, 0.10, 1.62)
+            pos = ((cx + 0.10, cy + off, cz + 0.10) if vertical
+                   else (cx + off, cy - 0.10, cz + 0.10))
+            o.append(box("rcur%d%d" % (int(cx * 10), s), cur, pos, "boat_red"))
+        rod = (0.06, sw + 0.30, 0.06) if vertical else (sw + 0.30, 0.06, 0.06)
+        o.append(box("rrod%d" % int(cx * 10), rod, (cx + 0.12 if vertical else cx,
+                                                    cy if vertical else cy - 0.12,
+                                                    cz + 0.82), "wood_pole"))
+
+    o += room_furniture()
+    return join_objects(o, "RoomInterior")
+
+
+def room_furniture():
+    W, D, T = ROOM_W, ROOM_D, ROOM_T
+    hw, hd = W / 2, D / 2
+    o = []
+
+    # ---- bed, right-hand wall ---------------------------------------------
+    bx, by = hw - T - 1.15, hd - T - 1.45
+    o.append(box("bframe", (2.10, 2.50, 0.30), (bx, by, 0.15), "wood_pole"))
+    for dx, dy in ((-0.95, -1.15), (0.95, -1.15), (-0.95, 1.15), (0.95, 1.15)):
+        o.append(box("bleg%d%d" % (int(dx * 10), int(dy * 10)), (0.14, 0.14, 0.30),
+                     (bx + dx, by + dy, 0.15), "wood_pole"))
+    o.append(box("bmatt", (1.96, 2.36, 0.28), (bx, by, 0.44), "trim_white"))
+    o.append(box("bduvet", (2.02, 1.62, 0.20), (bx, by - 0.42, 0.66), "leaf_teal"))
+    o.append(box("bfold", (2.02, 0.26, 0.09), (bx, by + 0.40, 0.71), "paper_white"))
+    for s in (-1, 1):
+        o.append(box("bpil%d" % s, (0.86, 0.44, 0.18), (bx + s * 0.48, by + 0.94, 0.66),
+                     "paper_white"))
+    o.append(box("bhead", (2.16, 0.14, 1.00), (bx, by + 1.30, 0.62), "wood_light"))
+
+    # nightstand, lamp, book
+    nx, ny = bx - 1.55, by + 0.95
+    o.append(box("nstand", (0.58, 0.58, 0.62), (nx, ny, 0.31), "wood_light"))
+    o.append(box("ndrawer", (0.50, 0.04, 0.20), (nx, ny - 0.29, 0.42), "wood_pole"))
+    o.append(cylinder("nlbase", 0.10, 0.28, 8, (nx, ny + 0.05, 0.62), "chime_metal"))
+    o.append(cylinder("nlshade", 0.21, 0.26, 12, (nx, ny + 0.05, 0.88),
+                      "hat_straw", radius_top=0.15))
+    o.append(box("nbook", (0.20, 0.28, 0.05), (nx + 0.16, ny - 0.14, 0.65), "boat_red"))
+
+    # ---- desk under the back window ---------------------------------------
+    dx0, dy0 = -1.6, hd - T - 0.62
+    o.append(box("dtop", (2.05, 0.82, 0.08), (dx0, dy0, 0.76), "wood_light"))
+    for sx in (-0.92, 0.92):
+        o.append(box("dside%d" % int(sx * 10), (0.08, 0.78, 0.72),
+                     (dx0 + sx, dy0, 0.36), "wood_light"))
+    o.append(box("ddrawer", (0.72, 0.72, 0.44), (dx0 + 0.52, dy0, 0.48), "wood_light"))
+    for i in range(2):
+        o.append(box("dhand%d" % i, (0.22, 0.04, 0.04),
+                     (dx0 + 0.52, dy0 - 0.37, 0.36 + i * 0.22), "chime_metal"))
+    # desk lamp
+    o.append(cylinder("dlb", 0.11, 0.04, 10, (dx0 - 0.66, dy0 + 0.14, 0.80), "camera_body"))
+    o.append(cylinder("dls", 0.028, 0.42, 6, (dx0 - 0.66, dy0 + 0.14, 0.83), "camera_body"))
+    head = cylinder("dlh", 0.15, 0.20, 10, (dx0 - 0.62, dy0 + 0.06, 1.22),
+                    "boat_red", radius_top=0.09)
+    rotate_verts(head, (math.radians(28), 0, 0), (dx0 - 0.62, dy0 + 0.06, 1.30))
+    o.append(head)
+    # papers, mug, pencil pot
+    o.append(box("dpaper", (0.42, 0.56, 0.02), (dx0 + 0.02, dy0 - 0.06, 0.81), "paper_white"))
+    o.append(box("dpaper2", (0.40, 0.54, 0.02), (dx0 - 0.06, dy0 + 0.04, 0.83), "paper_white"))
+    o.append(cylinder("dmug", 0.075, 0.13, 10, (dx0 - 0.36, dy0 - 0.22, 0.80), "trim_white"))
+    o.append(cylinder("dpot", 0.075, 0.16, 8, (dx0 + 0.72, dy0 + 0.10, 0.80), "chime_metal"))
+    for i in range(3):
+        o.append(box("dpen%d" % i, (0.02, 0.02, 0.26),
+                     (dx0 + 0.72 + (i - 1) * 0.03, dy0 + 0.10, 0.98),
+                     ["boat_red", "leaf_teal", "hat_band"][i]))
+
+    # chair
+    cx2, cy2 = dx0, dy0 - 1.08
+    o.append(box("cseat", (0.56, 0.54, 0.08), (cx2, cy2, 0.46), "wood_light"))
+    o.append(box("cback", (0.56, 0.09, 0.60), (cx2, cy2 + 0.23, 0.78), "wood_light"))
+    for dx, dy in ((-0.22, -0.21), (0.22, -0.21), (-0.22, 0.21), (0.22, 0.21)):
+        o.append(box("cleg%d%d" % (int(dx * 10), int(dy * 10)), (0.06, 0.06, 0.46),
+                     (cx2 + dx, cy2 + dy, 0.23), "wood_pole"))
+
+    # ---- wardrobe, left of the door ---------------------------------------
+    wx, wy = -hw + T + 0.44, -hd + T + 1.30
+    o.append(box("ward", (0.82, 1.60, 2.15), (wx, wy, 1.075), "wood_light"))
+    o.append(box("wardtop", (0.90, 1.70, 0.09), (wx, wy, 2.19), "wood_pole"))
+    for s in (-1, 1):
+        o.append(box("warddoor%d" % s, (0.05, 0.74, 1.95), (wx + 0.42, wy + s * 0.39, 1.06),
+                     "wood_pole"))
+        o.append(cylinder("wardknob%d" % s, 0.035, 0.06, 8,
+                          (wx + 0.46, wy + s * 0.07, 1.10), "chime_metal"))
+    o.append(box("wardbox", (0.52, 0.62, 0.34), (wx, wy - 0.30, 2.41), "boat_wood"))
+
+    # ---- bookshelf ---------------------------------------------------------
+    sx0, sy0 = hw - T - 0.24, -hd + T + 1.25
+    o.append(box("shback", (0.10, 1.70, 1.85), (sx0 + 0.14, sy0, 0.92), "wood_pole"))
+    for i in range(4):
+        o.append(box("shelf%d" % i, (0.42, 1.70, 0.06), (sx0, sy0, 0.28 + i * 0.50),
+                     "wood_light"))
+    cols = ["boat_red", "leaf_teal", "door_navy", "hat_band", "camera_body"]
+    for i in range(22):
+        row = i // 6
+        col = i % 6
+        o.append(box("bk%d" % i, (0.26, 0.10 + (i % 3) * 0.02, 0.28 + (i % 4) * 0.05),
+                     (sx0, sy0 - 0.70 + col * 0.25, 0.45 + row * 0.50 + (i % 4) * 0.02),
+                     cols[i % 5]))
+
+    # ---- rug ---------------------------------------------------------------
+    o.append(box("rug1", (3.0, 2.2, 0.025), (-0.5, -0.9, 0.012), "boat_red"))
+    o.append(box("rug2", (2.6, 1.8, 0.03), (-0.5, -0.9, 0.016), "wall_sand"))
+    o.append(box("rug3", (1.7, 1.1, 0.035), (-0.5, -0.9, 0.020), "boat_red"))
+
+    # ---- pictures on the right wall ---------------------------------------
+    for i, (py, pz, ph) in enumerate(((-0.4, 2.05, 0.52), (0.55, 2.20, 0.40),
+                                      (0.35, 1.62, 0.34))):
+        o.append(box("pfrm%d" % i, (0.05, ph * 1.35, ph), (hw - T - 0.03, py, pz),
+                     "wood_pole"))
+        o.append(box("pimg%d" % i, (0.02, ph * 1.35 - 0.09, ph - 0.09),
+                     (hw - T - 0.06, py, pz),
+                     ["leaf_mid", "wall_pink", "window_glass"][i]))
+
+    # ---- plant in the corner ----------------------------------------------
+    px, py2 = -hw + T + 0.55, hd - T - 0.75
+    o.append(cylinder("ppot", 0.30, 0.42, 12, (px, py2, 0), "boat_red", radius_top=0.36))
+    o.append(cylinder("psoil", 0.34, 0.04, 12, (px, py2, 0.40), "trunk_brown"))
+    for i in range(7):
+        a = i * math.tau / 7
+        o.append(ico_blob("pleaf%d" % i, 0.30, (px + math.cos(a) * 0.26,
+                                                py2 + math.sin(a) * 0.26,
+                                                0.66 + (i % 3) * 0.24),
+                          1, 0.26, 40 + i, (1.0, 1.0, 0.72), "leaf_mid"))
+    o.append(cylinder("pstem", 0.05, 0.70, 6, (px, py2, 0.40), "trunk_brown"))
+
+    # ---- ceiling pendant ---------------------------------------------------
+    o.append(box("pcord", (0.035, 0.035, 0.55), (0.6, -0.4, ROOM_H - 0.28), "pole_dark"))
+    o.append(cylinder("pshade", 0.38, 0.30, 14, (0.6, -0.4, ROOM_H - 0.86),
+                      "trim_white", radius_top=0.12))
+    o.append(cylinder("pbulb", 0.10, 0.13, 8, (0.6, -0.4, ROOM_H - 0.94), "lamp_glass"))
+
+    # ---- trunk at the foot of the bed --------------------------------------
+    o.append(box("trunkbox", (1.30, 0.60, 0.52), (hw - T - 1.15, -0.55, 0.26), "boat_wood"))
+    o.append(box("trunklid", (1.36, 0.66, 0.09), (hw - T - 1.15, -0.55, 0.55), "wood_pole"))
+    for s in (-1, 1):
+        o.append(box("trunkband%d" % s, (0.10, 0.64, 0.56),
+                     (hw - T - 1.15 + s * 0.48, -0.55, 0.28), "chime_metal"))
+    return o
+
+
 def build():
     reset_scene()
     objs = [house_large(), house_small(), house_solar(), porch_house(), shed(),
-            house_open()]
+            house_open(), room_interior()]
     info = export_glb(objs, "buildings.glb")
     info["objects"] = {o.name: tri_count(o) for o in objs}
     info["tris"] = sum(info["objects"].values())

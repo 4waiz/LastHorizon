@@ -72,9 +72,29 @@ export class Player {
     this.syncTransform();
   }
 
+  /** Lay the character down (on a bed) or stand them back up. */
+  setLying(on: boolean): void {
+    this.lying = on;
+    this.syncTransform();
+  }
+
+  private lying = false;
+
   private syncTransform(): void {
     this.root.position.copy(this.motor.position);
-    this.root.rotation.y = this.controller.facing;
+    this.root.rotation.set(0, this.controller.facing, 0);
+    if (this.lying) {
+      // Tip onto the back and lift clear of the floor so the model rests on
+      // the mattress rather than sinking through it.
+      this.root.rotation.x = -Math.PI / 2;
+      this.root.position.y += 0.30;
+      this.lookTarget.set(
+        this.motor.position.x,
+        this.motor.position.y + 0.55,
+        this.motor.position.z,
+      );
+      return;
+    }
     this.lookTarget.set(
       this.motor.position.x,
       this.motor.position.y + this.motor.config.height * 0.72,

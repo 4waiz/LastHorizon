@@ -49,6 +49,8 @@ export class PlayerController {
   jumpedThisFrame = false;
   /** True for the frame after a respawn. */
   respawnedThisFrame = false;
+  /** Off while the player is in the interior cell, which sits off-map. */
+  boundsEnabled = true;
 
   private timeSinceGrounded = Infinity;
   private jumpBufferedFor = Infinity;
@@ -147,7 +149,10 @@ export class PlayerController {
       this.facing = dampAngle(this.facing, target, t.turnLambda, dt);
     }
 
-    if (motor.position.y < t.killPlaneY || !inBounds(motor.position.x, motor.position.z)) {
+    if (
+      this.boundsEnabled &&
+      (motor.position.y < t.killPlaneY || !inBounds(motor.position.x, motor.position.z))
+    ) {
       this.respawn();
     }
   }

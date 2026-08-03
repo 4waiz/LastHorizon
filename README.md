@@ -125,11 +125,14 @@ placement declares a footprint that `Terrain` flattens *before* it computes
 its grid, ramping back to natural ground around the edge. That also gives the
 enterable house a flat floor.
 
-**One house is a real room.** `HouseOpen` is modelled with a doorway hole,
-window openings, and furniture — bed, table, chairs, shelf, hanging lamp. Its
-collision is a set of wall boxes with a gap at the door rather than one solid
-block, so you walk in, bump into the furniture, and can press `E` at the bed
-to sleep the clock round to dawn.
+**Interiors are a separate cell.** Every front door shows a "Go inside"
+prompt and teleports into one shared, well-detailed room that lives 600 m
+above the terrain. That is deliberate: the heightfield is ~2 m per cell, far
+too coarse to hold a house-sized platform reliably flat, so any floor built on
+it ends up partly buried on a slope. Lifting the room out of the terrain
+removes the problem and lets one room be worth detailing. Pressing `E` at the
+bed lays the character down, holds the shot for a beat, then fades the clock
+round to dawn.
 
 **Day and night.** A single scalar (`time`, 0..1) drives a colour script that
 produces the sun angle and colour, ambient fill, fog, sky gradient, cloud tint
@@ -252,8 +255,9 @@ make the player sink or float.
 - Only the tile-column UI is localised to English.
 - The camera fades foliage and trunks that block the character, but buildings
   are deliberately left solid — walking behind a house hides you briefly.
-- Only one house (`HouseOpen`, east side of the main road) has an interior.
-  The rest are solid shells.
+- All eight doors lead to the same room; there is one interior, not eight.
+- The interior cell has no windows onto the real world — the view through its
+  window frames is a painted panel, not the neighbourhood.
 - Vitest prints a "Multiple instances of Three.js" warning from its node
   module resolution. The production bundle is deduped and ships one copy.
 - Shadows come from a single directional light rather than true cascades, so

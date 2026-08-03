@@ -82,6 +82,9 @@ PALETTE = {
     "roof_under":   "#5E453C",
     "trim_white":   "#E9E4D6",
     "window_glass": "#5E7A80",
+    # Interior window panes. Kept as its own key so the runtime can find them
+    # by material name and swap in the live portal render.
+    "portal_glass": "#BFD8E8",
     "window_frame": "#C6BCA8",
     "door_navy":    "#4B4A70",
     "door_wood":    "#8A6F4E",

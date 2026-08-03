@@ -40,10 +40,10 @@ function noiseBuffer(ctx: AudioContext, seconds: number, brown = false): AudioBu
  * detune and a whisper of vinyl noise underneath.
  */
 const CHORDS: number[][] = [
-  [146.83, 220.00, 261.63, 349.23], // Dm9   D  A  C  F
-  [196.00, 246.94, 293.66, 392.00], // G13   G  B  D  G
-  [130.81, 196.00, 246.94, 329.63], // Cmaj7 C  G  B  E
-  [110.00, 164.81, 207.65, 261.63], // Am7   A  E  G# C
+  [293.66, 440.00, 523.25, 698.46], // Dm9   D4 A4 C5 F5
+  [392.00, 493.88, 587.33, 783.99], // G13   G4 B4 D5 G5
+  [261.63, 392.00, 493.88, 659.26], // Cmaj7 C4 G4 B4 E5
+  [220.00, 329.63, 415.30, 523.25], // Am7   A3 E4 G#4 C5
 ];
 
 /** A gentle bell figure that drifts over the pad. */
@@ -58,8 +58,6 @@ export class AudioManager {
 
   private windGain: GainNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
-  private humGain: GainNode | null = null;
-  private humPan: StereoPannerNode | null = null;
   private insectGain: GainNode | null = null;
 
   private started = false;
@@ -70,6 +68,11 @@ export class AudioManager {
   private chordIndex = 0;
   private motifStep = 0;
   private padTone: BiquadFilterNode | null = null;
+  private padTarget = 1;
+  private tracks: Partial<Record<'outdoor' | 'indoor', { el: HTMLAudioElement; gain: GainNode }>> = {};
+  private zone: 'outdoor' | 'indoor' = 'outdoor';
+  private tracksReady = false;
+  private trackFailed = false;
   private nextChordAt = 0;
   private nextBirdAt = 0;
   private nextInsectAt = 0;
@@ -111,14 +114,15 @@ export class AudioManager {
       this.sfxGain.connect(this.master);
 
       this.buildWind();
-      this.buildHum();
       this.buildInsects();
       this.buildPad();
+      this.buildTracks();
 
       this.started = true;
       // Fade in rather than punch in.
       this.master.gain.setTargetAtTime(this.muted ? 0 : 0.85, ctx.currentTime, 1.4);
       void ctx.resume();
+      this.applyZone();
     } catch (err) {
       console.warn('[LastHorizon] audio unavailable', err);
       this.failed = true;
@@ -128,49 +132,23 @@ export class AudioManager {
   private buildWind(): void {
     const ctx = this.ctx!;
     const src = ctx.createBufferSource();
-    src.buffer = noiseBuffer(ctx, 4, true);
+    src.buffer = noiseBuffer(ctx, 4);
     src.loop = true;
 
+    // Band-passed white noise high up: reads as air moving through leaves.
     const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 460;
-    filter.Q.value = 0.6;
+    filter.type = 'bandpass';
+    filter.frequency.value = 1500;
+    filter.Q.value = 0.5;
 
     const gain = ctx.createGain();
-    gain.gain.value = 0.11;
+    gain.gain.value = 0.045;
 
     src.connect(filter).connect(gain).connect(this.ambientGain!);
     src.start();
 
     this.windFilter = filter;
     this.windGain = gain;
-  }
-
-  private buildHum(): void {
-    const ctx = this.ctx!;
-    const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.value = 99;
-    const osc2 = ctx.createOscillator();
-    osc2.type = 'sine';
-    osc2.frequency.value = 198;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 340;
-
-    const gain = ctx.createGain();
-    gain.gain.value = 0;
-    const pan = ctx.createStereoPanner();
-
-    osc.connect(filter);
-    osc2.connect(filter);
-    filter.connect(gain).connect(pan).connect(this.ambientGain!);
-    osc.start();
-    osc2.start();
-
-    this.humGain = gain;
-    this.humPan = pan;
   }
 
   private buildInsects(): void {
@@ -181,6 +159,80 @@ export class AudioManager {
     this.insectGain = gain;
   }
 
+  /**
+   * Two looping tracks — one for outdoors, one for the interior — crossfaded
+   * as the player moves between them.
+   *
+   * These are the only streamed assets in the project. If either fails to
+   * load the synthesised pad below carries the scene on its own, so a missing
+   * or blocked file degrades to "quieter", never to "broken".
+   */
+  private buildTracks(): void {
+    const ctx = this.ctx!;
+    for (const zone of ['outdoor', 'indoor'] as const) {
+      const el = new Audio();
+      el.src = `./assets/audio/${zone}.mp3`;
+      el.loop = true;
+      el.preload = 'auto';
+      el.crossOrigin = 'anonymous';
+      el.volume = 1;
+
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      let node: MediaElementAudioSourceNode | null = null;
+      try {
+        node = ctx.createMediaElementSource(el);
+        node.connect(gain).connect(this.musicGain!);
+      } catch (err) {
+        console.warn(`[LastHorizon] could not route ${zone} track`, err);
+      }
+
+      el.addEventListener('error', () => {
+        console.warn(`[LastHorizon] ${zone}.mp3 unavailable; staying with the synth bed`);
+        this.trackFailed = true;
+        this.padTarget = 1;
+      });
+      el.addEventListener('canplay', () => {
+        this.tracksReady = true;
+        this.applyZone();
+      });
+
+      this.tracks[zone] = { el, gain };
+    }
+  }
+
+  /** Crossfade the two tracks and duck the synth pad when one is playing. */
+  private applyZone(): void {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    for (const zone of ['outdoor', 'indoor'] as const) {
+      const t = this.tracks[zone];
+      if (!t) continue;
+      const want = !this.trackFailed && this.tracksReady && this.zone === zone;
+      t.gain.gain.setTargetAtTime(want ? 0.9 : 0.0, now, 0.7);
+      if (want && t.el.paused) {
+        void t.el.play().catch(() => {
+          /* blocked until a gesture; retried on the next zone change */
+        });
+      }
+      if (!want && !t.el.paused) {
+        // Let the fade finish before stopping, so it doesn't cut off.
+        window.setTimeout(() => {
+          if (this.zone !== zone) t.el.pause();
+        }, 1600);
+      }
+    }
+    // The synth pad steps aside for the real music, but stays as a bed.
+    this.padTarget = this.trackFailed || !this.tracksReady ? 1 : 0.22;
+  }
+
+  /** Called by the game when the player moves between world and interior. */
+  setZone(zone: 'outdoor' | 'indoor'): void {
+    if (this.zone === zone) return;
+    this.zone = zone;
+    this.applyZone();
+  }
+
   private buildPad(): void {
     const ctx = this.ctx!;
 
@@ -188,7 +240,7 @@ export class AudioManager {
     // "lo-fi" thing you can do to a synth pad.
     const tone = ctx.createBiquadFilter();
     tone.type = 'lowpass';
-    tone.frequency.value = 760;
+    tone.frequency.value = 1500;
     tone.Q.value = 0.4;
     tone.connect(this.musicGain!);
     this.padTone = tone;
@@ -204,7 +256,7 @@ export class AudioManager {
 
     for (let i = 0; i < 4; i++) {
       const osc = ctx.createOscillator();
-      osc.type = i === 3 ? 'sine' : 'triangle';
+      osc.type = 'sine';
       osc.frequency.value = CHORDS[0][i];
       osc.detune.value = (i - 1.5) * 4;
       wobbleAmount.connect(osc.detune);
@@ -268,6 +320,11 @@ export class AudioManager {
     if (!this.ctx) return;
     if (suspend && this.ctx.state === 'running') void this.ctx.suspend();
     if (!suspend && this.ctx.state === 'suspended') void this.ctx.resume();
+    for (const t of Object.values(this.tracks)) {
+      if (!t) continue;
+      if (suspend) t.el.pause();
+    }
+    if (!suspend) this.applyZone();
   }
 
   // ------------------------------------------------------------------ frame
@@ -276,8 +333,6 @@ export class AudioManager {
    * @param speed          player ground speed, m/s
    * @param surface        1 = tarmac, 0 = grass
    * @param nightFactor    0 day, 1 night — swaps cicadas for crickets
-   * @param poleDistance   metres to the nearest utility pole
-   * @param polePan        -1..1 stereo position of that pole
    * @param moving         whether the player is on the ground and moving
    */
   update(
@@ -285,8 +340,6 @@ export class AudioManager {
     speed: number,
     surface: number,
     nightFactor: number,
-    poleDistance: number,
-    polePan: number,
     moving: boolean,
   ): void {
     if (!this.available || !this.ctx) return;
@@ -295,17 +348,11 @@ export class AudioManager {
 
     // wind rises a little with speed, and thins out after dark
     if (this.windFilter && this.windGain) {
-      const target = 300 + speed * 45 + Math.sin(now * 0.15) * 90;
+      const target = 1350 + speed * 60 + Math.sin(now * 0.13) * 340;
       this.windFilter.frequency.setTargetAtTime(target, now, 0.6);
-      this.windGain.gain.setTargetAtTime(lerp(0.11, 0.075, nightFactor), now, 1.2);
+      this.windGain.gain.setTargetAtTime(lerp(0.045, 0.032, nightFactor), now, 1.2);
     }
 
-    // transformer hum, gated by proximity to a pole
-    if (this.humGain && this.humPan) {
-      const g = clamp(1 - poleDistance / 11, 0, 1) * 0.11;
-      this.humGain.gain.setTargetAtTime(g, now, 0.25);
-      this.humPan.pan.setTargetAtTime(clamp(polePan, -1, 1), now, 0.3);
-    }
 
     // Chord rotation. Slow, but with an audible swell so it breathes rather
     // than drones — and the low-pass opens a touch on each new chord.
@@ -316,13 +363,13 @@ export class AudioManager {
       this.padVoices.forEach((v, i) => {
         v.osc.frequency.setTargetAtTime(chord[i], now, 1.4);
         v.gain.gain.cancelScheduledValues(now);
-        v.gain.gain.setTargetAtTime(0.19 - i * 0.022, now, 1.8);
-        v.gain.gain.setTargetAtTime(0.055, now + 5.5, 2.6);
+        v.gain.gain.setTargetAtTime((0.19 - i * 0.022) * this.padTarget, now, 1.8);
+        v.gain.gain.setTargetAtTime(0.055 * this.padTarget, now + 5.5, 2.6);
       });
       if (this.padTone) {
         this.padTone.frequency.cancelScheduledValues(now);
-        this.padTone.frequency.setTargetAtTime(1020, now, 1.5);
-        this.padTone.frequency.setTargetAtTime(700, now + 4.5, 2.5);
+        this.padTone.frequency.setTargetAtTime(2000, now, 1.5);
+        this.padTone.frequency.setTargetAtTime(1350, now + 4.5, 2.5);
       }
       // A bell note on every other chord, tracing the motif.
       if (this.chordIndex % 2 === 1) {
@@ -490,6 +537,12 @@ export class AudioManager {
       }
     }
     this.padVoices = [];
+    for (const t of Object.values(this.tracks)) {
+      if (!t) continue;
+      t.el.pause();
+      t.el.src = '';
+    }
+    this.tracks = {};
     void this.ctx?.close();
     this.ctx = null;
     this.started = false;

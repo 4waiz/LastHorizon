@@ -56,9 +56,11 @@ export class Game {
 
   private readonly camForward = new THREE.Vector3();
   private readonly camRight = new THREE.Vector3();
-  private nearestPole = { distance: 999, pan: 0 };
   private activeInteractable: Interactable | null = null;
   private sleeping = false;
+  private transitioning = false;
+  private readonly returnPoint = new THREE.Vector3();
+  private returnFacing = 0;
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
@@ -229,7 +231,7 @@ export class Game {
   }
 
   private update(dt: number): void {
-    const uiBlocking = this.hud.infoOpen || this.sleeping;
+    const uiBlocking = this.hud.infoOpen || this.sleeping || this.transitioning;
     if (uiBlocking) this.input.releaseAll();
 
     // 1. character
@@ -297,7 +299,7 @@ export class Game {
    * a bed you're standing beside still counts.
    */
   private updateInteraction(): void {
-    if (this.sleeping) return;
+    if (this.sleeping || this.transitioning) return;
 
     let best: Interactable | null = null;
     let bestDist = Infinity;
@@ -317,34 +319,106 @@ export class Game {
 
     if (best && this.input.consumeInteract()) {
       if (best.kind === 'sleep') void this.sleep();
+      else if (best.kind === 'enter') void this.enterInterior();
+      else if (best.kind === 'exit') void this.exitInterior();
     } else if (!best) {
       // Drop a press aimed at nothing so it can't fire later.
       this.input.consumeInteract();
     }
   }
 
-  /** Fade out, roll the clock round to dawn, fade back in. */
+  /** Common teleport: fade out, move, reframe the camera, fade back in. */
+  private async transit(
+    to: THREE.Vector3,
+    facing: number,
+    indoors: boolean,
+    outMs = 0.75,
+    inMs = 0.85,
+  ): Promise<void> {
+    this.hud.setPrompt(null);
+    this.activeInteractable = null;
+    this.input.releaseAll();
+
+    await this.hud.setFade(true, outMs);
+
+    this.world.interiors.setVisible(indoors);
+    // The kill plane and world bounds only make sense outdoors — the interior
+    // cell sits 600 m up and outside the terrain footprint.
+    this.player.controller.boundsEnabled = !indoors;
+    this.player.motor.teleport(to.x, to.y, to.z);
+    this.player.controller.facing = facing;
+    this.camera.resetBehind(this.player.lookTarget, facing);
+    // Indoors the camera has to sit close or it ends up inside a wall.
+    this.camera.setMinDistance(indoors ? 1.15 : 3.0);
+    this.camera.setDistance(indoors ? 2.3 : 6.4);
+    this.stepQuiet();
+
+    await this.hud.setFade(false, inMs);
+  }
+
+  /** Step the simulation without letting the player drift during a fade. */
+  private stepQuiet(): void {
+    // Enough steps for the camera spring and collision probe to settle.
+    for (let i = 0; i < 24; i++) this.update(1 / 60);
+    this.render();
+  }
+
+  private async enterInterior(): Promise<void> {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    this.returnPoint.copy(this.player.position);
+    this.returnFacing = this.player.controller.facing;
+
+    await this.transit(this.world.interiors.spawn, Math.PI, true);
+    this.transitioning = false;
+    this.hud.showToast('Inside', 'Quiet in here. The bed is by the window.');
+  }
+
+  private async exitInterior(): Promise<void> {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    await this.transit(this.returnPoint, this.returnFacing, false);
+    this.transitioning = false;
+  }
+
+  /**
+   * Sleep. The character actually lies down and is held on screen for a beat
+   * before the fade — a straight cut to black reads as a bug, not a nap.
+   */
   private async sleep(): Promise<void> {
-    if (this.sleeping) return;
+    if (this.sleeping || this.transitioning) return;
     this.sleeping = true;
     this.hud.setPrompt(null);
     this.activeInteractable = null;
     this.input.releaseAll();
 
-    await this.hud.setFade(true, 1.1);
+    const room = this.world.interiors;
+
+    // Lie down on the mattress and frame it from the side.
+    this.player.motor.teleport(room.bed.x, room.bed.y - 0.18, room.bed.z);
+    this.player.controller.facing = -Math.PI / 2;
+    this.player.setLying(true);
+    this.camera.resetBehind(this.player.lookTarget, Math.PI * 0.62);
+    this.camera.setMinDistance(1.15);
+    this.camera.setDistance(2.9);
+    this.camera.pitch = 0.34;
+    this.stepQuiet();
+    await wait(1500);
+
+    await this.hud.setFade(true, 1.2);
 
     this.env.setMode('cycle');
     this.settings.setTimeMode('cycle');
     this.env.jumpTo(0.285); // just after first light
-    // Re-seat the player beside the bed so they don't wake up inside it.
-    const bed = this.world.interactables.find((i) => i.kind === 'sleep');
-    if (bed) {
-      this.player.motor.teleport(bed.position.x + 1.5, bed.position.y - 0.4, bed.position.z);
-      this.camera.resetBehind(this.player.lookTarget, this.player.controller.facing);
-    }
-    this.render();
 
-    await this.hud.setFade(false, 1.4);
+    this.player.setLying(false);
+    this.player.motor.teleport(room.bedside.x, room.bedside.y, room.bedside.z);
+    this.player.controller.facing = Math.PI;
+    this.camera.resetBehind(this.player.lookTarget, Math.PI);
+    this.camera.setDistance(2.3);
+    this.stepQuiet();
+
+    await this.hud.setFade(false, 1.5);
     this.sleeping = false;
     this.hud.showToast('Morning', 'You slept until the light came back.');
   }
@@ -354,15 +428,11 @@ export class Game {
     const surface = this.world.surfaceHardness(p.x, p.z);
     const moving = this.player.motor.grounded && this.player.speed > 0.3;
 
-    // Cheap proximity check against the utility poles for the transformer hum.
-    this.nearestPole.distance = 999;
     this.audio.update(
       dt,
       this.player.speed,
       surface,
       1 - this.env.dayFactor,
-      this.nearestPole.distance,
-      this.nearestPole.pan,
       moving,
     );
   }
@@ -411,6 +481,10 @@ export class Game {
  * rAF alone is not enough: in a background or non-compositing tab it may
  * never fire, which would hang loading forever. Race it against a timer.
  */
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function frame(): Promise<void> {
   return new Promise((resolve) => {
     let settled = false;

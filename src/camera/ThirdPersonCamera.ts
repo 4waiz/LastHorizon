@@ -90,6 +90,18 @@ export class ThirdPersonCamera {
 
   setDistance(d: number): void {
     this.wantedDistance = clamp(d, this.tuning.minDistance, this.tuning.maxDistance);
+    // Snap rather than ease: this is only called on teleports, where easing
+    // would drag the camera through a wall on the way to its new spot.
+    this.currentDistance = this.wantedDistance;
+  }
+
+  /**
+   * Indoors the boom has to be able to collapse much further than it does
+   * outdoors — a 7 m room cannot hold a 6 m camera arm.
+   */
+  setMinDistance(d: number): void {
+    this.tuning.minDistance = d;
+    this.wantedDistance = clamp(this.wantedDistance, d, this.tuning.maxDistance);
   }
 
   resetBehind(target: THREE.Vector3, facing: number): void {

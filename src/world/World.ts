@@ -6,6 +6,7 @@ import { naturalHeight } from './Terrain';
 import { Vegetation, VegetationPrototypes, Keepout } from './Vegetation';
 import { Birds } from './Birds';
 import { Collectibles, CollectibleDef } from './Collectibles';
+import { Interiors } from './Interiors';
 import { CollisionWorld } from '../physics/CollisionWorld';
 import { makeToon, toonFromImported } from '../graphics/ToonMaterial';
 import { QualityPreset } from '../core/Settings';
@@ -47,6 +48,10 @@ interface Placement {
   pad?: { hx: number; hz: number; blend?: number };
   /** Raised above the levelled pad by this much. */
   lift?: number;
+  /** Front door position in local space; adds an "enter" prompt. */
+  door?: { x: number; z: number };
+  /** Depth of the foundation skirt that hides any gap on a slope. */
+  skirt?: number;
 }
 
 const HALF_PI = Math.PI / 2;
@@ -84,38 +89,43 @@ function houseOpenBoxes(): LocalBox[] {
   ];
 }
 
-/** Local position of the pillow end of the bed, for the sleep prompt. */
-const BED_LOCAL = new THREE.Vector3(-2.43, 0.62, -1.73);
-
 const PLACEMENTS: Placement[] = [
   // ---- west side of the main road, the hero row ------------------------
   { model: 'HouseLarge', x: -15.8, z: 62, yaw: HALF_PI,
+    door: { x: 1.35, z: 4.0 }, skirt: 2.5,
     collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5,
     pad: { hx: 3.9, hz: 4.7, blend: 2.8 } },
   { model: 'HouseSolar', x: -16.6, z: 43, yaw: HALF_PI + 0.06,
+    door: { x: 0.15, z: 3.7 }, skirt: 2.5,
     collider: { hx: 3.1, hy: 2.4, hz: 3.7, oy: 1.6 }, keepout: 8.5,
     pad: { hx: 3.6, hz: 4.2, blend: 2.8 } },
   { model: 'Shed', x: -15.2, z: 31.5, yaw: HALF_PI - 0.22,
+    door: { x: 0, z: 2.5 }, skirt: 2.0,
     collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5,
     pad: { hx: 2.3, hz: 3.0, blend: 2.2 } },
 
   // ---- east side ---------------------------------------------------------
   // The one you can walk into.
   { model: 'HouseOpen', x: 15.6, z: 33, yaw: -HALF_PI,
+    door: { x: -1.35, z: 4.0 }, skirt: 2.5,
     boxes: houseOpenBoxes(), keepout: 9.5, lift: 0.05,
     pad: { hx: 4.3, hz: 3.8, blend: 3.0 } },
   { model: 'PorchHouse', x: 16.4, z: 6, yaw: -HALF_PI - 0.05,
+    door: { x: 0.55, z: 1.9 }, skirt: 2.5,
     collider: { hx: 2.4, hy: 2.0, hz: 3.9, oy: 1.6, oz: 0.9 }, keepout: 8.5,
     pad: { hx: 3.0, hz: 4.4, blend: 2.6 } },
   { model: 'HouseSmall', x: 18.6, z: -24, yaw: -HALF_PI + 0.14,
+    door: { x: -0.55, z: 3.4 }, skirt: 2.5,
     collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.0,
     pad: { hx: 3.2, hz: 3.9, blend: 2.6 } },
 
   // ---- along the side road ----------------------------------------------
   { model: 'HouseLarge', x: 52, z: -22, yaw: Math.PI * 0.86,
+    door: { x: 1.35, z: 4.0 }, skirt: 2.5,
     collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5,
     pad: { hx: 3.9, hz: 4.7, blend: 2.8 } },
   { model: 'Shed', x: 66, z: -40, yaw: Math.PI * 0.72,
+    door: { x: 0, z: 2.5 }, skirt: 2.0,
     collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5,
     pad: { hx: 2.3, hz: 3.0, blend: 3.0 } },
 ];
@@ -124,7 +134,7 @@ const PLACEMENTS: Placement[] = [
 export interface Interactable {
   position: THREE.Vector3;
   radius: number;
-  kind: 'sleep';
+  kind: 'sleep' | 'enter' | 'exit';
   prompt: string;
 }
 
@@ -158,12 +168,12 @@ export class World {
   vegetation!: Vegetation;
   birds!: Birds;
   collectibles!: Collectibles;
+  interiors!: Interiors;
 
   /** Lamp heads that get a real point light after dark. */
   private lampPositions: THREE.Vector3[] = [];
   private lampLights: THREE.PointLight[] = [];
   private lampPools: THREE.InstancedMesh | null = null;
-  private interiorLight: THREE.PointLight | null = null;
 
   readonly spawn = new THREE.Vector3();
   spawnFacing = 0;
@@ -208,6 +218,23 @@ export class World {
     this.buildVegetation();
     this.buildBirds();
     this.buildCollectibles();
+
+    // The interior cell shares the one static BVH — it just lives 600 m up.
+    this.interiors = new Interiors(this.assets.buildings.get('RoomInterior'));
+    this.group.add(this.interiors.group);
+    this.colliderMeshes.push(...this.interiors.colliders);
+    this.interactables.push({
+      position: this.interiors.exit.clone(),
+      radius: 2.4,
+      kind: 'exit',
+      prompt: 'Step back outside',
+    });
+    this.interactables.push({
+      position: this.interiors.bed.clone(),
+      radius: 2.4,
+      kind: 'sleep',
+      prompt: 'Sleep until morning',
+    });
 
     this.collision.build(this.colliderMeshes);
 
@@ -296,7 +323,31 @@ export class World {
         );
       }
 
-      if (p.model === 'HouseOpen') this.furnishOpenHouse(p, y);
+      // A foundation skirt under the footprint. The terrain grid is ~2 m per
+      // cell, so a levelled pad can still alias by a few centimetres at the
+      // corners; a block extending down from the pad guarantees the building
+      // never reads as floating, whatever the ground does.
+      if (p.skirt && p.pad) {
+        const skirt = new THREE.Mesh(
+          new THREE.BoxGeometry(p.pad.hz * 1.94, p.skirt, p.pad.hx * 1.94),
+          makeToon(0xb4a892, { id: 'foundation' }),
+        );
+        skirt.position.set(p.x, y - p.skirt / 2 + 0.12, p.z);
+        skirt.rotation.y = p.yaw;
+        skirt.receiveShadow = true;
+        skirt.updateMatrixWorld(true);
+        this.group.add(skirt);
+      }
+
+      if (p.door) {
+        const [dx, dz] = this.localToWorld(p, p.door.x, p.door.z);
+        this.interactables.push({
+          position: new THREE.Vector3(dx, y + 1.0, dz),
+          radius: 2.4,
+          kind: 'enter',
+          prompt: 'Go inside',
+        });
+      }
     }
 
     for (const w of WALLS) {
@@ -343,28 +394,6 @@ export class World {
       this.group.add(barrier);
       this.addCollider(bp.x, this.terrain.heightAt(bp.x, bp.z) + 0.75, bp.z, bp.yaw, 3.4, 0.8, 0.3);
     }
-  }
-
-  /** Warm interior light and the bed you can sleep in. */
-  private furnishOpenHouse(p: Placement, y: number): void {
-    const [lx, lz] = this.localToWorld(p, 0.4, 0.6);
-    const lamp = new THREE.PointLight(0xffd9a0, 0, 9.5, 1.9);
-    lamp.position.set(lx, y + OPEN_H - 1.0, lz);
-    this.group.add(lamp);
-    this.interiorLight = lamp;
-
-    // A little bounce so the room is never a black box in daylight.
-    const fill = new THREE.PointLight(0xf3e6cc, 3.2, 8.0, 2.2);
-    fill.position.set(lx, y + 1.5, lz);
-    this.group.add(fill);
-
-    const [bx, bz] = this.localToWorld(p, BED_LOCAL.x, BED_LOCAL.z);
-    this.interactables.push({
-      position: new THREE.Vector3(bx, y + BED_LOCAL.y, bz),
-      radius: 2.8,
-      kind: 'sleep',
-      prompt: 'Sleep until morning',
-    });
   }
 
   private nearestRoadPoint(z: number): { x: number; z: number; yaw: number; index: number } {
@@ -673,12 +702,6 @@ export class World {
     this.birds?.update(dt, elapsed, cameraPos);
     this.collectibles?.update(dt, player);
     this.updateLamps(player, lampFactor);
-    if (this.interiorLight) {
-      // Only worth paying for when the player is actually nearby.
-      const near = this.interiorLight.position.distanceToSquared(player) < 26 * 26;
-      this.interiorLight.visible = near;
-      this.interiorLight.intensity = near ? 6 + lampFactor * 10 : 0;
-    }
   }
 
   private updateLamps(player: THREE.Vector3, lampFactor: number): void {
