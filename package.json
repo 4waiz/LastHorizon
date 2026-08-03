@@ -1,0 +1,40 @@
+{
+  "name": "lasthorizon",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "LastHorizon — a peaceful stylized third-person coastal exploration game built with Three.js.",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/4waiz/LastHorizon.git"
+  },
+  "bugs": {
+    "url": "https://github.com/4waiz/LastHorizon/issues"
+  },
+  "homepage": "https://github.com/4waiz/LastHorizon#readme",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "gsap": "^3.12.5",
+    "three": "^0.169.0",
+    "three-mesh-bvh": "^0.8.3"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "@typescript-eslint/eslint-plugin": "^8.13.0",
+    "@typescript-eslint/parser": "^8.13.0",
+    "eslint": "^8.57.1",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}
