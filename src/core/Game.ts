@@ -397,6 +397,10 @@ export class Game {
       this.camera.setMinDistance(3.0);
       this.camera.setDistance(6.4);
 
+      // The radar captured its roads at construction; without this it keeps
+      // drawing the village after travelling.
+      this.minimap.setData(this.runtime.mapData);
+
       // Leaving a zone leaves these pointing at content that no longer exists.
       this.indoors = false;
       this.sleeping = false;

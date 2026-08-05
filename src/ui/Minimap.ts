@@ -49,7 +49,7 @@ export class Minimap {
   private pulse = 0;
 
   constructor(
-    private readonly data: MinimapData,
+    private data: MinimapData,
     private readonly keepsakes: () => Array<MinimapPoint & { found: boolean }>,
   ) {
     this.canvas = document.getElementById('minimap') as HTMLCanvasElement;
@@ -61,6 +61,16 @@ export class Minimap {
 
   setVisible(on: boolean): void {
     if (this.canvas) this.canvas.style.display = on ? 'block' : 'none';
+  }
+
+  /**
+   * Point the radar at a different zone's roads and buildings.
+   *
+   * Without this it keeps drawing the village after travelling, because the
+   * data was captured once at construction.
+   */
+  setData(data: MinimapData): void {
+    this.data = data;
   }
 
   update(dt: number, player: THREE.Vector3, facing: number): void {
