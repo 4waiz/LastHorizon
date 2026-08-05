@@ -1,13 +1,16 @@
 import * as THREE from 'three';
 import { createRendererBackend, type RendererBackend } from './RendererBackend';
 import { Settings, QualityLevel, TimeMode } from './Settings';
-import type { TestSurface } from './TestMode';
+import type { LifeSnapshot, TestSurface } from './TestMode';
 import { DisposalRegistry } from './DisposalRegistry';
 import { ZoneManager } from '../world/zones/ZoneManager';
 import { buildCityChunk, buildCitySkyline } from '../world/zones/CityBuilder';
 import { CityRuntime } from '../world/zones/CityRuntime';
 import type { ZoneId } from '../world/zones/Manifest';
 import type { ZoneRuntime } from '../world/zones/ZoneRuntime';
+import { LifeClock } from './clocks/LifeClock';
+import { WorldClock } from './clocks/WorldClock';
+import { StoryClock } from './clocks/StoryClock';
 import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
@@ -86,6 +89,16 @@ export class Game {
   private readonly input = new InputManager();
   private readonly audio = new AudioManager();
   private readonly settings = new Settings();
+
+  /**
+   * Three independent clocks. Life is gated on active play; the world's day
+   * runs on its own fixed length; story timers are plain active seconds. See
+   * src/core/clocks for why none of them derives from the others.
+   */
+  private readonly life = new LifeClock();
+  private readonly worldClock = new WorldClock();
+  private readonly storyClock = new StoryClock();
+  private handlingBirthday = false;
 
   private running = false;
   private paused = false;
@@ -294,11 +307,71 @@ export class Game {
   private onVisibility = (): void => {
     this.paused = document.hidden;
     this.audio.setSuspended(document.hidden);
+    // A hidden tab is not active play. Without this the character would age
+    // while the game sat in the background, which is the one thing the life
+    // mechanic must never do.
+    this.life.setBlocked('hidden', document.hidden);
+    this.storyClock.setPaused(document.hidden);
     if (!document.hidden) {
       // Discard the elapsed background time so dt stays sane.
       this.clock.getDelta();
     }
   };
+
+  /**
+   * Advance all three clocks for one frame.
+   *
+   * `Environment` remains the day/night presentation authority; `WorldClock`
+   * mirrors it so world time has one typed, saveable home. Life and story time
+   * are advanced here and gated on whether the player is actually playing.
+   */
+  private advanceClocks(dt: number): void {
+    this.worldClock.jumpTo(this.env.time);
+
+    const settingsOpen = this.hud.infoOpen || this.hud.wardrobeOpen;
+    this.life.setBlocked('settings', settingsOpen);
+    this.life.setBlocked('loading', this.transitioning);
+    this.life.setBlocked('paused', this.paused);
+    this.storyClock.setPaused(this.paused || settingsOpen || this.transitioning);
+
+    this.storyClock.advance(dt);
+
+    const tick = this.life.advance(dt);
+    if (tick.birthdayReached !== null) void this.handleBirthday(tick.birthdayReached);
+
+    this.hud.setAge(this.life.ageYears, this.life.yearProgress);
+  }
+
+  /**
+   * A birthday has been reached.
+   *
+   * The clock has already paused itself, so nothing ages while this runs and
+   * the next birthday cannot race it. Acknowledging is the last step, and is
+   * what makes the delivery once-only across a reload.
+   */
+  private lifeSnapshot(): LifeSnapshot {
+    return {
+      ageYears: this.life.ageYears,
+      yearProgress: this.life.yearProgress,
+      pendingBirthday: this.life.pendingBirthday,
+      blocked: this.life.blockReasons,
+      rate: this.life.rate,
+    };
+  }
+
+  private async handleBirthday(age: number): Promise<void> {
+    if (this.handlingBirthday) return;
+    this.handlingBirthday = true;
+    try {
+      this.hud.showToast('Another year', `You are ${age} today.`);
+      // Autosave, appearance stage, NPC milestones and age-gated story checks
+      // attach here as those systems land.
+      await wait(60);
+      this.life.acknowledgeBirthday();
+    } finally {
+      this.handlingBirthday = false;
+    }
+  }
 
   private applyQuality(q: QualityLevel): void {
     const preset = this.settings.preset;
@@ -477,6 +550,17 @@ export class Game {
       activeZoneId: () => this.zones.activeZoneId,
       zoneDebug: () => this.zones.debugState(),
       releaseInput: () => this.input.releaseAll(),
+      advanceLife: (seconds) => {
+        const tick = this.life.advance(seconds);
+        if (tick.birthdayReached !== null) void this.handleBirthday(tick.birthdayReached);
+        return this.lifeSnapshot();
+      },
+      forceBirthday: () => {
+        const reached = this.life.forceBirthday();
+        if (reached !== null) void this.handleBirthday(reached);
+        return this.lifeSnapshot();
+      },
+      lifeState: () => this.lifeSnapshot(),
     };
   }
 
@@ -484,6 +568,8 @@ export class Game {
     const uiBlocking =
       this.hud.infoOpen || this.hud.wardrobeOpen || this.sleeping || this.transitioning;
     if (uiBlocking) this.input.releaseAll();
+
+    this.advanceClocks(dt);
 
     // 1. character
     this.camForward.copy(this.camera.forward);

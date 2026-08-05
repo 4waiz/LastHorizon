@@ -44,6 +44,17 @@ export interface TestSurface {
   activeZoneId(): string | null;
   zoneDebug(): ZoneDebugSnapshot;
   releaseInput(): void;
+  advanceLife(seconds: number): LifeSnapshot;
+  forceBirthday(): LifeSnapshot;
+  lifeState(): LifeSnapshot;
+}
+
+export interface LifeSnapshot {
+  ageYears: number;
+  yearProgress: number;
+  pendingBirthday: number | null;
+  blocked: readonly string[];
+  rate: number | 'frozen';
 }
 
 export interface ZoneDebugSnapshot {
@@ -96,6 +107,14 @@ export interface LHTestBridge {
   sit(on: boolean): void;
   lie(on: boolean): void;
   openWardrobe(open: boolean): void;
+  /**
+   * Age the character without waiting an hour of wall time. Feeds active
+   * seconds straight to the life clock, so every gate still applies.
+   */
+  advanceLife(seconds: number): LifeSnapshot;
+  /** Jump straight to the next birthday. */
+  forceBirthday(): LifeSnapshot;
+  getLifeState(): LifeSnapshot;
   /** Travel to another zone. Resolves false if the journey was refused. */
   travelTo(zoneId: string): Promise<boolean>;
   getActiveZone(): string | null;
@@ -216,6 +235,18 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     openWardrobe(open: boolean): void {
       surface.openWardrobe(open);
+    },
+
+    advanceLife(seconds: number): LifeSnapshot {
+      return surface.advanceLife(seconds);
+    },
+
+    forceBirthday(): LifeSnapshot {
+      return surface.forceBirthday();
+    },
+
+    getLifeState(): LifeSnapshot {
+      return surface.lifeState();
     },
 
     travelTo(zoneId: string): Promise<boolean> {

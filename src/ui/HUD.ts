@@ -439,6 +439,45 @@ export class HUD {
     return new Promise((resolve) => window.setTimeout(resolve, seconds * 1000 + 40));
   }
 
+  private ageBadge: HTMLElement | null = null;
+  private lastAgeShown = -1;
+
+  /**
+   * Minimal age readout: the number, and a thin bar for progress through the
+   * year. Created lazily in JS rather than added to index.html because full UI
+   * polish is a later phase and this should not leave dead markup behind if it
+   * is redesigned.
+   */
+  setAge(age: number, yearProgress: number): void {
+    if (!this.ageBadge) {
+      const host = document.getElementById('hud');
+      if (!host) return;
+      const el = document.createElement('div');
+      el.id = 'ageBadge';
+      el.style.cssText =
+        'position:absolute;top:14px;left:16px;padding:6px 12px 8px;' +
+        'font:600 13px/1.2 system-ui,sans-serif;letter-spacing:0.06em;' +
+        'color:#4a463e;background:rgba(248,244,234,0.86);border-radius:12px;' +
+        'pointer-events:none;user-select:none;min-width:64px;';
+      el.innerHTML =
+        '<span data-age></span>' +
+        '<span data-bar style="display:block;height:3px;margin-top:5px;' +
+        'border-radius:2px;background:rgba(74,70,62,0.18)">' +
+        '<span data-fill style="display:block;height:100%;width:0;' +
+        'border-radius:2px;background:#c2705a"></span></span>';
+      host.appendChild(el);
+      this.ageBadge = el;
+    }
+
+    if (age !== this.lastAgeShown) {
+      const label = this.ageBadge.querySelector('[data-age]');
+      if (label) label.textContent = `AGE ${age}`;
+      this.lastAgeShown = age;
+    }
+    const fill = this.ageBadge.querySelector<HTMLElement>('[data-fill]');
+    if (fill) fill.style.width = `${Math.round(Math.min(1, Math.max(0, yearProgress)) * 100)}%`;
+  }
+
   setDebug(text: string | null): void {
     if (text === null) {
       this.debug.hidden = true;
