@@ -183,7 +183,7 @@ export class Game {
     // Where the room appears to sit when you look out of it: on the east
     // verge, so the back window frames the road climbing toward the hill.
     const view = new THREE.Vector3(12.5, 0, 30);
-    view.y = this.world.terrain.heightAt(view.x, view.z);
+    view.y = this.world.heightAt(view.x, view.z);
     this.portal.setAnchor(INTERIOR_ORIGIN, view, 0);
 
     this.world.onCollect = (def, count, total) => {
@@ -340,7 +340,7 @@ export class Game {
         this.player.motor.teleport(x, y, z);
         this.player.controller.facing = facing;
       },
-      groundAt: (x, z) => this.world.terrain.heightAt(x, z),
+      groundAt: (x, z) => this.world.heightAt(x, z),
       frameCamera: (facing, distance, pitch) => {
         this.camera.resetBehind(this.player.lookTarget, facing);
         this.camera.setDistance(distance);

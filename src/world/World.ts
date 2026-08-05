@@ -12,6 +12,7 @@ import { makeToon, toonFromImported } from '../graphics/ToonMaterial';
 import { QualityPreset } from '../core/Settings';
 import { Rng } from '../utils/MathUtils';
 import { AssetBundle } from '../core/AssetManager';
+import type { ZoneRuntime } from './zones/ZoneRuntime';
 
 /**
  * Assembles the neighbourhood.
@@ -119,7 +120,7 @@ export interface WorldStats {
   buildings: number;
 }
 
-export class World {
+export class World implements ZoneRuntime {
   readonly group = new THREE.Group();
   readonly terrain: Terrain;
   readonly road: RoadNetwork;
@@ -766,6 +767,15 @@ export class World {
   }
 
   /** Surface under a point: 1 = tarmac, 0 = grass. */
+  /**
+   * Ground height, from the heightfield. Part of `ZoneRuntime`: callers ask
+   * the zone how high the ground is rather than reaching for a `Terrain` that
+   * only the village has.
+   */
+  heightAt(x: number, z: number): number {
+    return this.terrain.heightAt(x, z);
+  }
+
   surfaceHardness(x: number, z: number): number {
     return this.road.surfaceHardness(x, z);
   }
