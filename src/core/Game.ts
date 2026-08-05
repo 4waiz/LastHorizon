@@ -4,6 +4,7 @@ import { Settings, QualityLevel, TimeMode } from './Settings';
 import type { TestSurface } from './TestMode';
 import { DisposalRegistry } from './DisposalRegistry';
 import { ZoneManager } from '../world/zones/ZoneManager';
+import { buildCityChunk, buildCitySkyline } from '../world/zones/CityBuilder';
 import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
@@ -41,6 +42,8 @@ export class Game {
   private readonly clock = new THREE.Clock();
   private renderer!: RendererBackend;
   private zones!: ZoneManager;
+  /** Parent for streamed district geometry; null while the village is active. */
+  private zoneGroup: THREE.Group | null = null;
 
   /**
    * Renderer-lifetime resources.
@@ -116,29 +119,43 @@ export class Game {
     // Game.dispose() remembering to.
     this.zones = new ZoneManager(WORLD_MANIFEST, {
       buildZone: (zone, scope) => {
-        if (zone.id !== 'village_coast') {
-          // City districts are declared in the manifest but have no geometry
-          // yet; entering one would produce an empty zone, so refuse rather
-          // than strand the player somewhere blank.
-          throw new Error(`zone ${zone.id} has no builder yet`);
+        if (zone.id === 'village_coast') {
+          const world = new World(assets, preset);
+          world.portalMaterial = this.portal.material;
+          world.build();
+          this.scene.add(world.group);
+          scope.addTeardown(
+            () => {
+              this.scene.remove(world.group);
+              world.dispose();
+            },
+            'geometry',
+            'village-world',
+          );
+          this.world = world;
+          return;
         }
-        const world = new World(assets, preset);
-        world.portalMaterial = this.portal.material;
-        world.build();
-        this.scene.add(world.group);
+
+        // A city district. Streamed chunks attach to this group; the skyline
+        // is always-resident dressing so the horizon does not end in sky.
+        const group = new THREE.Group();
+        group.name = `zone_${zone.id}`;
+        this.scene.add(group);
+        this.zoneGroup = group;
         scope.addTeardown(
           () => {
-            this.scene.remove(world.group);
-            world.dispose();
+            this.scene.remove(group);
+            if (this.zoneGroup === group) this.zoneGroup = null;
           },
-          'geometry',
-          'village-world',
+          'other',
+          `zone-group:${zone.id}`,
         );
-        this.world = world;
+        buildCitySkyline(zone, scope, group);
       },
-      buildChunk: () => {
-        // Authored zones do not stream; city chunk building lands with the
-        // city prototype.
+      buildChunk: (zone, chunk, scope) => {
+        // Authored zones never stream, so this only fires for districts.
+        if (!this.zoneGroup) return;
+        buildCityChunk(zone, chunk, scope, this.zoneGroup);
       },
     });
     await this.zones.enter('village_coast');
