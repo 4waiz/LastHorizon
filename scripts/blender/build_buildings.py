@@ -55,12 +55,18 @@ def window(name, w, h, pos, facing="y", frame="window_frame",
     x, y, z = pos
     ft = depth * 1.9                    # frame thickness
     fw = w + 0.16                       # frame outer width
-    # Centre offsets measured from the wall face; positive = into the wall.
-    f_off = ft / 2 - WIN_REVEAL         # frame: reveal proud, rest buried
-    g_off = 0.07                        # glass: set back behind the reveal
-    m_off = 0.055                       # mullions: just in front of the glass
-    s_off = -0.03                       # sill: projects slightly, tucked under
-    st = depth * 0.9                    # sill thickness
+    # Centre offsets from the wall face; positive = into the wall.
+    #
+    # `_f` is a solid backing slab, not a hollow surround, so the glass and
+    # mullions must stay *in front* of it or it hides them. The whole assembly
+    # is simply shifted inward until the slab's outer face is flush with the
+    # wall: the glass then sits flush too, and the slab reads as the reveal
+    # behind it. Reordering instead of shifting is what buried the glass.
+    f_off = ft / 2                      # backing slab: outer face flush
+    g_off = f_off - ft / 2 + 0.026      # glass: flush, in front of the slab
+    m_off = 0.020                       # mullions: just proud of the glass
+    s_off = 0.040                       # sill: projects a little, supported
+    st = depth * 1.5                    # sill thickness
     sz = z - h / 2 - 0.08               # sill sits at the base of the opening
     out = []
 
@@ -110,12 +116,16 @@ def door(name, w, h, pos, colour="door_navy", facing="y", out_dir=-1):
     with a 7 cm gap between it and the wall.
     """
     x, y, z = pos
-    ft = 0.30                           # surround thickness
-    f_off = ft / 2 - WIN_REVEAL         # surround: reveal proud, rest buried
-    p_off = 0.10                        # leaf: recessed behind the reveal
-    h_off = 0.045                       # handle: proud of the leaf face
+    # Same shape of fix as `window`: `_f` is a solid backing slab, so the leaf
+    # stays in front of it and the whole assembly moves into the wall until
+    # the slab is flush. Pushing the leaf behind the slab hid the door
+    # entirely behind a blank panel.
+    ft = 0.30                           # backing slab thickness
+    f_off = ft / 2 + 0.05               # slab: fully buried behind the leaf
+    p_off = 0.05                        # leaf: flush with the wall face
+    h_off = -0.01                       # handle: proud of the leaf, as a knob
     step_t = 0.34
-    s_off = -step_t / 2                 # step: outer edge out, inner edge flush
+    s_off = -0.14                       # step: projects out, reaches the wall
     out = []
 
     if facing == "y":
