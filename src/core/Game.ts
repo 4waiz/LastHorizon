@@ -5,6 +5,7 @@ import type { TestSurface } from './TestMode';
 import { DisposalRegistry } from './DisposalRegistry';
 import { ZoneManager } from '../world/zones/ZoneManager';
 import { buildCityChunk, buildCitySkyline } from '../world/zones/CityBuilder';
+import type { ZoneRuntime } from '../world/zones/ZoneRuntime';
 import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
@@ -59,7 +60,19 @@ export class Game {
   private camera!: ThirdPersonCamera;
   private post!: PostProcessing;
   private env!: Environment;
-  private world!: World;
+  /**
+   * The active zone, behind the contract. Everything Game needs from a zone
+   * goes through here, so it no longer assumes it is in the village.
+   */
+  private runtime!: ZoneRuntime;
+
+  /**
+   * The village specifically, for the handful of things only it has:
+   * collectibles, the shared interior cell, keepsake markers. Null once a
+   * district is active — the narrowing is the point, since a district has no
+   * keepsakes to count.
+   */
+  private village!: World;
   private player!: Player;
   private contact!: ContactShadow;
   private portal!: WindowPortal;
@@ -132,7 +145,8 @@ export class Game {
             'geometry',
             'village-world',
           );
-          this.world = world;
+          this.runtime = world;
+          this.village = world;
           return;
         }
 
@@ -165,8 +179,8 @@ export class Game {
 
     this.player = new Player(assets.player.scene, assets.player.clips, this.input);
     this.scene.add(this.player.root);
-    this.player.setSpawn(this.world.spawn, this.world.spawnFacing);
-    this.camera.resetBehind(this.player.lookTarget, this.world.spawnFacing);
+    this.player.setSpawn(this.runtime.spawn, this.runtime.spawnFacing);
+    this.camera.resetBehind(this.player.lookTarget, this.runtime.spawnFacing);
 
     this.contact = new ContactShadow(0.66);
     this.scene.add(this.contact.mesh);
@@ -183,10 +197,10 @@ export class Game {
     // Where the room appears to sit when you look out of it: on the east
     // verge, so the back window frames the road climbing toward the hill.
     const view = new THREE.Vector3(12.5, 0, 30);
-    view.y = this.world.heightAt(view.x, view.z);
+    view.y = this.runtime.heightAt(view.x, view.z);
     this.portal.setAnchor(INTERIOR_ORIGIN, view, 0);
 
-    this.world.onCollect = (def, count, total) => {
+    this.village.onCollect = (def, count, total) => {
       this.hud.setCounter(count, total);
       this.hud.popCounter();
       this.hud.showToast(count >= total ? 'All found' : 'Found', def.found);
@@ -198,8 +212,8 @@ export class Game {
       onMuted: (m) => this.audio.setMuted(m),
       onTimeMode: (m) => this.applyTimeMode(m),
       onResetProgress: () => {
-        this.world.collectibles.restoreAll();
-        this.hud.setCounter(0, this.world.collectibles.total);
+        this.village.collectibles.restoreAll();
+        this.hud.setCounter(0, this.village.collectibles.total);
       },
       onInteract: () => this.input.queueInteract(),
       onOutfit: (patch) => {
@@ -208,8 +222,8 @@ export class Game {
       },
     });
     this.hud.syncOutfit(this.player.outfit);
-    this.hud.setCounter(this.world.collectibles.count, this.world.collectibles.total);
-    this.minimap = new Minimap(this.world.mapData, () => this.world.keepsakeMarkers);
+    this.hud.setCounter(this.village.collectibles.count, this.village.collectibles.total);
+    this.minimap = new Minimap(this.runtime.mapData, () => this.village.keepsakeMarkers);
 
     this.post.setEnabled(this.settings.current.quality === 'high');
     this.applyViewport();
@@ -266,7 +280,7 @@ export class Game {
     void q;
     this.renderer.applyQuality(preset);
     this.env.applyQuality(preset);
-    this.world.applyQuality(preset);
+    this.runtime.applyQuality(preset);
     this.post.setEnabled(this.settings.current.quality === 'high');
     this.portal.setQuality(preset.antialias ? 0.5 : 0.34);
     this.applyViewport();
@@ -340,7 +354,7 @@ export class Game {
         this.player.motor.teleport(x, y, z);
         this.player.controller.facing = facing;
       },
-      groundAt: (x, z) => this.world.heightAt(x, z),
+      groundAt: (x, z) => this.runtime.heightAt(x, z),
       frameCamera: (facing, distance, pitch) => {
         this.camera.resetBehind(this.player.lookTarget, facing);
         this.camera.setDistance(distance);
@@ -373,7 +387,7 @@ export class Game {
           programs: i.programs?.length ?? 0,
         };
       },
-      collectedCount: () => this.world.collectibles.count,
+      collectedCount: () => this.village.collectibles.count,
     };
   }
 
@@ -386,8 +400,8 @@ export class Game {
     this.camForward.copy(this.camera.forward);
     this.camRight.copy(this.camera.right);
     const wasAir = !this.player.motor.grounded;
-    this.player.update(dt, this.world.collision, this.camForward, this.camRight,
-                       this.world.inBounds);
+    this.player.update(dt, this.runtime.collision, this.camForward, this.camRight,
+                       this.runtime.inBounds);
 
     if (this.player.controller.jumpedThisFrame) this.audio.playJump();
     if (this.player.motor.justLanded && wasAir) {
@@ -399,7 +413,7 @@ export class Game {
     }
 
     // 2. camera (reads the already-resolved player position)
-    this.camera.update(dt, this.player.lookTarget, this.input, this.world.collision, this.scene);
+    this.camera.update(dt, this.player.lookTarget, this.input, this.runtime.collision, this.scene);
 
     // 3. atmosphere
     this.env.update(dt, this.elapsed, this.player.position, this.camera.camera.position);
@@ -408,7 +422,7 @@ export class Game {
     setToonPlayer(this.player.position);
 
     // 4. world
-    this.world.update(
+    this.runtime.update(
       dt,
       this.elapsed,
       this.player.position,
@@ -419,7 +433,7 @@ export class Game {
     // 5. contact shadow, dimmed as the sun goes down
     const groundY = this.player.motor.grounded
       ? this.player.position.y
-      : this.world.collision.groundBelow(
+      : this.runtime.collision.groundBelow(
           this.player.position.x,
           this.player.position.y + 0.4,
           this.player.position.z,
@@ -469,7 +483,7 @@ export class Game {
     let best: Interactable | null = null;
     let bestDist = Infinity;
     const p = this.player.lookTarget;
-    for (const it of this.world.interactables) {
+    for (const it of this.runtime.interactables) {
       const d = it.position.distanceTo(p);
       if (d < it.radius && d < bestDist) {
         best = it;
@@ -507,7 +521,7 @@ export class Game {
    * the seat with collision still running just wedges the capsule in the desk.
    */
   private sit(on: boolean): void {
-    const room = this.world.interiors;
+    const room = this.village.interiors;
     if (on) {
       this.player.motor.teleport(room.chair.x, room.chair.y, room.chair.z);
       this.player.controller.facing = Math.PI;
@@ -538,7 +552,7 @@ export class Game {
 
     await this.hud.setFade(true, outMs);
 
-    this.world.interiors.setVisible(indoors);
+    this.village.interiors.setVisible(indoors);
     this.indoors = indoors;
     this.audio.setZone(indoors ? 'indoor' : 'outdoor');
     // The kill plane and world bounds only make sense outdoors — the interior
@@ -568,7 +582,7 @@ export class Game {
     this.returnPoint.copy(this.player.position);
     this.returnFacing = this.player.controller.facing;
 
-    await this.transit(this.world.interiors.spawn, Math.PI, true);
+    await this.transit(this.village.interiors.spawn, Math.PI, true);
     this.transitioning = false;
     this.hud.showToast('Inside', 'Quiet in here. The bed is by the window.');
   }
@@ -591,7 +605,7 @@ export class Game {
     this.activeInteractable = null;
     this.input.releaseAll();
 
-    const room = this.world.interiors;
+    const room = this.village.interiors;
 
     // Lie down on the mattress and frame it from the side. `sleepSpot` is the
     // *feet* position: tipping onto the back swings the head 1.36 m along -Z,
@@ -630,7 +644,7 @@ export class Game {
     // The road field is a 2D lookup with no notion of the interior cell, and
     // the room sits directly above the main road in x/z — so indoors it would
     // report tarmac. Floorboards are closer to grass than asphalt.
-    const surface = this.indoors ? 0.3 : this.world.surfaceHardness(p.x, p.z);
+    const surface = this.indoors ? 0.3 : this.runtime.surfaceHardness(p.x, p.z);
     const moving = this.player.motor.grounded && this.player.speed > 0.3;
 
     this.audio.update(
@@ -655,7 +669,7 @@ export class Game {
       this.renderer.renderer,
       this.scene,
       this.camera.camera,
-      [this.world.interiors.group, this.player.root, this.contact.mesh],
+      [this.village.interiors.group, this.player.root, this.contact.mesh],
       (cam) => {
         // The sky dome rides the main camera, which is 600 m up. Move it onto
         // the portal camera or the window would look out at a tiny ball.
@@ -675,7 +689,7 @@ export class Game {
   }
 
   private reportDebug(): void {
-    const s = this.world.stats;
+    const s = this.runtime.stats;
     this.hud.setDebug(
       [
         `${this.fps.toFixed(0)} fps · ${this.renderer.info}`,
