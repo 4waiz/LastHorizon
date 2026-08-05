@@ -72,7 +72,7 @@ export class Game {
    * district is active — the narrowing is the point, since a district has no
    * keepsakes to count.
    */
-  private village!: World;
+  private village: World | null = null;
   private player!: Player;
   private contact!: ContactShadow;
   private portal!: WindowPortal;
@@ -200,7 +200,7 @@ export class Game {
     view.y = this.runtime.heightAt(view.x, view.z);
     this.portal.setAnchor(INTERIOR_ORIGIN, view, 0);
 
-    this.village.onCollect = (def, count, total) => {
+    this.village!.onCollect = (def, count, total) => {
       this.hud.setCounter(count, total);
       this.hud.popCounter();
       this.hud.showToast(count >= total ? 'All found' : 'Found', def.found);
@@ -212,8 +212,8 @@ export class Game {
       onMuted: (m) => this.audio.setMuted(m),
       onTimeMode: (m) => this.applyTimeMode(m),
       onResetProgress: () => {
-        this.village.collectibles.restoreAll();
-        this.hud.setCounter(0, this.village.collectibles.total);
+        this.village!.collectibles.restoreAll();
+        this.hud.setCounter(0, this.village!.collectibles.total);
       },
       onInteract: () => this.input.queueInteract(),
       onOutfit: (patch) => {
@@ -222,8 +222,10 @@ export class Game {
       },
     });
     this.hud.syncOutfit(this.player.outfit);
-    this.hud.setCounter(this.village.collectibles.count, this.village.collectibles.total);
-    this.minimap = new Minimap(this.runtime.mapData, () => this.village.keepsakeMarkers);
+    this.hud.setCounter(this.village!.collectibles.count, this.village!.collectibles.total);
+    // Runs every frame, including while a district is active — a district has
+    // no keepsakes, so this must degrade rather than assert.
+    this.minimap = new Minimap(this.runtime.mapData, () => this.village?.keepsakeMarkers ?? []);
 
     this.post.setEnabled(this.settings.current.quality === 'high');
     this.applyViewport();
@@ -387,7 +389,7 @@ export class Game {
           programs: i.programs?.length ?? 0,
         };
       },
-      collectedCount: () => this.village.collectibles.count,
+      collectedCount: () => this.village?.collectibles.count ?? 0,
     };
   }
 
@@ -521,7 +523,7 @@ export class Game {
    * the seat with collision still running just wedges the capsule in the desk.
    */
   private sit(on: boolean): void {
-    const room = this.village.interiors;
+    const room = this.village!.interiors;
     if (on) {
       this.player.motor.teleport(room.chair.x, room.chair.y, room.chair.z);
       this.player.controller.facing = Math.PI;
@@ -552,7 +554,7 @@ export class Game {
 
     await this.hud.setFade(true, outMs);
 
-    this.village.interiors.setVisible(indoors);
+    this.village!.interiors.setVisible(indoors);
     this.indoors = indoors;
     this.audio.setZone(indoors ? 'indoor' : 'outdoor');
     // The kill plane and world bounds only make sense outdoors — the interior
@@ -582,7 +584,7 @@ export class Game {
     this.returnPoint.copy(this.player.position);
     this.returnFacing = this.player.controller.facing;
 
-    await this.transit(this.village.interiors.spawn, Math.PI, true);
+    await this.transit(this.village!.interiors.spawn, Math.PI, true);
     this.transitioning = false;
     this.hud.showToast('Inside', 'Quiet in here. The bed is by the window.');
   }
@@ -605,7 +607,7 @@ export class Game {
     this.activeInteractable = null;
     this.input.releaseAll();
 
-    const room = this.village.interiors;
+    const room = this.village!.interiors;
 
     // Lie down on the mattress and frame it from the side. `sleepSpot` is the
     // *feet* position: tipping onto the back swings the head 1.36 m along -Z,
@@ -669,7 +671,7 @@ export class Game {
       this.renderer.renderer,
       this.scene,
       this.camera.camera,
-      [this.village.interiors.group, this.player.root, this.contact.mesh],
+      [this.village!.interiors.group, this.player.root, this.contact.mesh],
       (cam) => {
         // The sky dome rides the main camera, which is 600 m up. Move it onto
         // the portal camera or the window would look out at a tiny ball.

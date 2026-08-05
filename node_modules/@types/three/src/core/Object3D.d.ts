@@ -28,11 +28,14 @@ export interface Object3DJSONObject {
     visible?: boolean;
     frustumCulled?: boolean;
     renderOrder?: number;
+    static?: boolean;
     userData?: Record<string, unknown>;
 
     layers: number;
     matrix: Matrix4Tuple;
     up: Vector3Tuple;
+
+    pivot?: Vector3Tuple;
 
     matrixAutoUpdate?: boolean;
 
@@ -266,13 +269,6 @@ export class Object3D<TEventMap extends Object3DEventMap = Object3DEventMap> ext
     animations: AnimationClip[];
 
     /**
-     * An object that can be used to store custom data about the {@link Object3D}.
-     * @remarks It should not hold references to _functions_ as these **will not** be cloned.
-     * @default `{}`
-     */
-    userData: Record<string, any>;
-
-    /**
      * Custom depth material to be used when rendering to the depth map.
      * @remarks Can only be used in context of meshes.
      * When shadow-casting with a {@link THREE.DirectionalLight | DirectionalLight} or {@link THREE.SpotLight | SpotLight},
@@ -286,6 +282,34 @@ export class Object3D<TEventMap extends Object3DEventMap = Object3DEventMap> ext
      * @defaultValue `undefined`
      */
     customDistanceMaterial?: Material | undefined;
+
+    /**
+     * Whether the 3D object is supposed to be static or not. If set to `true`, it means
+     * the 3D object is not going to be changed after the initial renderer. This includes
+     * geometry and material settings. A static 3D object can be processed by the renderer
+     * slightly faster since certain state checks can be bypassed.
+     *
+     * Only relevant in context of {@link WebGPURenderer}.
+     *
+     * @default false
+     */
+    static: boolean;
+
+    /**
+     * An object that can be used to store custom data about the {@link Object3D}.
+     * @remarks It should not hold references to _functions_ as these **will not** be cloned.
+     * @default `{}`
+     */
+    userData: Record<string, any>;
+
+    /**
+     * The pivot point for rotation and scale transformations.
+     * When set, rotation and scale are applied around this point
+     * instead of the object's origin.
+     *
+     * @default null
+     */
+    pivot: Vector3 | null;
 
     /**
      * An optional callback that is executed immediately before a 3D object is rendered to a shadow map.
@@ -645,11 +669,15 @@ export class Object3D<TEventMap extends Object3DEventMap = Object3DEventMap> ext
     updateMatrixWorld(force?: boolean): void;
 
     /**
-     * Updates the global transform of the object.
-     * @param updateParents Recursively updates global transform of ancestors.
-     * @param updateChildren Recursively updates global transform of descendants.
+     * An alternative version of {@link Object3D#updateMatrixWorld} with more control over the
+     * update of ancestor and descendant nodes.
+     *
+     * @param {boolean} [updateParents=false] Whether ancestor nodes should be updated or not.
+     * @param {boolean} [updateChildren=false] Whether descendant nodes should be updated or not.
+     * @param {boolean} [force=false] - When set to `true`, a recomputation of world matrices is forced even
+     * when {@link Object3D#matrixWorldNeedsUpdate} is `false`.
      */
-    updateWorldMatrix(updateParents: boolean, updateChildren: boolean): void;
+    updateWorldMatrix(updateParents: boolean, updateChildren: boolean, force?: boolean): void;
 
     /**
      * Convert the object to three.js {@link https://github.com/mrdoob/three.js/wiki/JSON-Object-Scene-format-4 | JSON Object/Scene format}.
