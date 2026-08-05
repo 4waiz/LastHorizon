@@ -4,7 +4,14 @@ import type { QualityPreset } from '../../core/Settings';
 import type { Interactable, WorldStats } from '../World';
 import type { ZoneManifest } from './Manifest';
 import type { ZoneRuntime } from './ZoneRuntime';
-import { KERB_H, MAIN_ROAD_X, ROAD_HALF, SIDEWALK_W, SIDE_STREET_Z } from './CityBuilder';
+import {
+  cityChunkBuildings,
+  KERB_H,
+  MAIN_ROAD_X,
+  ROAD_HALF,
+  SIDEWALK_W,
+  SIDE_STREET_Z,
+} from './CityBuilder';
 
 /**
  * A city district, answering the same contract the village does.
@@ -124,20 +131,41 @@ export class CityRuntime implements ZoneRuntime {
     return [];
   }
 
-  /** Radar data straight off the lane graph — one polyline per directed edge. */
+  /**
+   * Radar data for the district.
+   *
+   * Roads come from the carriageway axes the geometry is actually built on,
+   * spanning the full zone, not from the lane graph — that is a six-node
+   * routing skeleton for future traffic, and drawing it gave a map with two
+   * short lines on it.
+   *
+   * Buildings come from every chunk in the manifest rather than only the
+   * resident ones. A map that reveals itself as you walk is a fog-of-war
+   * feature nobody asked for; the district layout is fixed and knowable.
+   */
   get mapData(): {
     roads: Array<Array<{ x: number; z: number }>>;
     buildings: Array<{ x: number; z: number; r: number }>;
   } {
-    const byId = new Map(this.manifest.lanes.map((l) => [l.id, l]));
-    const roads: Array<Array<{ x: number; z: number }>> = [];
-    for (const lane of this.manifest.lanes) {
-      for (const nextId of lane.next) {
-        const n = byId.get(nextId);
-        if (n) roads.push([{ x: lane.x, z: lane.z }, { x: n.x, z: n.z }]);
-      }
-    }
-    return { roads, buildings: [] };
+    const b = this.manifest.bounds;
+    const roads = [
+      // Main road, running north-south along x = MAIN_ROAD_X.
+      [
+        { x: MAIN_ROAD_X, z: b.minZ },
+        { x: MAIN_ROAD_X, z: b.maxZ },
+      ],
+      // Side street, running east-west along z = SIDE_STREET_Z.
+      [
+        { x: b.minX, z: SIDE_STREET_Z },
+        { x: b.maxX, z: SIDE_STREET_Z },
+      ],
+    ];
+
+    const buildings = this.manifest.chunks.flatMap((chunk) =>
+      cityChunkBuildings(chunk).map((p) => ({ x: p.x, z: p.z, r: p.r })),
+    );
+
+    return { roads, buildings };
   }
 
   get stats(): WorldStats {

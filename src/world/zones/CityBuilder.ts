@@ -229,6 +229,50 @@ const SHELLS = [
 
 const ROAD_KEEPOUT = ROAD_HALF + SIDEWALK_W + 2.5;
 
+export interface ShellPlacement {
+  shell: (typeof SHELLS)[number];
+  x: number;
+  z: number;
+  rot: boolean;
+  /** Half-diagonal footprint radius, for the map. */
+  r: number;
+}
+
+/**
+ * Where this chunk's buildings go.
+ *
+ * Extracted and exported so the geometry and the map read from one source.
+ * Deriving footprints separately — or letting the map guess — is how a map
+ * ends up showing buildings that are not there.
+ *
+ * Deterministic from the chunk seed, and the RNG draw order matters: the
+ * rotation value is only consumed when a slot is actually used, exactly as the
+ * original inline loop did, so placement is unchanged.
+ */
+export function cityChunkBuildings(chunk: ChunkManifest): ShellPlacement[] {
+  const rand = mulberry32(chunk.seed);
+  const b = chunk.bounds;
+  const cx = (b.minX + b.maxX) / 2;
+  const cz = (b.minZ + b.maxZ) / 2;
+  const slots: Array<[number, number]> = [
+    [cx - 12, cz - 12],
+    [cx + 12, cz + 12],
+  ];
+
+  const out: ShellPlacement[] = [];
+  for (const [sx, sz] of slots) {
+    const shell = SHELLS[Math.floor(rand() * SHELLS.length)];
+    const x = sx + (rand() - 0.5) * 3;
+    const z = sz + (rand() - 0.5) * 3;
+    if (!clearOfRoads(x, z, shell.w, shell.d)) continue;
+    const rot = rand() > 0.5;
+    const w = rot ? shell.d : shell.w;
+    const d = rot ? shell.w : shell.d;
+    out.push({ shell, x, z, rot, r: Math.max(w, d) / 2 });
+  }
+  return out;
+}
+
 /** True if a footprint centred here would sit on a carriageway or its walk. */
 function clearOfRoads(x: number, z: number, w: number, d: number): boolean {
   const nearMain = Math.abs(x - MAIN_ROAD_X) < ROAD_KEEPOUT + w / 2;
@@ -316,7 +360,6 @@ export function buildCityChunk(
   scope: DisposalRegistry,
   parent: THREE.Object3D,
 ): THREE.Mesh[] {
-  const rand = mulberry32(chunk.seed);
   const batch = new Batch();
   const b = chunk.bounds;
 
@@ -327,22 +370,12 @@ export function buildCityChunk(
   emitStreetlights(batch, b);
   if (zone.id === 'city_waterfront') emitWater(batch, b);
 
-  // Two candidate building slots per chunk, offset into opposite quadrants.
-  const cx = (b.minX + b.maxX) / 2;
-  const cz = (b.minZ + b.maxZ) / 2;
-  const slots: Array<[number, number]> = [
-    [cx - 12, cz - 12],
-    [cx + 12, cz + 12],
-  ];
-  for (const [sx, sz] of slots) {
-    const shell = SHELLS[Math.floor(rand() * SHELLS.length)];
-    const jitterX = sx + (rand() - 0.5) * 3;
-    const jitterZ = sz + (rand() - 0.5) * 3;
-    if (!clearOfRoads(jitterX, jitterZ, shell.w, shell.d)) continue;
-    emitShell(batch, shell, jitterX, jitterZ, rand() > 0.5);
+  for (const p of cityChunkBuildings(chunk)) {
+    emitShell(batch, p.shell, p.x, p.z, p.rot);
   }
 
-  emitParking(batch, b, rand);
+  // A separate stream, so prop placement cannot shift building placement.
+  emitParking(batch, b, mulberry32((chunk.seed ^ 0x9e3779b9) >>> 0));
 
   return batch.flush(parent, scope, `chunk_${chunk.coord.cx}_${chunk.coord.cz}`);
 }

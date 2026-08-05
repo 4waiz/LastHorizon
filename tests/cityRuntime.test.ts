@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { CityRuntime } from '../src/world/zones/CityRuntime';
-import { KERB_H, ROAD_HALF } from '../src/world/zones/CityBuilder';
+import { cityChunkBuildings, KERB_H, ROAD_HALF } from '../src/world/zones/CityBuilder';
 import { WORLD_MANIFEST } from '../src/world/zones/worldManifest';
 
 const market = WORLD_MANIFEST.zones.find((z) => z.id === 'city_old_market')!;
@@ -47,12 +47,52 @@ describe('CityRuntime', () => {
     expect(r.inBounds(99999, 0)).toBe(false);
   });
 
-  it('derives radar roads from the lane graph', () => {
+  it('draws roads spanning the whole district, not the lane skeleton', () => {
     const r = make();
-    const { roads, buildings } = r.mapData;
+    const { roads } = r.mapData;
     expect(roads.length).toBeGreaterThan(0);
-    expect(roads[0]).toHaveLength(2);
-    expect(buildings).toEqual([]);
+
+    // Each carriageway must cross the full zone. The lane graph is a six-node
+    // routing skeleton; drawing it produced a map with two short stubs.
+    const b = market.bounds;
+    const spans = roads.map((line) => {
+      const xs = line.map((p) => p.x);
+      const zs = line.map((p) => p.z);
+      return Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs));
+    });
+    const zoneSpan = Math.min(b.maxX - b.minX, b.maxZ - b.minZ);
+    for (const s of spans) expect(s).toBeGreaterThanOrEqual(zoneSpan);
+  });
+
+  it('reports building footprints for the whole district', () => {
+    const r = make();
+    const { buildings } = r.mapData;
+    // Previously empty, which is why the map had nothing on it.
+    expect(buildings.length).toBeGreaterThan(0);
+    for (const bld of buildings) {
+      expect(bld.r).toBeGreaterThan(0);
+      expect(Number.isFinite(bld.x) && Number.isFinite(bld.z)).toBe(true);
+    }
+  });
+
+  it('puts no building on a carriageway', () => {
+    const r = make();
+    for (const bld of r.mapData.buildings) {
+      // Same keepout the geometry uses, so map and world agree.
+      const onMain = Math.abs(bld.x) < ROAD_HALF;
+      const onSide = Math.abs(bld.z) < ROAD_HALF;
+      expect(onMain && onSide).toBe(false);
+    }
+  });
+
+  it('map footprints match the geometry placement exactly', () => {
+    // One source of truth: the map must not re-derive positions independently.
+    const chunk = market.chunks[0];
+    const placed = cityChunkBuildings(chunk);
+    const onMap = new CityRuntime(market).mapData.buildings;
+    for (const p of placed) {
+      expect(onMap.some((m) => Math.abs(m.x - p.x) < 1e-6 && Math.abs(m.z - p.z) < 1e-6)).toBe(true);
+    }
   });
 
   it('starts with nothing to collide with', () => {
