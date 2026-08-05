@@ -34,10 +34,14 @@ const PALETTE = {
   skyline: 0xa9b4bd,
 };
 
-/** Half-width of the carriageway, matching the village road for continuity. */
-const ROAD_HALF = 5.0;
-const SIDEWALK_W = 2.2;
-const KERB_H = 0.14;
+/**
+ * Street layout constants. Exported because `CityRuntime` answers ground
+ * height and surface hardness from the same numbers — two copies would drift
+ * and the player would hear grass while standing on tarmac.
+ */
+export const ROAD_HALF = 5.0;
+export const SIDEWALK_W = 2.2;
+export const KERB_H = 0.14;
 
 /**
  * Deterministic per-chunk RNG. Local, so chunk contents never depend on global
@@ -142,8 +146,8 @@ function slab(batch: Batch, color: number, r: Rect, y: number, thickness: number
 }
 
 /** Where the carriageways run, in world space. Lanes in the manifest match. */
-const MAIN_ROAD_X = 0;
-const SIDE_STREET_Z = 0;
+export const MAIN_ROAD_X = 0;
+export const SIDE_STREET_Z = 0;
 
 function onMainRoad(b: Bounds): boolean {
   return b.minX <= MAIN_ROAD_X + ROAD_HALF && b.maxX >= MAIN_ROAD_X - ROAD_HALF;
