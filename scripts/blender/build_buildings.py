@@ -32,61 +32,29 @@ import math  # noqa: E402
 # Shared building components
 # --------------------------------------------------------------------------
 
-#: How far a window frame stands proud of the wall it sits in. A frame is
-#: mostly *inside* the wall; only this thin reveal shows.
-WIN_REVEAL = 0.02
-
 def window(name, w, h, pos, facing="y", frame="window_frame",
-           glass="window_glass", panes=3, depth=0.10, out_dir=-1):
-    """Window set into the wall plane.
-
-    `pos` is a point on the *exterior* wall face. `out_dir` says which way that
-    face points along the facing axis: -1 for a wall at -Y or -X (the common
-    case, since these facades front the road), +1 for the opposite side.
-
-    The frame sits almost entirely inside the wall with only `WIN_REVEAL`
-    showing, and the glass and mullions recede behind it, which is what makes
-    the opening read as a hole rather than a panel.
-
-    This previously pushed every part *outward* from the face: the frame stood
-    ~6 cm proud as a floating slab, and the sill — 4 cm wider than the frame —
-    overhung it on both sides with nothing carrying it.
-    """
+           glass="window_glass", panes=3, depth=0.10):
+    """Recessed window: frame slab, glass, and vertical mullions."""
     x, y, z = pos
-    ft = depth * 1.9                    # frame thickness
-    fw = w + 0.16                       # frame outer width
-    # Centre offsets from the wall face; positive = into the wall.
-    #
-    # `_f` is a solid backing slab, not a hollow surround, so the glass and
-    # mullions must stay *in front* of it or it hides them. The whole assembly
-    # is simply shifted inward until the slab's outer face is flush with the
-    # wall: the glass then sits flush too, and the slab reads as the reveal
-    # behind it. Reordering instead of shifting is what buried the glass.
-    f_off = ft / 2                      # backing slab: outer face flush
-    g_off = f_off - ft / 2 + 0.026      # glass: flush, in front of the slab
-    m_off = 0.020                       # mullions: just proud of the glass
-    s_off = 0.040                       # sill: projects a little, supported
-    st = depth * 1.5                    # sill thickness
-    sz = z - h / 2 - 0.08               # sill sits at the base of the opening
     out = []
-
     if facing == "y":
-        out.append(box(name + "_f", (fw, ft, h + 0.16), (x, y - out_dir * f_off, z), frame))
-        out.append(box(name + "_g", (w, depth * 0.5, h), (x, y - out_dir * g_off, z), glass))
+        out.append(box(name + "_f", (w + 0.16, depth * 1.9, h + 0.16), (x, y + depth * 0.35, z), frame))
+        out.append(box(name + "_g", (w, depth * 0.5, h), (x, y - depth * 0.34, z), glass))
         for i in range(1, panes):
             mx = x - w / 2 + w * i / panes
             out.append(box(name + "_m%d" % i, (0.035, depth * 0.6, h),
-                           (mx, y - out_dir * m_off, z), frame))
-        # Sill matches the frame width exactly, so it cannot overhang into air.
-        out.append(box(name + "_s", (fw, st, 0.06), (x, y - out_dir * s_off, sz), frame))
+                           (mx, y - depth * 0.40, z), frame))
+        out.append(box(name + "_s", (w + 0.20, depth * 1.5, 0.06),
+                       (x, y - depth * 0.20, z - h / 2 - 0.08), frame))
     else:
-        out.append(box(name + "_f", (ft, fw, h + 0.16), (x - out_dir * f_off, y, z), frame))
-        out.append(box(name + "_g", (depth * 0.5, w, h), (x - out_dir * g_off, y, z), glass))
+        out.append(box(name + "_f", (depth * 1.9, w + 0.16, h + 0.16), (x + depth * 0.35, y, z), frame))
+        out.append(box(name + "_g", (depth * 0.5, w, h), (x - depth * 0.34, y, z), glass))
         for i in range(1, panes):
             my = y - w / 2 + w * i / panes
             out.append(box(name + "_m%d" % i, (depth * 0.6, 0.035, h),
-                           (x - out_dir * m_off, my, z), frame))
-        out.append(box(name + "_s", (st, fw, 0.06), (x - out_dir * s_off, y, sz), frame))
+                           (x - depth * 0.40, my, z), frame))
+        out.append(box(name + "_s", (depth * 1.5, w + 0.20, 0.06),
+                       (x - depth * 0.20, y, z - h / 2 - 0.08), frame))
     return out
 
 
@@ -104,43 +72,19 @@ def louvre_vent(name, w, h, pos, facing="y", slats=4):
     return out
 
 
-def door(name, w, h, pos, colour="door_navy", facing="y", out_dir=-1):
-    """Door set into the wall plane.
-
-    Same convention as `window`: `pos` is a point on the exterior wall face and
-    `out_dir` is which way that face points.
-
-    Previously every part was pushed outward from the face — the surround stood
-    5 cm proud, the leaf sat *entirely in front of* the wall rather than in the
-    opening, the handle floated ahead of the leaf, and the step was detached
-    with a 7 cm gap between it and the wall.
-    """
+def door(name, w, h, pos, colour="door_navy", facing="y"):
     x, y, z = pos
-    # Same shape of fix as `window`: `_f` is a solid backing slab, so the leaf
-    # stays in front of it and the whole assembly moves into the wall until
-    # the slab is flush. Pushing the leaf behind the slab hid the door
-    # entirely behind a blank panel.
-    ft = 0.30                           # backing slab thickness
-    f_off = ft / 2 + 0.05               # slab: fully buried behind the leaf
-    p_off = 0.05                        # leaf: flush with the wall face
-    h_off = -0.01                       # handle: proud of the leaf, as a knob
-    step_t = 0.34
-    s_off = -0.14                       # step: projects out, reaches the wall
     out = []
-
     if facing == "y":
-        out.append(box(name + "_f", (w + 0.18, ft, h + 0.12), (x, y - out_dir * f_off, z), "window_frame"))
-        out.append(box(name + "_p", (w, 0.10, h), (x, y - out_dir * p_off, z), colour))
+        out.append(box(name + "_f", (w + 0.18, 0.30, h + 0.12), (x, y + 0.10, z), "window_frame"))
+        out.append(box(name + "_p", (w, 0.10, h), (x, y - 0.05, z), colour))
         out.append(box(name + "_h", (0.05, 0.10, 0.16),
-                       (x + w * 0.34, y - out_dir * h_off, z), "metal_light"))
-        # Reaches back to the wall face, so the step is not floating.
-        out.append(box(name + "_step", (w + 0.44, step_t, 0.10),
-                       (x, y - out_dir * s_off, z - h / 2 + 0.05), "concrete"))
+                       (x + w * 0.34, y - 0.11, z), "metal_light"))
+        out.append(box(name + "_step", (w + 0.44, 0.34, 0.10),
+                       (x, y - 0.24, z - h / 2 + 0.05), "concrete"))
     else:
-        out.append(box(name + "_f", (ft, w + 0.18, h + 0.12), (x - out_dir * f_off, y, z), "window_frame"))
-        out.append(box(name + "_p", (0.10, w, h), (x - out_dir * p_off, y, z), colour))
-        out.append(box(name + "_h", (0.10, 0.05, 0.16),
-                       (x - out_dir * h_off, y + w * 0.34, z), "metal_light"))
+        out.append(box(name + "_f", (0.30, w + 0.18, h + 0.12), (x + 0.10, y, z), "window_frame"))
+        out.append(box(name + "_p", (0.10, w, h), (x - 0.05, y, z), colour))
     return out
 
 
@@ -229,8 +173,7 @@ def house_large():
     o += window("uw1", 2.05, 1.05, (-2.25, -D / 2, zf + 1.75), "y", panes=3)
     o += window("uw2", 1.15, 0.95, (0.95, -D / 2, zf + 1.70), "y", panes=2)
     o += window("uw3", 1.75, 1.00, (-W / 2, -1.0, zf + 1.75), "x", panes=3)
-    # +X wall: its exterior faces the other way, so the reveal must flip.
-    o += window("uw4", 1.45, 0.95, (W / 2, 0.8, zf + 1.72), "x", panes=2, out_dir=1)
+    o += window("uw4", 1.45, 0.95, (W / 2, 0.8, zf + 1.72), "x", panes=2)
     o += louvre_vent("uv1", 0.44, 0.78, (-0.55, -D / 2 - 0.01, zf + 1.68))
     o += louvre_vent("uv2", 0.40, 0.70, (2.65, -D / 2 - 0.01, zf + 1.60))
 
@@ -269,8 +212,7 @@ def house_small():
     o += door("d", 1.00, 2.10, (-0.55, -D / 2, 1.40), "door_navy")
     o += window("w1", 1.85, 1.00, (1.85, -D / 2, 1.85), "y", panes=3)
     o += window("w2", 1.55, 0.95, (-W / 2, 0.6, 1.85), "x", panes=3)
-    # +X wall: its exterior faces the other way, so the reveal must flip.
-    o += window("w3", 1.25, 0.90, (W / 2, -0.7, 1.82), "x", panes=2, out_dir=1)
+    o += window("w3", 1.25, 0.90, (W / 2, -0.7, 1.82), "x", panes=2)
     o += louvre_vent("v1", 0.40, 0.60, (-2.35, -D / 2 - 0.01, 2.10))
     return join_objects(o, "HouseSmall")
 
