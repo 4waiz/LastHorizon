@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { createRendererBackend, type RendererBackend } from './RendererBackend';
 import { Settings, QualityLevel, TimeMode } from './Settings';
 import type { TestSurface } from './TestMode';
+import { ZoneManager } from '../world/zones/ZoneManager';
+import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
 import { AssetManager } from './AssetManager';
@@ -37,6 +39,7 @@ export class Game {
   private readonly scene = new THREE.Scene();
   private readonly clock = new THREE.Clock();
   private renderer!: RendererBackend;
+  private zones!: ZoneManager;
   private camera!: ThirdPersonCamera;
   private post!: PostProcessing;
   private env!: Environment;
@@ -92,10 +95,40 @@ export class Game {
     this.env.setMode(this.settings.current.timeMode);
 
     this.portal = new WindowPortal(window.innerWidth, window.innerHeight);
-    this.world = new World(assets, preset);
-    this.world.portalMaterial = this.portal.material;
-    this.world.build();
-    this.scene.add(this.world.group);
+
+    // The village is now a zone. It is still the same hand-authored World,
+    // built exactly as before — the difference is that the ZoneManager owns
+    // it through a disposal scope, so leaving the zone is guaranteed to give
+    // its geometry, materials and textures back rather than relying on
+    // Game.dispose() remembering to.
+    this.zones = new ZoneManager(WORLD_MANIFEST, {
+      buildZone: (zone, scope) => {
+        if (zone.id !== 'village_coast') {
+          // City districts are declared in the manifest but have no geometry
+          // yet; entering one would produce an empty zone, so refuse rather
+          // than strand the player somewhere blank.
+          throw new Error(`zone ${zone.id} has no builder yet`);
+        }
+        const world = new World(assets, preset);
+        world.portalMaterial = this.portal.material;
+        world.build();
+        this.scene.add(world.group);
+        scope.addTeardown(
+          () => {
+            this.scene.remove(world.group);
+            world.dispose();
+          },
+          'geometry',
+          'village-world',
+        );
+        this.world = world;
+      },
+      buildChunk: () => {
+        // Authored zones do not stream; city chunk building lands with the
+        // city prototype.
+      },
+    });
+    await this.zones.enter('village_coast');
 
     loading.setProgress(0.94, 'the explorer');
     await frame();
@@ -624,7 +657,12 @@ export class Game {
     this.input.dispose();
     this.audio.dispose();
     this.player?.dispose();
-    this.world?.dispose();
+    // The active zone owns the world now: leaving it disposes the geometry
+    // and removes the group from the scene. Awaiting is not an option in a
+    // synchronous dispose, so report a failure rather than drop it silently.
+    void this.zones?.dispose().catch((err) => {
+      console.warn('[LastHorizon] zone teardown failed', err);
+    });
     this.env?.dispose();
     this.contact?.dispose();
     this.post?.dispose();
