@@ -14,7 +14,7 @@ function build(chunkIndex: number) {
   const parent = new THREE.Group();
   const scope = new DisposalRegistry('test');
   const meshes = buildCityChunk(market, market.chunks[chunkIndex], scope, parent);
-  return { parent, scope, meshes };
+  return { parent, scope, meshes: meshes.length };
 }
 
 /** Signature of everything the chunk emitted, for determinism comparison. */
@@ -70,7 +70,7 @@ describe('city chunk geometry', () => {
     for (const c of touching) {
       const parent = new THREE.Group();
       const scope = new DisposalRegistry('seam');
-      expect(buildCityChunk(market, c, scope, parent)).toBeGreaterThan(0);
+      expect(buildCityChunk(market, c, scope, parent).length).toBeGreaterThan(0);
       scope.dispose();
     }
   });
@@ -79,7 +79,7 @@ describe('city chunk geometry', () => {
     const parent = new THREE.Group();
     const scope = new DisposalRegistry('sky');
     const meshes = buildCitySkyline(market, scope, parent);
-    expect(meshes).toBeGreaterThan(0);
+    expect(meshes.length).toBeGreaterThan(0);
     scope.dispose();
     expect(parent.children.length).toBe(0);
   });

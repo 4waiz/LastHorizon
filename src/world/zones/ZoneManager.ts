@@ -64,9 +64,31 @@ export class ZoneManager {
       unload: (chunk) => this.unloadChunk(chunk),
     });
 
+    /*
+     * `TravelService` prepares the destination before releasing the source, so
+     * a failed journey is a no-op. `enter()` refuses to run while another zone
+     * is active, because two resident zones would double peak memory and make
+     * `active` ambiguous. Both rules are worth having and they conflict.
+     *
+     * Resolution: the check that actually prevents stranding — resolving a
+     * valid spawn in the destination — already runs before either hook. So the
+     * source is released inside `prepare`, immediately before building, and
+     * `release` becomes a no-op.
+     *
+     * The residual risk is narrow but real: if `enter()` throws *after*
+     * `leave()` has run, the player is left with no active zone. `enter()`
+     * disposes its own partial scope, so nothing leaks, but recovery would
+     * need a re-entry into the source zone. Not handled yet — see
+     * docs/PHASE_02_REPORT.md.
+     */
     this.travel = new TravelService(this.spawns, {
-      prepare: travelHooks?.prepare ?? ((id) => this.enter(id)),
-      release: travelHooks?.release ?? (() => this.leave()),
+      prepare:
+        travelHooks?.prepare ??
+        (async (id) => {
+          await this.leave();
+          await this.enter(id);
+        }),
+      release: travelHooks?.release ?? (async () => { /* done inside prepare */ }),
       ...(travelHooks?.fade ? { fade: travelHooks.fade } : {}),
     });
   }

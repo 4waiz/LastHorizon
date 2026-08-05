@@ -81,8 +81,8 @@ class Batch {
    * Materials come from `makeToon`, which caches by value — so the city reuses
    * the village's programs rather than compiling its own.
    */
-  flush(parent: THREE.Object3D, scope: DisposalRegistry, label: string): number {
-    let meshes = 0;
+  flush(parent: THREE.Object3D, scope: DisposalRegistry, label: string): THREE.Mesh[] {
+    const meshes: THREE.Mesh[] = [];
     for (const [color, parts] of this.byColor) {
       const merged = mergeGeometries(parts, false);
       // mergeGeometries clones; the sources are now dead weight.
@@ -94,7 +94,7 @@ class Batch {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       parent.add(mesh);
-      meshes++;
+      meshes.push(mesh);
 
       scope.addTeardown(
         () => {
@@ -315,7 +315,7 @@ export function buildCityChunk(
   chunk: ChunkManifest,
   scope: DisposalRegistry,
   parent: THREE.Object3D,
-): number {
+): THREE.Mesh[] {
   const rand = mulberry32(chunk.seed);
   const batch = new Batch();
   const b = chunk.bounds;
@@ -356,7 +356,7 @@ export function buildCitySkyline(
   zone: ZoneManifest,
   scope: DisposalRegistry,
   parent: THREE.Object3D,
-): number {
+): THREE.Mesh[] {
   const rand = mulberry32(zone.seed);
   const batch = new Batch();
   const cx = (zone.bounds.minX + zone.bounds.maxX) / 2;

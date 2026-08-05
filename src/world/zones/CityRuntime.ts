@@ -78,10 +78,17 @@ export class CityRuntime implements ZoneRuntime {
     return 0.6;
   }
 
-  inBounds(x: number, z: number): boolean {
+  /**
+   * An arrow property, not a method — deliberately, and matching `World`.
+   * `PlayerController` holds this as a bare function reference, so a method
+   * would lose `this` and throw on the first frame after arrival. The
+   * `ZoneRuntime` interface cannot express that difference, which is why it is
+   * called out here.
+   */
+  inBounds = (x: number, z: number): boolean => {
     const b = this.manifest.bounds;
     return x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ;
-  }
+  };
 
   // ------------------------------------------------------------- collision
 

@@ -5,6 +5,8 @@ import type { TestSurface } from './TestMode';
 import { DisposalRegistry } from './DisposalRegistry';
 import { ZoneManager } from '../world/zones/ZoneManager';
 import { buildCityChunk, buildCitySkyline } from '../world/zones/CityBuilder';
+import { CityRuntime } from '../world/zones/CityRuntime';
+import type { ZoneId } from '../world/zones/Manifest';
 import type { ZoneRuntime } from '../world/zones/ZoneRuntime';
 import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
@@ -45,6 +47,8 @@ export class Game {
   private zones!: ZoneManager;
   /** Parent for streamed district geometry; null while the village is active. */
   private zoneGroup: THREE.Group | null = null;
+  /** The active district runtime, if the player is in one. */
+  private city: CityRuntime | null = null;
 
   /**
    * Renderer-lifetime resources.
@@ -156,10 +160,20 @@ export class Game {
         group.name = `zone_${zone.id}`;
         this.scene.add(group);
         this.zoneGroup = group;
+
+        const city = new CityRuntime(zone, group);
+        this.city = city;
+        this.runtime = city;
+        // A district has no keepsakes and no interior cell. Clearing this is
+        // what makes the village-only paths unreachable rather than stale.
+        this.village = null;
+
         scope.addTeardown(
           () => {
             this.scene.remove(group);
+            city.dispose();
             if (this.zoneGroup === group) this.zoneGroup = null;
+            if (this.city === city) this.city = null;
           },
           'other',
           `zone-group:${zone.id}`,
@@ -168,8 +182,17 @@ export class Game {
       },
       buildChunk: (zone, chunk, scope) => {
         // Authored zones never stream, so this only fires for districts.
-        if (!this.zoneGroup) return;
-        buildCityChunk(zone, chunk, scope, this.zoneGroup);
+        if (!this.zoneGroup || !this.city) return;
+        const meshes = buildCityChunk(zone, chunk, scope, this.zoneGroup);
+        // Solid geometry has to reach collision too, or the player falls
+        // through a district that renders perfectly well.
+        const city = this.city;
+        city.addChunkColliders(chunk.id, meshes);
+        scope.addTeardown(
+          () => city.releaseChunkColliders(chunk.id),
+          'physics',
+          `chunk-colliders:${chunk.id}`,
+        );
       },
     });
     await this.zones.enter('village_coast');
@@ -342,6 +365,59 @@ export class Game {
   }
 
   /**
+   * Move the player to another zone.
+   *
+   * `TravelService` guarantees the destination is built and has a valid spawn
+   * before the source is released, so a failure here means nothing moved and
+   * nothing was torn down. Everything that pointed at the old zone is rebound
+   * afterwards, because `this.runtime` has changed underneath them.
+   */
+  async travelTo(to: ZoneId): Promise<boolean> {
+    const from = this.zones.activeZoneId;
+    if (!from || from === to || this.transitioning) return false;
+
+    this.transitioning = true;
+    this.input.releaseAll();
+    try {
+      const result = await this.zones.travel.travel({ to, context: { fromZone: from } });
+
+      if (!result.ok) {
+        this.hud.showToast('Not that way', result.message);
+        return false;
+      }
+
+      // Land on the resolved spawn, which may differ from the requested one if
+      // it was unavailable or unsafe.
+      const { spawn } = result;
+      const y = this.runtime.heightAt(spawn.x, spawn.z);
+      this.player.setLying(false);
+      this.player.setSitting(false);
+      this.player.setSpawn(new THREE.Vector3(spawn.x, y + 0.05, spawn.z), spawn.facing);
+      this.camera.resetBehind(this.player.lookTarget, spawn.facing);
+      this.camera.setMinDistance(3.0);
+      this.camera.setDistance(6.4);
+
+      // Leaving a zone leaves these pointing at content that no longer exists.
+      this.indoors = false;
+      this.sleeping = false;
+      this.activeInteractable = null;
+      this.hud.setPrompt(null);
+      this.player.controller.boundsEnabled = true;
+      this.audio.setZone('outdoor');
+
+      const zone = this.zones.activeZone;
+      if (zone) this.hud.showToast('Arrived', zone.displayName);
+      // Stream the first rings before handing control back, so the player does
+      // not spawn into an empty district.
+      await this.zones.update(spawn.x, spawn.z);
+      this.stepQuiet();
+      return true;
+    } finally {
+      this.transitioning = false;
+    }
+  }
+
+  /**
    * The only surface the `?e2e=1` test bridge is given. Deliberately a fixed
    * set of operations rather than a handle to the scene graph, so test mode
    * cannot grow into a general back door. Built here because the operations it
@@ -390,6 +466,13 @@ export class Game {
         };
       },
       collectedCount: () => this.village?.collectibles.count ?? 0,
+      // The bridge deals in plain strings; TravelService rejects an unknown
+      // zone at runtime ("there is no route to ..."), so this cannot smuggle
+      // an invalid id past validation.
+      travelTo: (id) => this.travelTo(id as ZoneId),
+      activeZoneId: () => this.zones.activeZoneId,
+      zoneDebug: () => this.zones.debugState(),
+      releaseInput: () => this.input.releaseAll(),
     };
   }
 

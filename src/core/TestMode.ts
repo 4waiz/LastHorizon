@@ -40,6 +40,20 @@ export interface TestSurface {
   isLying(): boolean;
   renderStats(): RenderStats;
   collectedCount(): number;
+  travelTo(zoneId: string): Promise<boolean>;
+  activeZoneId(): string | null;
+  zoneDebug(): ZoneDebugSnapshot;
+  releaseInput(): void;
+}
+
+export interface ZoneDebugSnapshot {
+  zoneId: string | null;
+  zoneName: string;
+  kind: string;
+  residentChunks: string[];
+  residentCount: number;
+  trackedResources: number;
+  travelling: boolean;
 }
 
 export interface RenderStats {
@@ -82,6 +96,11 @@ export interface LHTestBridge {
   sit(on: boolean): void;
   lie(on: boolean): void;
   openWardrobe(open: boolean): void;
+  /** Travel to another zone. Resolves false if the journey was refused. */
+  travelTo(zoneId: string): Promise<boolean>;
+  getActiveZone(): string | null;
+  /** Zone, resident chunks and tracked resources — for streaming assertions. */
+  getZoneDebug(): ZoneDebugSnapshot;
   /** Advance the simulation by a fixed number of 1/60 s steps. */
   settle(frames?: number): void;
   /**
@@ -199,12 +218,26 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
       surface.openWardrobe(open);
     },
 
+    travelTo(zoneId: string): Promise<boolean> {
+      return surface.travelTo(zoneId);
+    },
+
+    getActiveZone(): string | null {
+      return surface.activeZoneId();
+    },
+
+    getZoneDebug(): ZoneDebugSnapshot {
+      return surface.zoneDebug();
+    },
+
     settle(frames = 40): void {
       for (let i = 0; i < frames; i++) surface.step(FIXED_DT);
     },
 
     prepareShot(frames = 40): void {
       pinPresentation();
+      // Stale keys otherwise walk the player out of frame while settling.
+      surface.releaseInput();
       bridge.settle(frames);
     },
   };
