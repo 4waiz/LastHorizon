@@ -1,8 +1,16 @@
 # Phase 2 report — Zone streaming and engine boundaries
 
-**Status: INCOMPLETE.** Roughly a third of the phase is built, tested and
-committed. The rest is not started. This document says which is which, because
-a report that rounds partial work up to "done" is worse than no report.
+**Status: PARTIAL, deliberately.** The zone architecture, engine boundaries and
+city geometry are built and tested. Physics, navigation, traffic lanes and the
+debug overlay are **deferred to the phases that first need them**, recorded as
+debt in the 2026-08-06 update at the foot of this document.
+
+`Game.travelTo` is the one outstanding item that must land before a checkpoint
+can honestly be tagged, because without it the city is unreachable.
+
+This document says which is which. A report that rounds partial work up to
+"done" is worse than no report — particularly when the next phase opens with
+"continue from the clean checkpoint".
 
 **Date:** 2026-08-05
 **Base:** tag `phase-01-foundation`
@@ -132,3 +140,81 @@ resources that no registry knows about.
 
 Building the city first would mean authoring geometry against an integration
 that has never been exercised.
+
+---
+
+# Update — 2026-08-06
+
+Sections 1–4 above were written partway through. This section supersedes them
+where they disagree.
+
+## Landed since
+
+| Deliverable | State |
+| --- | --- |
+| `CityBuilder` — roads, sidewalks, crossings, four service shells, parking, streetlights, waterfront, skyline impostors | Built, unit-tested, **never seen in a browser** |
+| `ZoneRuntime` contract | Built; `World implements` it |
+| `Game` decoupled from `World` | 21 of 25 call sites go through the contract; 4 village-only members behind a narrowed type |
+| `CityRuntime` | Implements the contract — flat ground from the street layout, collision rebuilt as chunks stream |
+
+`npm run verify` green, **176 tests**.
+
+## Deliberately deferred out of Phase 2
+
+Recorded as debt rather than silently dropped. **None of these blocks Phase 3**,
+which needs the life clock, aging, modes and saves — not physics or navigation.
+
+| Deferred | Why it is safe to defer | Where it attaches |
+| --- | --- | --- |
+| `PhysicsWorld` + Rapier | No vehicles or dynamic bodies exist until Phase 5. Rapier 0.19.3 is installed and smoke-tested (ball rests at y=0.999). | `CollisionWorld`'s proxy geometry feeds both the BVH and a future Rapier static set |
+| Recast tiled navmesh | No NPCs until Phase 6. Blocked on generator config — `generateSoloNavMesh` returns "Failed to create Detour navmesh data"; the call matches the package's own `.d.ts`, so it is config, not API misuse. | Per zone/chunk, alongside `ChunkStreamer` |
+| Road lane graph runtime | No traffic until Phase 6. Lane data and dangling-edge validation already exist in the manifest. | `CityRuntime.mapData` already reads the graph |
+| World debug overlay | Diagnostic only. `ZoneManager.debugState()` already returns zone, resident chunks and tracked resources — nothing renders it. | HUD |
+| Playwright travel tests + heap snapshots | Needs `travelTo` first. The 20-round-trip assertion exists as a unit test at the object-ownership level. | `tests/e2e/` |
+| City geometry visual verification | Needs `travelTo` first. | — |
+
+## The one thing that must land before the checkpoint
+
+**`Game.travelTo(zoneId)`.** Without it the city is unreachable, so acceptance
+criterion 2 is false and the phase has no honest checkpoint.
+
+Scoped, with steps 1–3 already done and green:
+
+1. `await zones.travel.travel({ to, context })`.
+2. On success: swap `this.runtime`, clear `this.village`, rebind
+   `player.setSpawn`, `camera.resetBehind`, the minimap, and the audio zone
+   profile from `zone.audio`.
+3. On failure the player has not moved — `TravelService` already guarantees
+   this by preparing the destination before releasing the source.
+4. Expose it on `TestSurface` so `__LH_TEST__` can drive
+   village → city → village.
+
+Then tag **`phase-02-partial`** and begin Phase 3.
+
+Two traps found the hard way, worth carrying:
+
+- **Stale input walks the player out of frame during capture.** Call
+  `input.releaseAll()` before `teleport`; it belongs inside
+  `__LH_TEST__.prepareShot()`.
+- **`CityRuntime` has no interactables and no interior cell.** Any `Game` code
+  reached while a district is active must tolerate `this.village` being unset —
+  that narrowing is the whole point of the split, and it will surface the
+  moment travel works.
+
+## Known defect carried forward
+
+Window and door frames on `house_small`, `house_large` and `porch_house` stand
+~6 cm proud of the wall, and the sill is 4 cm wider than its frame so it
+overhangs unsupported. **Three attempts to fix this by repositioning offsets
+failed and were reverted** (`9950a39`); the geometry is back to its original
+state.
+
+The reason: **there is no opening cut in those walls.** The wall body is a
+solid box — `house_open()` and `room_interior()` use `boolean_diff` to cut real
+holes, but the other three do not, so the frame assembly must sit proud to be
+visible at all. Recessing it buries it inside solid geometry.
+
+The real fix is to cut openings with `boolean_diff` before `join_objects` and
+set the frames into them; design is in the session log. A cheap partial win
+that needs no wall surgery: narrow the sill from `w + 0.20` to `w + 0.16` so it
+stops overhanging.
