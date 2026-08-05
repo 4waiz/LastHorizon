@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createRendererBackend, type RendererBackend } from './RendererBackend';
 import { Settings, QualityLevel, TimeMode } from './Settings';
 import type { TestSurface } from './TestMode';
+import { DisposalRegistry } from './DisposalRegistry';
 import { ZoneManager } from '../world/zones/ZoneManager';
 import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
@@ -40,6 +41,18 @@ export class Game {
   private readonly clock = new THREE.Clock();
   private renderer!: RendererBackend;
   private zones!: ZoneManager;
+
+  /**
+   * Renderer-lifetime resources.
+   *
+   * Distinct from the zone scope on purpose. `PostProcessing` and
+   * `WindowPortal` own render targets sized to the *viewport*, and both are
+   * built before any world exists and outlive every zone change. Putting them
+   * in a zone scope would tear them down on travel and leave rendering broken
+   * on arrival. Zone content — the World, and the CollisionWorld it owns —
+   * belongs to the zone scope; these belong here.
+   */
+  private readonly gameScope = new DisposalRegistry('game');
   private camera!: ThirdPersonCamera;
   private post!: PostProcessing;
   private env!: Environment;
@@ -140,6 +153,15 @@ export class Game {
 
     this.contact = new ContactShadow(0.66);
     this.scene.add(this.contact.mesh);
+
+    // Everything above outlives zone changes, so record ownership here rather
+    // than relying on dispose() listing them by hand. Registration order is
+    // creation order; the registry releases in reverse.
+    this.gameScope.add(this.renderer, 'other', 'renderer');
+    this.gameScope.add(this.post, 'renderTarget', 'post-processing');
+    this.gameScope.add(this.env, 'other', 'environment');
+    this.gameScope.add(this.portal, 'renderTarget', 'window-portal');
+    this.gameScope.add(this.contact, 'geometry', 'contact-shadow');
 
     // Where the room appears to sit when you look out of it: on the east
     // verge, so the back window frames the road climbing toward the hill.
@@ -657,17 +679,21 @@ export class Game {
     this.input.dispose();
     this.audio.dispose();
     this.player?.dispose();
-    // The active zone owns the world now: leaving it disposes the geometry
-    // and removes the group from the scene. Awaiting is not an option in a
-    // synchronous dispose, so report a failure rather than drop it silently.
+
+    // The active zone owns the world (and, through it, the CollisionWorld).
+    // Awaiting is not an option in a synchronous dispose, so report a failure
+    // rather than drop it silently.
     void this.zones?.dispose().catch((err) => {
       console.warn('[LastHorizon] zone teardown failed', err);
     });
-    this.env?.dispose();
-    this.contact?.dispose();
-    this.post?.dispose();
-    this.portal?.dispose();
-    this.renderer?.dispose();
+
+    // Everything renderer-lifetime. Listed once, at creation, rather than
+    // duplicated here — a hand-maintained teardown list is exactly how a
+    // resource ends up released twice or not at all.
+    const report = this.gameScope.dispose();
+    if (report.errors.length) {
+      console.warn('[LastHorizon] game teardown had errors', report.errors);
+    }
   }
 }
 
