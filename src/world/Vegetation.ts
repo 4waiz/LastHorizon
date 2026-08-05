@@ -44,7 +44,9 @@ export class InstancedSet {
       geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(rootInverse, mesh.matrixWorld));
 
       const src = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-      const mat = toonFromImported(src, name);
+      // The only caller allowed to grant wind/fade: everything here really is
+      // vegetation, whereas `leaf_*` elsewhere is just a palette colour.
+      const mat = toonFromImported(src, name, { allowWind: true });
 
       const inst = new THREE.InstancedMesh(geo, mat, capacity);
       inst.castShadow = true;

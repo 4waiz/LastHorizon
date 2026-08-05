@@ -21,9 +21,11 @@
     "forceConsistentCasingInFileNames": true,
 
     "types": ["vite/client", "vitest/globals"],
-    "baseUrl": ".",
+    // No `baseUrl`: it is deprecated in TypeScript 6 and stops working in 7.
+    // Non-relative `paths` entries resolve against this file's directory,
+    // which is what `baseUrl: "."` was doing anyway.
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src", "tests", "vite.config.ts", "vitest.config.ts"]

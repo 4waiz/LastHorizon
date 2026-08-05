@@ -64,7 +64,9 @@ export class CollisionWorld {
     // Construct the BVH directly rather than via the prototype helper: that
     // helper only exists on whichever copy of THREE.BufferGeometry got
     // patched, and a duplicated three install would silently break it.
-    const bvh = new MeshBVH(merged, { maxLeafTris: 8 });
+    // `targetLeafSize` is three-mesh-bvh 0.9's name for what was `maxLeafTris`
+    // — a straight rename, same leaf-capacity threshold in buildTree.
+    const bvh = new MeshBVH(merged, { targetLeafSize: 8 });
     merged.boundsTree = bvh;
     this.bvh = bvh;
     this.collider = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ visible: false }));

@@ -1,2 +1,9 @@
 # Dev-only screenshot sink (see the lh-shot-sink plugin in vite.config.ts).
 .shots/
+
+# MCP server config — contains a live Context7 API key.
+.mcp.json
+
+# Playwright MCP scratch output: page snapshots, console logs, baseline shots.
+.playwright-mcp/
+

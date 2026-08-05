@@ -126,6 +126,10 @@ export default defineConfig({
     target: 'es2020',
     sourcemap: false,
     chunkSizeWarningLimit: 1400,
+    // Pinned to Vite 7 (Rollup), not Vite 8 (Rolldown) — see
+    // docs/adr/0002-vite-7-not-8.md. Vite 8 would require
+    // `rolldownOptions` + `advancedChunks.groups` instead of the object form
+    // below, which is still supported here.
     rollupOptions: {
       output: {
         manualChunks: {

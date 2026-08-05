@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { Renderer } from './Renderer';
+import { createRendererBackend, type RendererBackend } from './RendererBackend';
 import { Settings, QualityLevel, TimeMode } from './Settings';
+import type { TestSurface } from './TestMode';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
 import { AssetManager } from './AssetManager';
@@ -35,7 +36,7 @@ const DEBUG = import.meta.env.DEV;
 export class Game {
   private readonly scene = new THREE.Scene();
   private readonly clock = new THREE.Clock();
-  private renderer!: Renderer;
+  private renderer!: RendererBackend;
   private camera!: ThirdPersonCamera;
   private post!: PostProcessing;
   private env!: Environment;
@@ -73,7 +74,7 @@ export class Game {
   async start(loading: LoadingScreen): Promise<void> {
     const preset = this.settings.preset;
 
-    this.renderer = new Renderer(this.canvas, preset);
+    this.renderer = createRendererBackend(this.canvas, preset).backend;
     this.camera = new ThirdPersonCamera(window.innerWidth / window.innerHeight);
     this.post = new PostProcessing(this.renderer.renderer, this.scene, this.camera.camera);
 
@@ -250,6 +251,58 @@ export class Game {
 
   get debugPlayer(): Player {
     return this.player;
+  }
+
+  /**
+   * The only surface the `?e2e=1` test bridge is given. Deliberately a fixed
+   * set of operations rather than a handle to the scene graph, so test mode
+   * cannot grow into a general back door. Built here because the operations it
+   * forwards to are private.
+   */
+  testSurface(): TestSurface {
+    return {
+      setTimeMode: (mode) => this.applyTimeMode(mode),
+      jumpToTime: (t) => this.env.jumpTo(t),
+      getTime: () => this.env.time,
+      teleport: (x, y, z, facing) => {
+        this.player.motor.teleport(x, y, z);
+        this.player.controller.facing = facing;
+      },
+      groundAt: (x, z) => this.world.terrain.heightAt(x, z),
+      frameCamera: (facing, distance, pitch) => {
+        this.camera.resetBehind(this.player.lookTarget, facing);
+        this.camera.setDistance(distance);
+        if (pitch !== undefined) this.camera.pitch = pitch;
+      },
+      step: (dt) => {
+        this.update(dt);
+        this.render();
+      },
+      enterInterior: () => this.enterInterior(),
+      exitInterior: () => this.exitInterior(),
+      sit: (on) => this.sit(on),
+      setLying: (on) => this.player.setLying(on),
+      openWardrobe: (open) => this.hud.openWardrobe(open),
+      isIndoors: () => this.indoors,
+      isRunning: () => this.running,
+      playerPosition: () => this.player.position,
+      playerFacing: () => this.player.controller.facing,
+      playerState: () => this.player.state,
+      playerSpeed: () => this.player.speed,
+      isSitting: () => this.player.isSitting,
+      isLying: () => this.player.isLying,
+      renderStats: () => {
+        const i = this.renderer.renderer.info;
+        return {
+          drawCalls: i.render.calls,
+          triangles: i.render.triangles,
+          geometries: i.memory.geometries,
+          textures: i.memory.textures,
+          programs: i.programs?.length ?? 0,
+        };
+      },
+      collectedCount: () => this.world.collectibles.count,
+    };
   }
 
   private update(dt: number): void {

@@ -1,6 +1,7 @@
 import './style.css';
 import { Game } from './core/Game';
 import { LoadingScreen } from './ui/LoadingScreen';
+import { featureFlags } from './core/FeatureFlags';
 
 /** Entry point: boot the game behind the loading screen, fail visibly. */
 
@@ -40,6 +41,13 @@ async function boot(): Promise<void> {
   if (import.meta.env.DEV) {
     // Handle for manual inspection and deterministic frame capture.
     (window as unknown as { __lh: unknown }).__lh = game;
+  }
+
+  // Deterministic test bridge. Opt-in via ?e2e=1 only — a normal visit, in dev
+  // or production, never installs it.
+  if (featureFlags().e2e) {
+    const { installTestBridge } = await import('./core/TestMode');
+    installTestBridge(game.testSurface());
   }
 
   if (import.meta.hot) {

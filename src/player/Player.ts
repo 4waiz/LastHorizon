@@ -147,6 +147,10 @@ export class Player {
     return this.sitting;
   }
 
+  get isLying(): boolean {
+    return this.lying;
+  }
+
   get position(): THREE.Vector3 {
     return this.motor.position;
   }

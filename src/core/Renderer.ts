@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { QualityPreset } from './Settings';
+import type { RendererBackend, RendererKind } from './RendererBackend';
 
 /**
  * WebGL renderer setup.
@@ -8,7 +9,8 @@ import { QualityPreset } from './Settings';
  * hue shift ACES puts into warm sunlight, which matters when the whole look
  * depends on flat, authored colour.
  */
-export class Renderer {
+export class Renderer implements RendererBackend {
+  readonly kind: RendererKind = 'webgl2';
   readonly renderer: THREE.WebGLRenderer;
   readonly canvas: HTMLCanvasElement;
 

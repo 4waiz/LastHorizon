@@ -276,6 +276,7 @@ export function disposeMaterialCache(): void {
 export function toonFromImported(
   src: THREE.Material,
   nameHint = '',
+  opts: { allowWind?: boolean } = {},
 ): THREE.Material {
   const std = src as THREE.MeshStandardMaterial;
   const color = std.color ? std.color.clone() : new THREE.Color(0xcccccc);
@@ -284,13 +285,29 @@ export function toonFromImported(
   if (n.includes('lamp_glass')) {
     return makeLampMaterial('lamp_glass', color.getHex());
   }
-  const foliage =
+
+  /*
+   * `leaf_*` and friends are PALETTE COLOUR names in the Blender kit, not
+   * semantic foliage markers: book spines, a bed blanket, pens and framed
+   * pictures are all authored with `leaf_teal` / `leaf_mid`, and HouseLarge's
+   * dormer window box uses `leaf_mid` for its five 24 cm plants.
+   *
+   * Matching on the name alone therefore handed the tree-canopy wind shader
+   * to furniture and to building trim. The dormer plants sit ~6.5 m up, and
+   * the sway mask is keyed off *object-space* height against a 4.5 m
+   * reference, so they swung with over twice a full tree's amplitude — far
+   * enough out of the planter to read as detached geometry by the roof.
+   *
+   * Wind, occluder fade and double-siding are vegetation treatments, so only
+   * the vegetation path may opt in. Everything else renders solid.
+   */
+  const vegetationName =
     n.includes('leaf') || n.includes('palm_frond') || n.includes('bush');
-  const fadeable = foliage || n.includes('trunk');
+  const wind = opts.allowWind === true;
 
   return makeToon(color, {
-    kind: foliage ? 'foliage' : 'solid',
-    fadeable,
-    side: n.includes('palm_frond') ? THREE.DoubleSide : undefined,
+    kind: wind && vegetationName ? 'foliage' : 'solid',
+    fadeable: wind && (vegetationName || n.includes('trunk')),
+    side: wind && n.includes('palm_frond') ? THREE.DoubleSide : undefined,
   });
 }

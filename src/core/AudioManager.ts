@@ -179,9 +179,10 @@ export class AudioManager {
 
       const gain = ctx.createGain();
       gain.gain.value = 0;
-      let node: MediaElementAudioSourceNode | null = null;
       try {
-        node = ctx.createMediaElementSource(el);
+        // Scoped to the try: the routed node is never referenced afterwards,
+        // and a failure here is already handled by falling back to the pad.
+        const node = ctx.createMediaElementSource(el);
         node.connect(gain).connect(this.musicGain!);
       } catch (err) {
         console.warn(`[LastHorizon] could not route ${zone} track`, err);
