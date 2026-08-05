@@ -26,7 +26,9 @@
     "verify": "npm run typecheck && npm run lint && npm test && npm run build && npm run check:budgets"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "0.19.3",
     "gsap": "^3.12.5",
+    "recast-navigation": "0.43.1",
     "three": "0.185.1",
     "three-mesh-bvh": "0.9.14"
   },
