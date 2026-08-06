@@ -284,6 +284,11 @@ export class Game {
     // there is no mode-selection screen yet, so the save's own mode is
     // adopted. That is resuming, not mixing — the guard matters once the
     // player has actively chosen a mode.
+    // Reading a save can migrate it, and the phase rules say life must not
+    // advance during a migration. Blocking across the whole read is the simple
+    // correct choice: it cannot advance before the game is running anyway, and
+    // this keeps the rule true if resume is ever called mid-session.
+    this.life.block('saveMigration');
     try {
       const resumed = await this.saves.load('autosave');
       if (resumed.ok) {
@@ -297,6 +302,8 @@ export class Game {
     } catch (err) {
       // A broken save must never stop the game booting.
       console.warn('[LastHorizon] could not read the autosave', err);
+    } finally {
+      this.life.unblock('saveMigration');
     }
 
     loading.setProgress(1, 'the afternoon');
@@ -500,24 +507,38 @@ export class Game {
     if (this.handlingBirthday) return;
     this.handlingBirthday = true;
     try {
-      this.hud.showToast('Another year', `You are ${age} today.`);
-
-      // Autosave while the clock is stopped. This is the safe moment by
-      // construction: nothing can age, and the next birthday cannot arrive
-      // mid-write.
-      const result = await this.saves.save('autosave', this.captureSave('autosave'));
-      if (!result.ok) {
-        console.warn('[LastHorizon] birthday autosave failed', result.reason);
-        this.hud.showToast('Could not save', 'Your progress is still here, but not written.');
+      // Loop rather than handle one: acknowledging can immediately deliver
+      // the next birthday from carried overflow, and a re-entrant call would
+      // hit the guard above and be dropped silently.
+      let current = age;
+      for (;;) {
+        await this.deliverBirthday(current);
+        const next = this.life.pendingBirthday;
+        if (next === null) break;
+        current = next;
       }
-
-      // Appearance stage, NPC milestones and age-gated story checks attach
-      // here as those systems land.
-      await wait(60);
-      this.life.acknowledgeBirthday();
     } finally {
       this.handlingBirthday = false;
     }
+  }
+
+  /** One birthday: announce, autosave while the clock is stopped, age up. */
+  private async deliverBirthday(age: number): Promise<void> {
+    this.hud.showToast('Another year', `You are ${age} today.`);
+
+    // Autosave while the clock is stopped. This is the safe moment by
+    // construction: nothing can age, and the next birthday cannot arrive
+    // mid-write.
+    const result = await this.saves.save('autosave', this.captureSave('autosave'));
+    if (!result.ok) {
+      console.warn('[LastHorizon] birthday autosave failed', result.reason);
+      this.hud.showToast('Could not save', 'Your progress is still here, but not written.');
+    }
+
+    // Appearance stage, NPC milestones and age-gated story checks attach
+    // here as those systems land.
+    await wait(60);
+    this.life.acknowledgeBirthday();
   }
 
   private applyQuality(q: QualityLevel): void {
@@ -707,14 +728,17 @@ export class Game {
       activeZoneId: () => this.zones.activeZoneId,
       zoneDebug: () => this.zones.debugState(),
       releaseInput: () => this.input.releaseAll(),
-      advanceLife: (seconds) => {
+      // Awaited rather than fire-and-forget: a caller that immediately asks
+      // for another birthday would otherwise hit the in-progress guard and
+      // have it silently dropped.
+      advanceLife: async (seconds) => {
         const tick = this.life.advance(seconds);
-        if (tick.birthdayReached !== null) void this.handleBirthday(tick.birthdayReached);
+        if (tick.birthdayReached !== null) await this.handleBirthday(tick.birthdayReached);
         return this.lifeSnapshot();
       },
-      forceBirthday: () => {
+      forceBirthday: async () => {
         const reached = this.life.forceBirthday();
-        if (reached !== null) void this.handleBirthday(reached);
+        if (reached !== null) await this.handleBirthday(reached);
         return this.lifeSnapshot();
       },
       lifeState: () => this.lifeSnapshot(),

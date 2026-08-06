@@ -44,8 +44,8 @@ export interface TestSurface {
   activeZoneId(): string | null;
   zoneDebug(): ZoneDebugSnapshot;
   releaseInput(): void;
-  advanceLife(seconds: number): LifeSnapshot;
-  forceBirthday(): LifeSnapshot;
+  advanceLife(seconds: number): Promise<LifeSnapshot>;
+  forceBirthday(): Promise<LifeSnapshot>;
   lifeState(): LifeSnapshot;
   completeChapter(id: string): void;
   saveNow(slot: string): Promise<boolean>;
@@ -114,9 +114,13 @@ export interface LHTestBridge {
    * Age the character without waiting an hour of wall time. Feeds active
    * seconds straight to the life clock, so every gate still applies.
    */
-  advanceLife(seconds: number): LifeSnapshot;
-  /** Jump straight to the next birthday. */
-  forceBirthday(): LifeSnapshot;
+  advanceLife(seconds: number): Promise<LifeSnapshot>;
+  /**
+   * Jump straight to the next birthday. Resolves once it has been fully
+   * handled, so consecutive calls each land instead of being dropped by the
+   * in-progress guard.
+   */
+  forceBirthday(): Promise<LifeSnapshot>;
   getLifeState(): LifeSnapshot;
   /** Mark a story chapter complete, so age+chapter gates can be reached. */
   completeChapter(id: string): void;
@@ -246,11 +250,11 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
       surface.openWardrobe(open);
     },
 
-    advanceLife(seconds: number): LifeSnapshot {
+    advanceLife(seconds: number): Promise<LifeSnapshot> {
       return surface.advanceLife(seconds);
     },
 
-    forceBirthday(): LifeSnapshot {
+    forceBirthday(): Promise<LifeSnapshot> {
       return surface.forceBirthday();
     },
 
