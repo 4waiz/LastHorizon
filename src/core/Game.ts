@@ -406,6 +406,18 @@ export class Game {
     // synced so its collision is in place before anything can drive at it.
     if (featureFlags().testRoad) await this.buildTestRoad();
 
+    // The map reads the world each redraw rather than being handed a
+    // snapshot, so a driven vehicle moves on it and a found keepsake greys
+    // out without anything having to remember to push an update.
+    this.hud.setMapSource(this.runtime.mapData, () => ({
+      player: {
+        x: this.player.position.x,
+        z: this.player.position.z,
+        facing: this.player.controller.facing,
+      },
+      markers: this.mapMarkers(),
+    }));
+
     // Needs the HUD, because the wardrobe handler opens it.
     this.syncInteractables();
     // Somewhere for recovered vehicles to reappear: the verge by the house,
@@ -871,6 +883,7 @@ export class Game {
       // The radar captured its roads at construction; without this it keeps
       // drawing the village after travelling.
       this.minimap.setData(this.runtime.mapData);
+      this.hud.setMapData(this.runtime.mapData);
 
       // Leaving a zone leaves these pointing at content that no longer exists.
       this.indoors = false;
@@ -1110,6 +1123,10 @@ export class Game {
       this.player.motor.airTime,
       0.35 + this.env.dayFactor * 0.65,
     );
+
+    // 5b. the map, if it is open
+    if (this.input.consumeMap()) this.hud.toggleMap();
+    this.hud.updateMap();
 
     // 6. radar — hidden indoors, where it has nothing useful to show
     this.minimap.setVisible(!this.indoors);
@@ -1544,6 +1561,44 @@ export class Game {
       z: this.testRoadOrigin.z + mark.z,
       facing: mark.facing,
     };
+  }
+
+  /**
+   * Everything the map should mark.
+   *
+   * Built fresh each redraw. Keepsakes come from the village, which a district
+   * does not have, so this has to degrade rather than assert -- the same rule
+   * the radar follows.
+   */
+  private mapMarkers(): Array<{
+    x: number; z: number;
+    kind: 'keepsake' | 'vehicle' | 'home' | 'garage';
+    found?: boolean; label?: string;
+  }> {
+    const out: Array<{
+      x: number; z: number;
+      kind: 'keepsake' | 'vehicle' | 'home' | 'garage';
+      found?: boolean; label?: string;
+    }> = [];
+
+    for (const k of this.village?.keepsakeMarkers ?? []) {
+      out.push({ x: k.x, z: k.z, kind: 'keepsake', found: k.found });
+    }
+
+    const zone = this.zones.activeZoneId ?? 'village_coast';
+    for (const record of this.garage.inZone(zone)) {
+      out.push({
+        x: record.transform.x,
+        z: record.transform.z,
+        kind: 'vehicle',
+        label: record.kind,
+      });
+    }
+
+    const spot = this.garage.garageFor(zone);
+    if (spot) out.push({ x: spot.transform.x, z: spot.transform.z, kind: 'garage' });
+
+    return out;
   }
 
   /** Right whichever vehicle the player is standing closest to, within reach. */

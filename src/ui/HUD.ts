@@ -1,5 +1,18 @@
 import { NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
 import type { Dashboard } from '../vehicles/VehicleControls';
+import type { MinimapData } from './Minimap';
+import {
+  MAP_LEGEND,
+  clampScale,
+  drawMap,
+  fitToData,
+  mapToWorld,
+  scaleBarMetres,
+  worldToMap,
+  zoomAbout,
+  type MapMarker,
+  type MapView,
+} from './MapPanel';
 import { InputManager } from '../core/InputManager';
 import { clamp } from '../utils/MathUtils';
 import type { Outfit } from '../player/Player';
@@ -54,6 +67,20 @@ export class HUD {
   private dashFuel = $('dashFuel');
   private dashFuelWrap = $('dashFuelWrap');
   private dashHints = $('dashHints');
+  private mapPanel = $('mapPanel');
+  private mapCanvas = $<HTMLCanvasElement>('mapCanvas');
+  private mapScaleText = $('mapScaleText');
+
+  /** Where the map is looking. Kept between openings, like a real map. */
+  private mapView: MapView = { centreX: 0, centreZ: 0, scale: 1 };
+  private mapData: MinimapData = { roads: [], buildings: [] };
+  private mapFitted = false;
+  private mapDrag: { pointerId: number; x: number; y: number } | null = null;
+  /** Asked for each redraw, so the map is never stale. */
+  private mapSource: (() => {
+    player: { x: number; z: number; facing: number };
+    markers: MapMarker[];
+  }) | null = null;
   private wardrobe = $('wardrobe');
 
   private btnSound = $<HTMLButtonElement>('btnSound');
@@ -84,6 +111,7 @@ export class HUD {
 
     this.wireTiles();
     this.wireInfoPanel();
+    this.wireMap();
     this.wireWardrobe();
     if (this.isTouch) this.wireTouch();
     this.syncAll();
@@ -201,7 +229,9 @@ export class HUD {
     });
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        if (!this.info.hidden) this.openInfo(false);
+        // Innermost panel first: Esc should close what is actually on top.
+        if (!this.mapPanel.hidden) this.openMap(false);
+        else if (!this.info.hidden) this.openInfo(false);
         else if (document.pointerLockElement) document.exitPointerLock();
       }
     });
@@ -497,6 +527,149 @@ export class HUD {
       this.dashFuel.style.width = `${Math.round(readout.fuel * 100)}%`;
     }
     this.dashHints.textContent = readout.hints.join(' · ');
+  }
+
+  // ------------------------------------------------------------------- map
+
+  /** Where the map gets its world from. Set once by `Game`. */
+  setMapSource(
+    data: MinimapData,
+    source: () => { player: { x: number; z: number; facing: number }; markers: MapMarker[] },
+  ): void {
+    this.mapData = data;
+    this.mapSource = source;
+    this.mapFitted = false;
+  }
+
+  /** Point the map at another zone, the way the radar is repointed. */
+  setMapData(data: MinimapData): void {
+    this.mapData = data;
+    this.mapFitted = false;
+  }
+
+  get mapOpen(): boolean {
+    // `hidden` is `boolean | 'until-found'` in the current DOM types, so it
+    // needs coercing rather than passing straight through.
+    return this.mapPanel.hidden === false;
+  }
+
+  toggleMap(): void {
+    this.openMap(!this.mapOpen);
+  }
+
+  openMap(open: boolean): void {
+    this.mapPanel.hidden = !open;
+    if (!open) return;
+
+    // First opening frames the whole zone; after that the view is left where
+    // the player put it, which is what makes panning worth having.
+    if (!this.mapFitted) {
+      this.mapView = fitToData(this.mapData, this.mapCanvas.width, this.mapCanvas.height);
+      this.mapFitted = true;
+    }
+    this.drawMapNow();
+  }
+
+  /** Centre on the player without changing the zoom. */
+  centreMapOnPlayer(): void {
+    const at = this.mapSource?.().player;
+    if (!at) return;
+    this.mapView = { ...this.mapView, centreX: at.x, centreZ: at.z };
+    this.drawMapNow();
+  }
+
+  private drawMapNow(): void {
+    const ctx = this.mapCanvas.getContext('2d');
+    const src = this.mapSource?.();
+    if (!ctx || !src) return;
+
+    drawMap(
+      ctx,
+      this.mapData,
+      this.mapView,
+      src.player,
+      src.markers,
+      this.mapCanvas.width,
+      this.mapCanvas.height,
+    );
+    this.mapScaleText.textContent = `${scaleBarMetres(this.mapView)} m`;
+  }
+
+  /** Redraw while open, so a driven vehicle moves on the map. */
+  updateMap(): void {
+    if (!this.mapPanel.hidden) this.drawMapNow();
+  }
+
+  private wireMap(): void {
+    const legend = $('mapLegend');
+    legend.innerHTML = MAP_LEGEND.map(
+      (e) => `<li><i style="background:${e.colour}"></i>${e.label}</li>`,
+    ).join('');
+
+    $('mapClose').addEventListener('click', () => this.openMap(false));
+    $('mapCentre').addEventListener('click', () => this.centreMapOnPlayer());
+    $('mapFit').addEventListener('click', () => {
+      this.mapView = fitToData(this.mapData, this.mapCanvas.width, this.mapCanvas.height);
+      this.drawMapNow();
+    });
+    this.mapPanel.addEventListener('pointerdown', (e) => {
+      if (e.target === this.mapPanel) this.openMap(false);
+    });
+
+    // Drag to pan. Worked in canvas pixels rather than world metres so the map
+    // keeps up with the cursor exactly, at any zoom.
+    const canvas = this.mapCanvas;
+    canvas.addEventListener('pointerdown', (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      this.mapDrag = { pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+      canvas.classList.add('is-dragging');
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!this.mapDrag || e.pointerId !== this.mapDrag.pointerId) return;
+      // The canvas is CSS-scaled, so a screen pixel is not a canvas pixel.
+      const rect = canvas.getBoundingClientRect();
+      const ratio = canvas.width / Math.max(rect.width, 1);
+      const dx = (e.clientX - this.mapDrag.x) * ratio;
+      const dy = (e.clientY - this.mapDrag.y) * ratio;
+      this.mapDrag.x = e.clientX;
+      this.mapDrag.y = e.clientY;
+
+      this.mapView = {
+        ...this.mapView,
+        centreX: this.mapView.centreX - dx / this.mapView.scale,
+        centreZ: this.mapView.centreZ + dy / this.mapView.scale,
+      };
+      this.drawMapNow();
+    });
+    const endDrag = (e: PointerEvent) => {
+      if (this.mapDrag?.pointerId !== e.pointerId) return;
+      this.mapDrag = null;
+      canvas.classList.remove('is-dragging');
+    };
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const ratio = canvas.width / Math.max(rect.width, 1);
+      const anchor = {
+        x: (e.clientX - rect.left) * ratio,
+        y: (e.clientY - rect.top) * ratio,
+      };
+      this.mapView = zoomAbout(
+        this.mapView,
+        anchor,
+        e.deltaY < 0 ? 1.18 : 1 / 1.18,
+        canvas.width,
+        canvas.height,
+      );
+      this.drawMapNow();
+    }, { passive: false });
+
+    void clampScale;
+    void mapToWorld;
+    void worldToMap;
   }
 
   setPrompt(text: string | null): void {

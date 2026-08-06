@@ -47,6 +47,8 @@ export class InputManager {
   private jumpQueued = false;
   /** True once per press of the righting key. */
   private flipQueued = false;
+  /** True once per press of the map key. */
+  private mapQueued = false;
   private interactQueued = false;
   /** Touch or gamepad interact, which have no entry in `keys`. */
   private pointerInteractHeld = false;
@@ -147,6 +149,10 @@ export class InputManager {
       // Righting a vehicle. Harmless on foot, so it needs no mode check here.
       if (code === 'KeyR') {
         this.flipQueued = true;
+        e.preventDefault();
+      }
+      if (code === 'KeyM') {
+        this.mapQueued = true;
         e.preventDefault();
       }
       if (code in MOVE_KEYS || code === 'Space') e.preventDefault();
@@ -285,6 +291,17 @@ export class InputManager {
     this.flipQueued = true;
   }
 
+  /** True exactly once per press of M. */
+  consumeMap(): boolean {
+    if (!this.mapQueued) return false;
+    this.mapQueued = false;
+    return true;
+  }
+
+  queueMap(): void {
+    this.mapQueued = true;
+  }
+
   /** True exactly once per jump press. */
   consumeJump(): boolean {
     if (!this.jumpQueued) return false;
@@ -351,6 +368,7 @@ export class InputManager {
     this.pointerId = -1;
     this.jumpQueued = false;
     this.flipQueued = false;
+    this.mapQueued = false;
     this.interactQueued = false;
     this.pointerInteractHeld = false;
     this.gamepadInteractHeld = false;
