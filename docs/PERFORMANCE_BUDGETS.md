@@ -60,20 +60,34 @@ cliff immediately, but it fragments batching.
 
 ## Bundle budget
 
-Measured after the Phase 1 modernization (three r185, Vite 7).
+Measured after Phase 4. The baseline column is pre-Phase-1 (three r169, Vite 5);
+"Phase 1" is the figure that column was first compared against.
 
-| Artefact | Baseline (r169/Vite 5) | Current | Budget (raw) |
-| --- | --- | --- | --- |
-| `three-*.js` | 573.51 kB | 621.74 kB | ≤ 700 kB |
-| `index-*.js` | 204.62 kB | 208.28 kB | ≤ 260 kB |
-| `gsap-*.js` | 70.44 kB | 70.04 kB | ≤ 90 kB |
-| `bvh-*.js` | 48.82 kB | 56.59 kB | ≤ 75 kB |
-| `index-*.css` | 15.47 kB | 15.46 kB | ≤ 24 kB |
-| **JS total** | **897.4 kB** | **956.7 kB** | **≤ 1,100 kB** |
-| **JS total, gzip** | 253.3 kB | 269.1 kB | ≤ 320 kB |
+| Artefact | Baseline (r169/Vite 5) | Phase 1 | Current | Budget (raw) |
+| --- | --- | --- | --- | --- |
+| `three-*.js` | 573.51 kB | 621.74 kB | 623.67 kB | ≤ 700 kB |
+| `index-*.js` | 204.62 kB | 208.28 kB | 281.92 kB | ≤ 300 kB |
+| `gsap-*.js` | 70.44 kB | 70.04 kB | 70.04 kB | ≤ 90 kB |
+| `bvh-*.js` | 48.82 kB | 56.59 kB | 56.59 kB | ≤ 75 kB |
+| `index-*.css` | 15.47 kB | 15.46 kB | 15.69 kB | ≤ 24 kB |
+| **JS total** | **897.4 kB** | **956.7 kB** | **1,032.2 kB** | **≤ 1,100 kB** |
+| **JS total, gzip** | 253.3 kB | 269.1 kB | 293.4 kB | ≤ 320 kB |
 
 The three.js upgrade cost ~48 kB raw / ~12 kB gzip. Accepted: it removed all
 five npm audit vulnerabilities and the duplicate-instance warning.
+
+### The app chunk budget, raised from 260 kB to 300 kB in Phase 4
+
+Phases 2–4 put roughly 74 kB of new gameplay code in the app chunk, and none of
+it is separable: zone streaming and the city runtime, three clocks, the
+versioned save service, gates, the interaction system, inventory, equipment,
+needs, age stages and the appearance rig. It is all reached from the first
+frame, so code-splitting it would trade bundle size for a stall on load.
+
+300 kB is deliberately close — about 9% of headroom. The next phase that wants
+more has to come back and justify it here rather than absorb it quietly. If it
+needs to go much higher, the answer is probably to split the city runtime out
+behind the zone-travel boundary, where a load pause is already expected.
 
 ## Asset budget
 

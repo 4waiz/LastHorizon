@@ -384,6 +384,8 @@ export class Game {
     this.hud.show();
     this.audio.start();
     this.audio.setMuted(this.settings.current.muted);
+    this.applyNeedsSettings();
+    this.gameScope.addTeardown(this.settings.onChange(() => this.applyNeedsSettings()));
 
     window.addEventListener('resize', this.onResize);
     document.addEventListener('visibilitychange', this.onVisibility);
@@ -875,6 +877,11 @@ export class Game {
       pressInteract: (held: boolean) => this.input.setInteractHeld(held),
       needsState: () => this.needs.toJSON(),
       appearanceState: () => this.player.appearance.snapshot(),
+      playGesture: (name: string) => this.player.playGesture(name),
+      gestureState: () => ({
+        playing: this.player.gesture,
+        weight: this.player.animator?.overlayWeight ?? 0,
+      }),
       inventoryState: () => this.inventory.toJSON(),
       completeChapter: (id) => {
         this.completedChapters.add(id);
@@ -978,6 +985,19 @@ export class Game {
     for (const it of worldInteractables(this.runtime.interactables, this.interactionHandlers)) {
       this.interactions.register(it);
     }
+  }
+
+  /**
+   * Push the accessibility options onto the needs.
+   *
+   * Bound to `Settings.onChange` rather than read per frame, so turning a need
+   * off takes effect immediately and `Needs` stays the only thing that knows
+   * what "off" means: it leaves the value where it was rather than topping it
+   * up, so switching back on resumes instead of granting a free refill.
+   */
+  private applyNeedsSettings(): void {
+    const s = this.settings.current;
+    this.needs.configure({ enabled: s.needsEnabled, decayScale: s.needsDecay });
   }
 
   /** What actions are allowed to read when deciding whether they can run. */

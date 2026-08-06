@@ -1,4 +1,4 @@
-import { QualityLevel, Settings, TimeMode } from '../core/Settings';
+import { NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
 import { InputManager } from '../core/InputManager';
 import { clamp } from '../utils/MathUtils';
 import type { Outfit } from '../player/Player';
@@ -157,10 +157,31 @@ export class HUD {
     }
   }
 
+  /**
+   * The needs toggles.
+   *
+   * Each is an independent on/off, so this is a multi-select segment rather
+   * than the mutually-exclusive ones above — turning hunger off must not turn
+   * mood back on.
+   */
+  private syncNeeds(): void {
+    const { needsEnabled, needsDecay } = this.settings.current;
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setNeeds button')) {
+      const id = b.dataset.need as NeedId;
+      const on = needsEnabled[id] === true;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', String(on));
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setNeedsDecay button')) {
+      b.classList.toggle('is-on', Number(b.dataset.decay) === needsDecay);
+    }
+  }
+
   private syncAll(): void {
     this.syncSound();
     this.syncQuality();
     this.syncTime();
+    this.syncNeeds();
   }
 
   // ---------------------------------------------------------- info panel
@@ -196,6 +217,19 @@ export class HUD {
         this.settings.setTimeMode(m);
         this.cb.onTimeMode(m);
         this.syncTime();
+      });
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setNeeds button')) {
+      b.addEventListener('click', () => {
+        const id = b.dataset.need as NeedId;
+        this.settings.setNeedEnabled(id, !this.settings.current.needsEnabled[id]);
+        this.syncNeeds();
+      });
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setNeedsDecay button')) {
+      b.addEventListener('click', () => {
+        this.settings.setNeedsDecay(Number(b.dataset.decay));
+        this.syncNeeds();
       });
     }
     $('setReset').addEventListener('click', () => {

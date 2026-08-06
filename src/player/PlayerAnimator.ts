@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp } from '../utils/MathUtils';
+import { AnimationLayers } from './AnimationLayers';
 import { PlayerState } from './PlayerStateMachine';
 
 /**
@@ -64,6 +65,16 @@ export class PlayerAnimator {
 
   readonly missing: string[] = [];
 
+  /**
+   * Upper-body overlays, on the same mixer.
+   *
+   * Composed rather than substituted: locomotion works and is not worth
+   * rewriting to gain an overlay. `AnimationLayers` is used for its `additive`
+   * layer alone, which converts a *clone* of the clip so the version this class
+   * plays normally is untouched.
+   */
+  private readonly overlay: AnimationLayers;
+
   constructor(root: THREE.Object3D, clips: THREE.AnimationClip[]) {
     this.mixer = new THREE.AnimationMixer(root);
     // The glTF splits the body by material, so the morph lands on whichever
@@ -83,6 +94,7 @@ export class PlayerAnimator {
     for (const name of Object.values(CLIP_FOR)) {
       if (!this.actions.has(name)) this.missing.push(name);
     }
+    this.overlay = new AnimationLayers(this.mixer, clips);
   }
 
   get available(): string[] {
@@ -136,8 +148,35 @@ export class PlayerAnimator {
       this.current.setEffectiveTimeScale(rate);
     }
 
-    this.mixer.update(dt);
+    // Steps the mixer itself, after ramping the overlay's weight -- so this
+    // must not also call mixer.update, or every clip runs at double speed.
+    this.overlay.update(dt);
     this.updateBlink(dt);
+  }
+
+  /**
+   * Start an upper-body overlay: Wave, CarryBox, UsePhone.
+   *
+   * These key only the chest, neck, head and arms and are played additively, so
+   * they run over whatever the legs are doing rather than replacing it. Returns
+   * false for an unknown clip, so a missing overlay degrades to no gesture.
+   */
+  playOverlay(name: string, fadeSeconds = 0.25, loop = true): boolean {
+    if (!this.overlay.play('additive', name, { loop, fadeSeconds })) return false;
+    this.overlay.setWeight('additive', 1, fadeSeconds);
+    return true;
+  }
+
+  stopOverlay(fadeSeconds = 0.25): void {
+    this.overlay.stop('additive', fadeSeconds);
+  }
+
+  get overlayPlaying(): string | null {
+    return this.overlay.playing('additive');
+  }
+
+  get overlayWeight(): number {
+    return this.overlay.weight('additive');
   }
 
   /**
@@ -169,6 +208,7 @@ export class PlayerAnimator {
   }
 
   dispose(): void {
+    this.overlay.dispose();
     this.mixer.stopAllAction();
     for (const a of this.actions.values()) this.mixer.uncacheAction(a.getClip());
     this.actions.clear();

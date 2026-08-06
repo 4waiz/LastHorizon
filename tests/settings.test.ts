@@ -5,7 +5,9 @@ import {
   QUALITY_ORDER,
   detectQuality,
   DeviceInfo,
+  NEED_IDS as SETTINGS_NEED_IDS,
 } from '../src/core/Settings';
+import { NEED_IDS } from '../src/player/Needs';
 
 /** In-memory Storage stand-in so tests never touch the real localStorage. */
 class MemoryStorage implements Storage {
@@ -147,5 +149,100 @@ describe('Settings', () => {
     const s = new Settings(null);
     expect(() => s.setQuality('high')).not.toThrow();
     expect(s.current.quality).toBe('high');
+  });
+});
+
+describe('needs accessibility options', () => {
+  it('tracks every need by default', () => {
+    const s = new Settings(new MemoryStorage());
+    expect(s.current.needsEnabled).toEqual({
+      hunger: true, energy: true, cleanliness: true, mood: true,
+    });
+    expect(s.current.needsDecay).toBe(1);
+  });
+
+  it('toggles one need without disturbing the others', () => {
+    const s = new Settings(new MemoryStorage());
+    s.setNeedEnabled('hunger', false);
+    expect(s.current.needsEnabled.hunger).toBe(false);
+    expect(s.current.needsEnabled.mood).toBe(true);
+  });
+
+  it('persists and reads back', () => {
+    const store = new MemoryStorage();
+    const a = new Settings(store);
+    a.setNeedEnabled('cleanliness', false);
+    a.setNeedsDecay(0.5);
+
+    const b = new Settings(store);
+    expect(b.current.needsEnabled.cleanliness).toBe(false);
+    expect(b.current.needsEnabled.hunger).toBe(true);
+    expect(b.current.needsDecay).toBe(0.5);
+  });
+
+  it('clamps the decay scale', () => {
+    const s = new Settings(new MemoryStorage());
+    s.setNeedsDecay(-5);
+    expect(s.current.needsDecay).toBe(0);
+    s.setNeedsDecay(99);
+    expect(s.current.needsDecay).toBe(2);
+    s.setNeedsDecay(Number.NaN);
+    expect(s.current.needsDecay).toBe(2);
+  });
+
+  it('fills in a stored blob that is missing a need', () => {
+    // A save written before a need existed must not switch the rest off.
+    const store = new MemoryStorage();
+    store.setItem(
+      'lasthorizon.settings.v1',
+      JSON.stringify({ needsEnabled: { hunger: false }, needsDecay: 1 }),
+    );
+    const s = new Settings(store);
+    expect(s.current.needsEnabled.hunger).toBe(false);
+    expect(s.current.needsEnabled.energy).toBe(true);
+    expect(s.current.needsEnabled.mood).toBe(true);
+  });
+
+  it('ignores a need in storage that no longer exists', () => {
+    const store = new MemoryStorage();
+    store.setItem(
+      'lasthorizon.settings.v1',
+      JSON.stringify({ needsEnabled: { hunger: true, warmth: false } }),
+    );
+    const s = new Settings(store);
+    expect(Object.keys(s.current.needsEnabled).sort()).toEqual([
+      'cleanliness', 'energy', 'hunger', 'mood',
+    ]);
+  });
+
+  it('survives a garbage value without losing the rest of the settings', () => {
+    const store = new MemoryStorage();
+    store.setItem(
+      'lasthorizon.settings.v1',
+      JSON.stringify({ quality: 'low', needsEnabled: 'yes please', needsDecay: 'fast' }),
+    );
+    const s = new Settings(store);
+    expect(s.current.quality).toBe('low');
+    expect(s.current.needsEnabled.hunger).toBe(true);
+    expect(s.current.needsDecay).toBe(1);
+  });
+
+  it('notifies listeners so the game can re-apply them', () => {
+    const s = new Settings(new MemoryStorage());
+    let seen = 0;
+    s.onChange(() => seen++);
+    s.setNeedEnabled('energy', false);
+    s.setNeedsDecay(0);
+    expect(seen).toBe(2);
+    // No-ops must not churn.
+    s.setNeedEnabled('energy', false);
+    s.setNeedsDecay(0);
+    expect(seen).toBe(2);
+  });
+
+  it('keeps the NeedId mirror in step with Needs.ts', () => {
+    // Settings cannot import gameplay code, so the union is duplicated. This
+    // is the only thing stopping the two drifting apart.
+    expect([...SETTINGS_NEED_IDS].sort()).toEqual([...NEED_IDS].sort());
   });
 });

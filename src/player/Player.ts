@@ -99,6 +99,25 @@ export class Player {
     }
   }
 
+  /**
+   * Start or stop an upper-body gesture over whatever the legs are doing.
+   *
+   * Wave, CarryBox and UsePhone ship in the GLB. The gameplay that triggers
+   * them arrives later — greeting an NPC in Phase 6, holding handlebars in
+   * Phase 5 — so for now this is the seam they hang off.
+   */
+  playGesture(name: string): boolean {
+    return this.animator?.playOverlay(name) ?? false;
+  }
+
+  stopGesture(): void {
+    this.animator?.stopOverlay();
+  }
+
+  get gesture(): string | null {
+    return this.animator?.overlayPlaying ?? null;
+  }
+
   /** Recolour a slot and persist the whole outfit. */
   setOutfit(patch: Partial<Outfit>): void {
     Object.assign(this.outfit, patch);

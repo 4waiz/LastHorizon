@@ -100,10 +100,25 @@ export function detectQuality(d: DeviceInfo = readDevice()): QualityLevel {
 
 export type TimeMode = 'cycle' | 'day' | 'dusk' | 'night';
 
+/** Mirrors `NeedId` in src/player/Needs.ts, which must not be imported here:
+ *  Settings is loaded before the player exists and has no other dependency
+ *  on gameplay code. `settings.test.ts` keeps the two in step. */
+export type NeedId = 'hunger' | 'energy' | 'cleanliness' | 'mood';
+export const NEED_IDS: readonly NeedId[] = ['hunger', 'energy', 'cleanliness', 'mood'];
+
 export interface SettingsState {
   quality: QualityLevel;
   muted: boolean;
   timeMode: TimeMode;
+  /**
+   * Soft-need accessibility. Off means a need neither decays nor penalises;
+   * `needsDecay` scales how fast the enabled ones drain, 0 freezing them.
+   *
+   * These are accessibility options, not difficulty: someone who finds a drain
+   * bar stressful should be able to switch it off and still play the game.
+   */
+  needsEnabled: Record<NeedId, boolean>;
+  needsDecay: number;
 }
 
 const STORAGE_KEY = 'lasthorizon.settings.v1';
@@ -123,6 +138,8 @@ export class Settings {
       quality: detectQuality(),
       muted: false,
       timeMode: 'cycle',
+      needsEnabled: { hunger: true, energy: true, cleanliness: true, mood: true },
+      needsDecay: 1,
       ...defaults,
       ...this.read(),
     };
@@ -139,6 +156,21 @@ export class Settings {
       if (typeof parsed.muted === 'boolean') out.muted = parsed.muted;
       if (parsed.timeMode && ['cycle', 'day', 'dusk', 'night'].includes(parsed.timeMode)) {
         out.timeMode = parsed.timeMode;
+      }
+      if (parsed.needsEnabled && typeof parsed.needsEnabled === 'object') {
+        // Per key, so a stored blob missing one -- or carrying a need that no
+        // longer exists -- cannot switch the others off or add a phantom.
+        const e: Record<NeedId, boolean> = {
+          hunger: true, energy: true, cleanliness: true, mood: true,
+        };
+        for (const id of NEED_IDS) {
+          const v = parsed.needsEnabled[id];
+          if (typeof v === 'boolean') e[id] = v;
+        }
+        out.needsEnabled = e;
+      }
+      if (typeof parsed.needsDecay === 'number' && Number.isFinite(parsed.needsDecay)) {
+        out.needsDecay = Math.min(2, Math.max(0, parsed.needsDecay));
       }
       return out;
     } catch {
@@ -195,6 +227,21 @@ export class Settings {
   toggleMuted(): boolean {
     this.setMuted(!this.state.muted);
     return this.state.muted;
+  }
+
+  setNeedEnabled(id: NeedId, on: boolean): void {
+    if (this.state.needsEnabled[id] === on) return;
+    this.state.needsEnabled = { ...this.state.needsEnabled, [id]: on };
+    this.emit();
+  }
+
+  /** 0 freezes every need; 1 is normal. Clamped to 0..2. */
+  setNeedsDecay(scale: number): void {
+    if (!Number.isFinite(scale)) return;
+    const v = Math.min(2, Math.max(0, scale));
+    if (this.state.needsDecay === v) return;
+    this.state.needsDecay = v;
+    this.emit();
   }
 
   setTimeMode(m: TimeMode): void {

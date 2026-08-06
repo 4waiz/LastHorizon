@@ -17,7 +17,9 @@ const KB = 1024;
 /** Matched against dist/assets by filename prefix. */
 const BUNDLE_BUDGETS = [
   { prefix: 'three-', ext: '.js', maxKB: 700, label: 'three chunk' },
-  { prefix: 'index-', ext: '.js', maxKB: 260, label: 'app chunk' },
+  // Raised from 260 in Phase 4; see "Bundle budget" in
+  // docs/PERFORMANCE_BUDGETS.md for what was added and why.
+  { prefix: 'index-', ext: '.js', maxKB: 300, label: 'app chunk' },
   { prefix: 'gsap-', ext: '.js', maxKB: 90, label: 'gsap chunk' },
   { prefix: 'bvh-', ext: '.js', maxKB: 75, label: 'bvh chunk' },
   { prefix: 'index-', ext: '.css', maxKB: 24, label: 'stylesheet' },

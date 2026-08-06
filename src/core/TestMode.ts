@@ -52,6 +52,8 @@ export interface TestSurface {
   pressInteract(held: boolean): void;
   needsState(): Record<string, number>;
   appearanceState(): AppearanceSnapshot;
+  playGesture(name: string): boolean;
+  gestureState(): { playing: string | null; weight: number };
   inventoryState(): ReadonlyArray<{ id: string; count: number }>;
   completeChapter(id: string): void;
   saveNow(slot: string): Promise<boolean>;
@@ -161,6 +163,12 @@ export interface LHTestBridge {
    * not the values that were requested.
    */
   getAppearance(): AppearanceSnapshot;
+
+  /** Start an upper-body overlay clip. False if the clip is not in the GLB. */
+  playGesture(name: string): boolean;
+
+  /** Which overlay is running, and how far its weight has ramped. */
+  getGesture(): { playing: string | null; weight: number };
 
   /** Carried stacks, for save round-trip assertions. */
   getInventory(): ReadonlyArray<{ id: string; count: number }>;
@@ -331,6 +339,14 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     getAppearance(): AppearanceSnapshot {
       return surface.appearanceState();
+    },
+
+    playGesture(name: string): boolean {
+      return surface.playGesture(name);
+    },
+
+    getGesture(): { playing: string | null; weight: number } {
+      return surface.gestureState();
     },
 
     getInventory(): ReadonlyArray<{ id: string; count: number }> {

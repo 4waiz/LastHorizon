@@ -789,6 +789,12 @@ body {
   font-size: 13.5px;
 }
 
+.settings__note {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
 .pill {
   min-width: 88px;
   padding: 7px 15px;
@@ -837,6 +843,23 @@ body {
   color: var(--ink);
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(70, 60, 45, 0.16);
+}
+
+/* Independent toggles rather than one-of-N, so they wrap on a narrow panel
+   instead of squeezing four labels onto a single row. */
+.seg--multi {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.seg--multi button {
+  padding: 6px 10px;
+}
+
+/* Off reads as struck through, so the state is not carried by colour alone. */
+.seg--multi button:not(.is-on) {
+  text-decoration: line-through;
+  opacity: 0.62;
 }
 
 .credits p {
