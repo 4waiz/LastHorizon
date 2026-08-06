@@ -5,6 +5,7 @@ import { CharacterMotor, DEFAULT_MOTOR } from '../physics/CharacterMotor';
 import { PlayerAnimator } from './PlayerAnimator';
 import { PlayerController } from './PlayerController';
 import { PlayerState, PlayerStateMachine } from './PlayerStateMachine';
+import { AgeAppearance } from './AgeAppearance';
 import { makeToon, toonFromImported } from '../graphics/ToonMaterial';
 
 /** Wardrobe slots, keyed by the Blender material name they came from. */
@@ -40,6 +41,8 @@ export class Player {
   readonly controller: PlayerController;
   readonly states = new PlayerStateMachine();
   readonly animator: PlayerAnimator | null;
+  /** Age proportions on the rig. Empty when the capsule fallback is used. */
+  readonly appearance: AgeAppearance;
 
   /** Roughly chest height — what the camera actually looks at. */
   readonly lookTarget = new THREE.Vector3();
@@ -83,6 +86,7 @@ export class Player {
       this.applyOutfit();
       this.animator = new PlayerAnimator(this.model, clips);
       this.animator.play('idle', true);
+      this.appearance = new AgeAppearance(this.model);
     } else {
       // Fall back to a visible capsule rather than an invisible player.
       const geo = new THREE.CapsuleGeometry(DEFAULT_MOTOR.radius, DEFAULT_MOTOR.height - DEFAULT_MOTOR.radius * 2, 4, 10);
@@ -91,6 +95,7 @@ export class Player {
       mesh.castShadow = true;
       this.root.add(mesh);
       this.animator = null;
+      this.appearance = new AgeAppearance(null);
     }
   }
 
@@ -208,6 +213,7 @@ export class Player {
     if (this.sitting) {
       this.motor.velocity.set(0, 0, 0);
       this.animator?.update(dt, 'sit', 0);
+      this.appearance.update();
       this.syncTransform();
       return;
     }
@@ -225,6 +231,8 @@ export class Player {
     });
 
     this.animator?.update(dt, this.states.state, this.controller.planarSpeed);
+    // After the mixer, never before: it owns every bone rotation.
+    this.appearance.update();
     this.syncTransform();
   }
 

@@ -447,7 +447,7 @@ export class Game {
     this.needs.advance(tick.consumed);
     this.player.controller.speedScale = this.needs.modifiers().moveSpeed;
 
-    this.hud.setAge(this.life.ageYears, this.life.yearProgress);
+    this.syncAge();
   }
 
   /**
@@ -479,7 +479,18 @@ export class Game {
     if (o.startVehicle !== 'none') this.inventory.add(`keys_${o.startVehicle}`, 1);
 
     if (o.unlockCity) this.unlockedZones.add('city_old_market');
+    this.syncAge();
+  }
+
+  /**
+   * Publish the current age everywhere it is presented.
+   *
+   * Proportions are fed the *fractional* age, not the whole year, so the last
+   * year of a stage blends into the next and a birthday is not a visible jolt.
+   */
+  private syncAge(): void {
     this.hud.setAge(this.life.ageYears, this.life.yearProgress);
+    this.player.appearance.applyAge(this.life.ageYears + this.life.yearProgress);
   }
 
   private gateContext(): GateContext {
@@ -591,7 +602,7 @@ export class Game {
       this.camera.resetBehind(this.player.lookTarget, this.player.controller.facing);
     }
 
-    this.hud.setAge(this.life.ageYears, this.life.yearProgress);
+    this.syncAge();
   }
 
   private lifeSnapshot(): LifeSnapshot {
@@ -863,6 +874,7 @@ export class Game {
       },
       pressInteract: (held: boolean) => this.input.setInteractHeld(held),
       needsState: () => this.needs.toJSON(),
+      appearanceState: () => this.player.appearance.snapshot(),
       inventoryState: () => this.inventory.toJSON(),
       completeChapter: (id) => {
         this.completedChapters.add(id);

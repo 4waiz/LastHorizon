@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { TimeMode } from './Settings';
+import type { AppearanceSnapshot } from '../player/AgeAppearance';
 
 /**
  * Deterministic test mode: the `window.__LH_TEST__` bridge.
@@ -50,6 +51,7 @@ export interface TestSurface {
   interactionState(): InteractionSnapshot;
   pressInteract(held: boolean): void;
   needsState(): Record<string, number>;
+  appearanceState(): AppearanceSnapshot;
   inventoryState(): ReadonlyArray<{ id: string; count: number }>;
   completeChapter(id: string): void;
   saveNow(slot: string): Promise<boolean>;
@@ -153,6 +155,12 @@ export interface LHTestBridge {
 
   /** The four soft needs, 0..1. */
   getNeeds(): Record<string, number>;
+
+  /**
+   * Age proportions as they actually sit on the rig, read back off the bones —
+   * not the values that were requested.
+   */
+  getAppearance(): AppearanceSnapshot;
 
   /** Carried stacks, for save round-trip assertions. */
   getInventory(): ReadonlyArray<{ id: string; count: number }>;
@@ -319,6 +327,10 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     getNeeds(): Record<string, number> {
       return surface.needsState();
+    },
+
+    getAppearance(): AppearanceSnapshot {
+      return surface.appearanceState();
     },
 
     getInventory(): ReadonlyArray<{ id: string; count: number }> {

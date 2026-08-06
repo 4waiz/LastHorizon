@@ -11,6 +11,8 @@
  * repository's glTF convention: +Z forward, +Y up.
  */
 
+import type * as THREE from 'three';
+
 export type SocketId =
   | 'hand_r'
   | 'hand_l'
@@ -59,23 +61,60 @@ const v = (x: number, y: number, z: number): Vec3Tuple => ({ x, y, z });
  * until something real is fitted to them.
  */
 export const SOCKETS: readonly SocketDef[] = [
-  { id: 'hand_r', bone: 'hand_r', position: v(0, 0, 0), rotation: v(0, 0, 0), isTarget: false, availableFrom: 4 },
-  { id: 'hand_l', bone: 'hand_l', position: v(0, 0, 0), rotation: v(0, 0, 0), isTarget: false, availableFrom: 4 },
+  { id: 'hand_r', bone: 'hand.R', position: v(0, 0, 0), rotation: v(0, 0, 0), isTarget: false, availableFrom: 4 },
+  { id: 'hand_l', bone: 'hand.L', position: v(0, 0, 0), rotation: v(0, 0, 0), isTarget: false, availableFrom: 4 },
 
   // Carried box or bag: held in front of the chest, both hands reaching to it.
-  { id: 'carry', bone: 'spine_02', position: v(0, 0.06, 0.26), rotation: v(0, 0, 0), isTarget: true, availableFrom: 4 },
+  { id: 'carry', bone: 'chest', position: v(0, 0.06, 0.26), rotation: v(0, 0, 0), isTarget: true, availableFrom: 4 },
   // Phone: right hand, angled toward the face.
-  { id: 'phone', bone: 'hand_r', position: v(0.02, 0.03, 0.04), rotation: v(-0.5, 0, 0), isTarget: false, availableFrom: 4 },
-  { id: 'back', bone: 'spine_02', position: v(0, 0.04, -0.14), rotation: v(0, 0, 0), isTarget: false, availableFrom: 4 },
+  { id: 'phone', bone: 'hand.R', position: v(0.02, 0.03, 0.04), rotation: v(-0.5, 0, 0), isTarget: false, availableFrom: 4 },
+  { id: 'back', bone: 'chest', position: v(0, 0.04, -0.14), rotation: v(0, 0, 0), isTarget: false, availableFrom: 4 },
 
   { id: 'seat', bone: 'hips', position: v(0, 0, 0), rotation: v(0, 0, 0), isTarget: true, availableFrom: 5 },
-  { id: 'steering_wheel', bone: 'spine_02', position: v(0, 0.05, 0.34), rotation: v(0, 0, 0), isTarget: true, availableFrom: 5 },
-  { id: 'handlebar_l', bone: 'spine_02', position: v(-0.28, 0.02, 0.32), rotation: v(0, 0, 0), isTarget: true, availableFrom: 5 },
-  { id: 'handlebar_r', bone: 'spine_02', position: v(0.28, 0.02, 0.32), rotation: v(0, 0, 0), isTarget: true, availableFrom: 5 },
+  { id: 'steering_wheel', bone: 'chest', position: v(0, 0.05, 0.34), rotation: v(0, 0, 0), isTarget: true, availableFrom: 5 },
+  { id: 'handlebar_l', bone: 'chest', position: v(-0.28, 0.02, 0.32), rotation: v(0, 0, 0), isTarget: true, availableFrom: 5 },
+  { id: 'handlebar_r', bone: 'chest', position: v(0.28, 0.02, 0.32), rotation: v(0, 0, 0), isTarget: true, availableFrom: 5 },
 
-  { id: 'weapon', bone: 'hand_r', position: v(0, 0.02, 0.05), rotation: v(0, 0, 0), isTarget: false, availableFrom: 9 },
-  { id: 'weapon_holster', bone: 'thigh_r', position: v(0.08, -0.1, 0), rotation: v(0, 0, 0), isTarget: false, availableFrom: 9 },
+  { id: 'weapon', bone: 'hand.R', position: v(0, 0.02, 0.05), rotation: v(0, 0, 0), isTarget: false, availableFrom: 9 },
+  { id: 'weapon_holster', bone: 'thigh.R', position: v(0.08, -0.1, 0), rotation: v(0, 0, 0), isTarget: false, availableFrom: 9 },
 ];
+
+/**
+ * Bone names as authored in `scripts/blender/build_character.py`.
+ *
+ * Duplicated here rather than imported because the Python is the source of
+ * truth and cannot be imported at runtime. `validateAgainstRig` is what keeps
+ * the two honest — and it earned its place immediately, catching this table
+ * naming `spine_02` and `hand_r` when the rig calls them `chest` and `hand.R`.
+ */
+export const RIG_BONES: readonly string[] = [
+  'root', 'hips', 'spine', 'chest', 'neck', 'head',
+  'shoulder.L', 'upperarm.L', 'lowerarm.L', 'hand.L',
+  'shoulder.R', 'upperarm.R', 'lowerarm.R', 'hand.R',
+  'thigh.L', 'shin.L', 'foot.L',
+  'thigh.R', 'shin.R', 'foot.R',
+];
+
+/**
+ * The name three.js will actually see for a bone.
+ *
+ * `GLTFLoader` puts every node name through `PropertyBinding.sanitizeNodeName`,
+ * which replaces whitespace with `_` and **strips** `[ ] . : /` outright. So the
+ * rig's `shoulder.L` is `shoulderL` once loaded, and looking a bone up by its
+ * authored name finds nothing — silently, because a missing bone is not an
+ * error, it just means the attachment never moves.
+ *
+ * This cost the age proportions 14 of their 20 bones before anything noticed:
+ * the six that survived were exactly the six whose names contain no dot.
+ */
+export function sceneBoneName(bone: string): string {
+  return bone.replace(/\s/g, '_').replace(/[[\]./:]/g, '');
+}
+
+/** Find a bone by its authored name, whichever form the scene holds it under. */
+export function findBone(root: THREE.Object3D, bone: string): THREE.Object3D | null {
+  return root.getObjectByName(bone) ?? root.getObjectByName(sceneBoneName(bone)) ?? null;
+}
 
 const BY_ID = new Map(SOCKETS.map((s) => [s.id, s]));
 
@@ -102,6 +141,9 @@ export function requiredBones(): readonly string[] {
  * bone.
  */
 export function validateAgainstRig(boneNames: readonly string[]): string[] {
-  const have = new Set(boneNames);
-  return requiredBones().filter((b) => !have.has(b));
+  // Compared in sanitized form so this works against either the authored names
+  // or the names the loaded scene holds — otherwise it would report every
+  // dotted bone as missing the moment it was pointed at a real rig.
+  const have = new Set(boneNames.map(sceneBoneName));
+  return requiredBones().filter((b) => !have.has(sceneBoneName(b)));
 }
