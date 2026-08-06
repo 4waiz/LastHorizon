@@ -99,6 +99,5 @@ outdoor world, taking triangles from ~482 k to ~780 k.
   clamped to 1/15 s. A fixed-step clock with render interpolation is Phase 2
   work.
 - **Interiors are one shared room** reached by all eight doors.
-- **`dist/` is committed**, so build output and source can drift.
 - **Vite is pinned to 7** because Rolldown's native binding is blocked by this
   machine's Smart App Control. See `docs/adr/0002-vite-7-not-8.md`.
