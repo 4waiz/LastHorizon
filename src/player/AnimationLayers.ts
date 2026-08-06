@@ -40,6 +40,8 @@ const DEFAULT_FADE = 0.2;
 
 export class AnimationLayers {
   private readonly actions = new Map<string, THREE.AnimationAction>();
+  /** Additive conversions of the same clips; see `additiveAction`. */
+  private readonly additiveActions = new Map<string, THREE.AnimationAction>();
   private readonly slots: Record<LayerId, Slot> = {
     locomotion: { action: null, name: null, targetWeight: 1, fadeSpeed: 1 / DEFAULT_FADE },
     upperBody: { action: null, name: null, targetWeight: 0, fadeSpeed: 1 / DEFAULT_FADE },
@@ -74,6 +76,36 @@ export class AnimationLayers {
   }
 
   /**
+   * The additive form of a clip, built once and cached.
+   *
+   * `makeClipAdditive` subtracts the reference frame from the track values *in
+   * place* and has no idempotency guard, so calling it on the live clip is
+   * wrong twice over: replaying an additive clip after it was stopped would
+   * subtract the reference a second time and the pose would drift further from
+   * rest each time, and the same clip could never be played normally again —
+   * including by anything else sharing the GLB's clips.
+   *
+   * Converting a clone avoids both. Returns null for an unknown clip.
+   */
+  private additiveAction(name: string): THREE.AnimationAction | null {
+    const cached = this.additiveActions.get(name);
+    if (cached) return cached;
+
+    const source = this.actions.get(name);
+    if (!source) return null;
+
+    const clip = source.getClip().clone();
+    clip.name = `${name}__additive`;
+    THREE.AnimationUtils.makeClipAdditive(clip);
+
+    const action = this.mixer.clipAction(clip);
+    action.enabled = true;
+    action.blendMode = THREE.AdditiveAnimationBlendMode;
+    this.additiveActions.set(name, action);
+    return action;
+  }
+
+  /**
    * Start a clip on a layer, crossfading from whatever it was playing.
    *
    * Returns false for an unknown clip rather than throwing: a missing optional
@@ -83,7 +115,7 @@ export class AnimationLayers {
     const slot = this.slots[layer];
     if (slot.name === name) return true;
 
-    const next = this.actions.get(name);
+    const next = layer === 'additive' ? this.additiveAction(name) : this.actions.get(name);
     if (!next) return false;
 
     const fade = opts.fadeSeconds ?? DEFAULT_FADE;
@@ -94,13 +126,6 @@ export class AnimationLayers {
     next.setLoop(opts.loop === false ? THREE.LoopOnce : THREE.LoopRepeat, opts.loop === false ? 1 : Infinity);
     next.clampWhenFinished = opts.loop === false;
     next.setEffectiveTimeScale(opts.timeScale ?? 1);
-
-    if (layer === 'additive') {
-      // Additive clips are differences from rest, so they sum with the base
-      // rather than replacing it.
-      THREE.AnimationUtils.makeClipAdditive(next.getClip());
-      next.blendMode = THREE.AdditiveAnimationBlendMode;
-    }
 
     if (previous && previous !== next && fade > 0) {
       next.setEffectiveWeight(0);
@@ -169,7 +194,13 @@ export class AnimationLayers {
   dispose(): void {
     this.mixer.stopAllAction();
     for (const a of this.actions.values()) this.mixer.uncacheAction(a.getClip());
+    for (const a of this.additiveActions.values()) {
+      const clip = a.getClip();
+      this.mixer.uncacheAction(clip);
+      this.mixer.uncacheClip(clip);
+    }
     this.actions.clear();
+    this.additiveActions.clear();
     for (const layer of ['locomotion', 'upperBody', 'additive'] as const) {
       this.slots[layer].action = null;
       this.slots[layer].name = null;

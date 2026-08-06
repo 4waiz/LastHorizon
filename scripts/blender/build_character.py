@@ -712,6 +712,104 @@ def add_blink_shape(mesh):
     return moved
 
 
+# ---- upper-body overlays -------------------------------------------------
+#
+# These key ONLY arm, shoulder and head bones. Nothing below the chest is
+# touched, so the runtime can run them beside a locomotion clip.
+#
+# The runtime converts them with THREE.AnimationUtils.makeClipAdditive, which
+# subtracts frame 1. That is why every one of these starts from the rest pose
+# on frame 1: the first frame becomes the reference the rest is measured
+# against, so a clip that starts mid-gesture would offset the whole body for as
+# long as it played.
+
+UPPER_BONES = ["chest", "neck", "head",
+               "shoulder.L", "upperarm.L", "lowerarm.L", "hand.L",
+               "shoulder.R", "upperarm.R", "lowerarm.R", "hand.R"]
+
+
+def _rest_frame(arm, frame=1):
+    """Key every upper-body bone at rest, so additive conversion has a base."""
+    for b in UPPER_BONES:
+        set_pose(arm, b, frame)
+
+
+def anim_wave(arm):
+    """A greeting: right arm up, forearm swings twice, head tips slightly."""
+    _clear_pose(arm)
+    act = new_action(arm, "Wave")
+    _rest_frame(arm)
+
+    # Raise: shoulder lifts, upper arm swings out and forward.
+    set_pose(arm, "shoulder.R", 10, rx=-6, ry=-8)
+    set_pose(arm, "upperarm.R", 10, rx=-96, ry=-24, rz=-14)
+    set_pose(arm, "lowerarm.R", 10, rx=-58, rz=-10)
+    set_pose(arm, "head", 10, rz=-5, rx=-3)
+    set_pose(arm, "chest", 10, rz=-3)
+
+    # Two swings of the forearm, hand trailing a touch behind the wrist.
+    for i, f in enumerate((20, 30, 40)):
+        swing = -34 if i % 2 == 0 else -76
+        set_pose(arm, "lowerarm.R", f, rx=-58, rz=swing * 0.35)
+        set_pose(arm, "hand.R", f, rz=swing * 0.18)
+        set_pose(arm, "upperarm.R", f, rx=-96, ry=-24, rz=-14)
+
+    # Back to rest.
+    set_pose(arm, "shoulder.R", 55)
+    set_pose(arm, "upperarm.R", 55)
+    set_pose(arm, "lowerarm.R", 55)
+    set_pose(arm, "hand.R", 55)
+    set_pose(arm, "head", 55)
+    set_pose(arm, "chest", 55)
+
+    finalize(act)
+    return act
+
+
+def anim_carry(arm):
+    """Both arms forward and bent, as if holding a box against the chest.
+
+    Loops with a small settle so a carried item is never perfectly static,
+    which reads as a floating prop rather than something with weight.
+    """
+    _clear_pose(arm)
+    act = new_action(arm, "CarryBox")
+    _rest_frame(arm)
+
+    for i, f in enumerate((1, 30, 60)):
+        if f == 1:
+            continue
+        bob = 3.0 if i == 1 else 0.0
+        for side, sign in (("L", 1), ("R", -1)):
+            set_pose(arm, "shoulder." + side, f, rx=-4)
+            set_pose(arm, "upperarm." + side, f, rx=-62 + bob, ry=sign * 10, rz=sign * -6)
+            set_pose(arm, "lowerarm." + side, f, rx=-72, rz=sign * -18)
+            set_pose(arm, "hand." + side, f, rz=sign * -12)
+        set_pose(arm, "chest", f, rx=2 - bob * 0.2)
+
+    finalize(act)
+    return act
+
+
+def anim_phone(arm):
+    """Right hand raised to the ear, head tipped toward it."""
+    _clear_pose(arm)
+    act = new_action(arm, "UsePhone")
+    _rest_frame(arm)
+
+    for f in (18, 50, 82):
+        drift = 2.0 if f == 50 else 0.0
+        set_pose(arm, "shoulder.R", f, rx=-8)
+        set_pose(arm, "upperarm.R", f, rx=-74 + drift, ry=-18, rz=-20)
+        set_pose(arm, "lowerarm.R", f, rx=-104, rz=-26)
+        set_pose(arm, "hand.R", f, rx=-10, rz=-14)
+        set_pose(arm, "head", f, rz=6, rx=-2 + drift * 0.5)
+        set_pose(arm, "chest", f, rz=-2)
+
+    finalize(act)
+    return act
+
+
 def build():
     reset_scene()
     bpy.context.scene.render.fps = FPS
@@ -730,7 +828,9 @@ def build():
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode="POSE")
     clips = [anim_idle(arm), anim_walk(arm), anim_run(arm),
-             anim_jump(arm), anim_fall(arm), anim_land(arm), anim_sit(arm)]
+             anim_jump(arm), anim_fall(arm), anim_land(arm), anim_sit(arm),
+             # Upper-body overlays; see UPPER_BONES above.
+             anim_wave(arm), anim_carry(arm), anim_phone(arm)]
     _clear_pose(arm)
     bpy.ops.object.mode_set(mode="OBJECT")
     arm.animation_data.action = None

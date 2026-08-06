@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import { AnimationLayers, MAX_FOOT_LIFT, footOffset } from '../src/player/AnimationLayers';
 import {
+  RIG_BONES,
   SOCKETS,
   requiredBones,
   socket,
@@ -66,6 +67,79 @@ describe('layer playback', () => {
     l.update(0.5);
     expect(l.play('locomotion', 'Idle')).toBe(true);
     expect(l.playing('locomotion')).toBe('Idle');
+  });
+});
+
+describe('additive layer', () => {
+  /**
+   * A rig plus a clip whose first frame is *not* the rest pose, so that
+   * subtracting the reference frame is observable. With y running 1 -> 2, one
+   * additive conversion leaves 0 -> 1; a second would leave -1 -> 0.
+   */
+  function offsetRig() {
+    const root = new THREE.Object3D();
+    root.name = 'root';
+    const bone = new THREE.Object3D();
+    bone.name = 'bone';
+    root.add(bone);
+
+    const offset = new THREE.AnimationClip('Wave', 1, [
+      new THREE.VectorKeyframeTrack('bone.position', [0, 1], [0, 1, 0, 0, 2, 0]),
+    ]);
+    const idle = clip('Idle');
+    return {
+      l: new AnimationLayers(new THREE.AnimationMixer(root), [idle, offset]),
+      bone,
+      offset,
+    };
+  }
+
+  it('leaves the source clip untouched', () => {
+    // makeClipAdditive rewrites track values in place. Converting the live
+    // clip would mean the same animation could never be played normally
+    // again -- on this rig or anything else sharing the GLB's clips.
+    const { l, offset } = offsetRig();
+    const before = Array.from(offset.tracks[0].values);
+
+    l.play('additive', 'Wave');
+    l.setWeight('additive', 1, 0);
+    l.update(0.016);
+
+    expect(Array.from(offset.tracks[0].values)).toEqual(before);
+    expect(offset.blendMode).not.toBe(THREE.AdditiveAnimationBlendMode);
+  });
+
+  it('does not re-subtract the reference frame when replayed', () => {
+    const { l, bone } = offsetRig();
+
+    l.play('additive', 'Wave');
+    l.setWeight('additive', 1, 0);
+    l.update(0.001);
+    const first = bone.position.y;
+    // Reference frame subtracted exactly once: starts at rest, not at +1.
+    expect(first).toBeCloseTo(0, 2);
+
+    // Fade out fully so the slot is released, then play it again.
+    l.stop('additive', 0);
+    for (let i = 0; i < 5; i++) l.update(0.016);
+    expect(l.playing('additive')).toBeNull();
+
+    l.play('additive', 'Wave');
+    l.setWeight('additive', 1, 0);
+    l.update(0.001);
+    // A second conversion would put this at -1.
+    expect(bone.position.y).toBeCloseTo(first, 2);
+  });
+
+  it('runs a wave over locomotion without stopping it', () => {
+    const { l } = offsetRig();
+    l.play('locomotion', 'Idle');
+    l.play('additive', 'Wave');
+    l.setWeight('additive', 1, 0.1);
+    for (let i = 0; i < 20; i++) l.update(0.016);
+
+    expect(l.playing('locomotion')).toBe('Idle');
+    expect(l.playing('additive')).toBe('Wave');
   });
 });
 
@@ -157,9 +231,15 @@ describe('procedural foot placement', () => {
 
 describe('sockets', () => {
   it('resolves by id', () => {
-    expect(socket('carry')?.bone).toBe('spine_02');
-    expect(socket('phone')?.bone).toBe('hand_r');
+    expect(socket('carry')?.bone).toBe('chest');
+    expect(socket('phone')?.bone).toBe('hand.R');
     expect(socket('nonexistent' as never)).toBeNull();
+  });
+
+  it('every socket names a bone the authored rig actually has', () => {
+    // The bug this catches shipped the moment the table was written: it said
+    // spine_02 and hand_r, the rig says chest and hand.R.
+    expect(validateAgainstRig(RIG_BONES)).toEqual([]);
   });
 
   it('has no duplicate ids', () => {
@@ -184,8 +264,8 @@ describe('sockets', () => {
   });
 
   it('catches a socket pointing at a bone the rig does not have', () => {
-    const missing = validateAgainstRig(['hips', 'spine_02']);
-    expect(missing).toContain('hand_r');
+    const missing = validateAgainstRig(['hips', 'chest']);
+    expect(missing).toContain('hand.R');
     expect(missing).not.toContain('hips');
   });
 
