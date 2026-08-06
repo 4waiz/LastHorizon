@@ -31,7 +31,7 @@ Then open <http://localhost:5173>.
 | `npm run dev` | Vite dev server with HMR |
 | `npm run build` | Type-check, then bundle to `dist/` |
 | `npm run preview` | Serve the production bundle |
-| `npm test` | Vitest suite (100 tests, no WebGL needed) |
+| `npm test` | Vitest suite (433 tests, no WebGL needed) |
 | `npm run test:e2e` | Playwright smoke tests against the production build |
 | `npm run typecheck` | `tsc --noEmit` under strict mode |
 | `npm run lint` | ESLint (flat config) over `src/` and `tests/` |
@@ -265,18 +265,23 @@ make the player sink or float.
 
 ## Tests
 
-`npm test` runs 100 tests covering the logic that doesn't need a GPU:
+`npm test` runs 433 tests across 21 files, covering the logic that doesn't
+need a GPU. The largest groups:
 
 | File | Covers |
 | --- | --- |
-| `mathUtils.test.ts` | clamping, frame-rate-independent damping, angle wrapping, seeded RNG determinism, noise continuity |
-| `playerState.test.ts` | every state transition, hysteresis bands, coyote time, hard vs soft landings |
-| `settings.test.ts` | preset monotonicity, device detection, persistence, corrupt-storage recovery |
-| `collectibles.test.ts` | persistence, stale-id rejection, reset, missing storage |
-| `input.test.ts` | key mapping, diagonal normalisation, jump consumption, blur release |
-| `world.test.ts` | terrain/road continuity and corridor flatness, plus the character motor against a real BVH — grounding, jumping, wall blocking and high-speed tunnelling |
-| `toonMaterial.test.ts` | wind is opt-in — palette colour names like `leaf_mid` must not hand furniture the foliage shader |
-| `featureFlags.test.ts` | flags default off; only the documented on-forms enable them |
+| `clocks.test.ts` | The three independent clocks — life, world and story — and why none is derived from another |
+| `inventory.test.ts` | Stacks and slot limits, wardrobe migration, the four soft needs and their accessibility switches |
+| `zones.test.ts` | Zone manifests, streaming hysteresis, spawn resolution, disposal ownership |
+| `save.test.ts` | Schema versioning, migration, and writes that are read back and compared before committing |
+| `interaction.test.ts` | What the player can do and when: distance, facing, availability, and one press doing one thing |
+| `world.test.ts` | Terrain/road continuity and corridor flatness, plus the character motor against a real BVH |
+| `animationLayers.test.ts` | Layer weights, additive conversion on a clone, foot placement, sockets against the rig |
+| `ageAppearance.test.ts` | Age proportions written only to bone channels the clips leave alone |
+| `toonMaterial.test.ts` | Wind is opt-in — palette colour names like `leaf_mid` must not hand furniture the foliage shader |
+| `featureFlags.test.ts` | Flags default off; only the documented on-forms enable them |
+
+The full per-file table is in [docs/TEST_STRATEGY.md](docs/TEST_STRATEGY.md).
 
 Browser coverage lives in `tests/e2e/` and runs under Playwright against the
 production build, driven through the `?e2e=1` test bridge. See
@@ -285,8 +290,14 @@ what is *not* yet covered.
 
 ## Known limitations
 
-- The neighbourhood is one hand-authored layout; there is no streaming, so the
-  whole world is built up front (about a second on a desktop).
+- The village is one hand-authored layout, built up front (about a second on a
+  desktop). Streaming exists and carries the city district, which loads in
+  chunks around the player — the village predates it and does not use it.
+- The city district is a prototype: blocks, roads and a skyline, with no
+  interiors and no residents yet.
+- Needs, inventory and age proportions are simulated and saved, but the world
+  barely feeds them. Sleeping restores energy and mood; bread, coffee and soap
+  are in the item catalogue with no way yet to acquire or use them.
 - Only the tile-column UI is localised to English.
 - The camera fades foliage and trunks that block the character, but buildings
   are deliberately left solid — walking behind a house hides you briefly.
