@@ -1,4 +1,5 @@
 import gsap from 'gsap';
+import type { GameMode } from '../core/Gates';
 
 /**
  * Branded loading screen.
@@ -27,7 +28,11 @@ export class LoadingScreen {
   private idleSpin: gsap.core.Tween | null = null;
   private done = false;
 
-  constructor(private readonly onStart: () => void) {
+  private modeRow: HTMLElement | null = null;
+  private chosenMode: GameMode = 'story';
+  private modeLocked = false;
+
+  constructor(private readonly onStart: (mode: GameMode) => void) {
     this.root = document.getElementById('loading')!;
     this.fill = document.getElementById('loadingFill')!;
     this.pct = document.getElementById('loadingPct')!;
@@ -169,10 +174,78 @@ export class LoadingScreen {
     this.msg.textContent = text;
   }
 
+  /**
+   * Preselect a mode, e.g. because a save was resumed.
+   *
+   * A resumed run already has a mode; offering a different one would either be
+   * ignored or silently change the rules of a run in progress.
+   */
+  presetMode(mode: GameMode, locked = false): void {
+    this.chosenMode = mode;
+    // Called during `start()`, which runs before `ready()` builds the row, so
+    // the lock has to be remembered and applied when the row appears.
+    this.modeLocked = this.modeLocked || locked;
+    this.syncModeRow();
+  }
+
+  /**
+   * Story / Free Roam selection.
+   *
+   * Built in JS rather than added to index.html: this is the minimal version
+   * the phase asks for, and full menu polish is a later phase — dead markup
+   * left behind by a redesign is worse than none.
+   */
+  private buildModeRow(): void {
+    if (this.modeRow || !this.startBtn.parentElement) return;
+
+    const row = document.createElement('div');
+    row.className = 'loading__modes';
+    row.style.cssText =
+      'display:flex;gap:8px;justify-content:center;margin:0 0 12px;';
+
+    for (const mode of ['story', 'freeRoam'] as const) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.mode = mode;
+      b.textContent = mode === 'story' ? 'Story' : 'Free Roam';
+      b.style.cssText =
+        'padding:7px 16px;border-radius:999px;border:1px solid rgba(74,70,62,0.28);' +
+        'background:transparent;color:#4a463e;font:600 12px/1 system-ui,sans-serif;' +
+        'letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;';
+      b.addEventListener('click', () => {
+        this.chosenMode = mode;
+        this.syncModeRow();
+      });
+      row.appendChild(b);
+    }
+
+    this.startBtn.parentElement.insertBefore(row, this.startBtn);
+    this.modeRow = row;
+    this.syncModeRow();
+  }
+
+  private syncModeRow(): void {
+    if (!this.modeRow) return;
+
+    if (this.modeLocked) {
+      this.modeRow.style.opacity = '0.55';
+      this.modeRow.style.pointerEvents = 'none';
+      this.modeRow.title = 'Continuing a saved run.';
+    }
+
+    for (const b of this.modeRow.querySelectorAll<HTMLButtonElement>('button')) {
+      const on = b.dataset.mode === this.chosenMode;
+      b.style.background = on ? '#4a463e' : 'transparent';
+      b.style.color = on ? '#f8f4ea' : '#4a463e';
+      b.setAttribute('aria-pressed', String(on));
+    }
+  }
+
   /** Everything is loaded; wait for a gesture so audio may start. */
   ready(): void {
     this.target = 1;
     this.msg.textContent = 'Ready when you are.';
+    this.buildModeRow();
     this.startBtn.hidden = false;
     gsap.fromTo(
       this.startBtn,
@@ -196,7 +269,7 @@ export class LoadingScreen {
       .timeline({
         onComplete: () => {
           this.root.style.display = 'none';
-          this.onStart();
+          this.onStart(this.chosenMode);
         },
       })
       // one last outward swoosh as the world takes over

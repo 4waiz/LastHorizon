@@ -109,6 +109,8 @@ export class Game {
   /** The spawn the player last arrived at; saved rather than a raw position. */
   private lastSpawnId = 'village_start';
   private readonly completedChapters = new Set<string>();
+  /** True once an autosave has been applied, so mode selection defers to it. */
+  private resumedFromSave = false;
   private readonly unlockedZones = new Set<ZoneId>(['village_coast']);
 
   private running = false;
@@ -293,6 +295,9 @@ export class Game {
       const resumed = await this.saves.load('autosave');
       if (resumed.ok) {
         this.applySave(resumed.data);
+        this.resumedFromSave = true;
+        // Show which mode is being continued, and stop it being changed.
+        loading.presetMode(resumed.data.mode, true);
         if (resumed.recoveredFromBackup) {
           this.hud.showToast('Recovered', 'Your last save was damaged; an earlier one was used.');
         } else if (resumed.migratedFrom !== undefined) {
@@ -306,14 +311,28 @@ export class Game {
       this.life.unblock('saveMigration');
     }
 
+    // A save written between reaching a birthday and acknowledging it — the
+    // crash case — restores with one still armed. Deliver it now rather than
+    // leaving the clock permanently blocked on it.
+    if (this.life.pendingBirthday !== null) {
+      await this.handleBirthday(this.life.pendingBirthday);
+    }
+
     loading.setProgress(1, 'the afternoon');
     loading.ready();
   }
 
-  /** Called once the player dismisses the loading screen. */
-  begin(): void {
+  /**
+   * Called once the player dismisses the loading screen.
+   *
+   * The chosen mode only applies to a fresh run: a resumed save already has
+   * one, and switching it would silently change the rules of a run in
+   * progress — story gates applied to a Free Roam save, or the reverse.
+   */
+  begin(mode: GameMode = 'story'): void {
     if (this.running) return;
     this.running = true;
+    if (!this.resumedFromSave) this.mode = mode;
 
     this.input.attach(this.canvas);
     this.hud.show();
@@ -526,19 +545,24 @@ export class Game {
   private async deliverBirthday(age: number): Promise<void> {
     this.hud.showToast('Another year', `You are ${age} today.`);
 
-    // Autosave while the clock is stopped. This is the safe moment by
-    // construction: nothing can age, and the next birthday cannot arrive
-    // mid-write.
+    // Appearance stage, NPC milestones and age-gated story checks attach
+    // here as those systems land.
+    await wait(60);
+
+    // Acknowledge *before* saving. Saving first records the pre-birthday
+    // state — age N, sitting on the boundary — so a reload re-arms and
+    // re-fires the same birthday, which is the duplicate event the phase
+    // rules forbid. Acknowledging first also fails in the safe direction: a
+    // crash between the two re-fires the birthday rather than skipping it.
+    this.life.acknowledgeBirthday();
+
+    // The clock is still stopped if the carried overflow reached another
+    // boundary, so this remains a safe moment to write.
     const result = await this.saves.save('autosave', this.captureSave('autosave'));
     if (!result.ok) {
       console.warn('[LastHorizon] birthday autosave failed', result.reason);
       this.hud.showToast('Could not save', 'Your progress is still here, but not written.');
     }
-
-    // Appearance stage, NPC milestones and age-gated story checks attach
-    // here as those systems land.
-    await wait(60);
-    this.life.acknowledgeBirthday();
   }
 
   private applyQuality(q: QualityLevel): void {

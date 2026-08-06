@@ -22,7 +22,7 @@ async function boot(): Promise<void> {
   if (!canvas) throw new Error('missing #viewport canvas');
 
   let game: Game | null = null;
-  const loading = new LoadingScreen(() => game?.begin());
+  const loading = new LoadingScreen((mode) => game?.begin(mode));
 
   if (!hasWebGL()) {
     loading.fail('This browser cannot run WebGL.');

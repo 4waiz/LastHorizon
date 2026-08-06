@@ -9,6 +9,8 @@ import {
   type SaveData,
   type SaveDataV1,
 } from '../src/save/SaveSchema';
+import { SpawnRegistry } from '../src/world/zones/SpawnRegistry';
+import { WORLD_MANIFEST } from '../src/world/zones/worldManifest';
 
 let clock = 1_000_000;
 const now = () => clock++;
@@ -314,6 +316,56 @@ describe('status reporting', () => {
     off();
     await svc.save('slot1', story());
     expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe('safe spawn fallback', () => {
+  const registry = new SpawnRegistry(WORLD_MANIFEST);
+
+  it('degrades when the saved spawn no longer exists', async () => {
+    const { svc } = service();
+    // A spawn that was valid when the save was written and has since been
+    // removed from the manifest — the ordinary consequence of world edits.
+    await svc.save('slot1', story({ spawnId: 'jetty_removed_in_a_later_patch' }));
+
+    const read = await svc.load('slot1');
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+
+    const resolved = registry.resolve({ zoneId: read.data.zone, spawnId: read.data.spawnId });
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    // Somewhere valid, flagged as a fallback so the game can tell the player.
+    expect(resolved.fallback).toBe(true);
+    expect(resolved.spawn.id).toBe('village_start');
+    expect(resolved.reason).toBeTruthy();
+  });
+
+  it('uses the saved spawn when it is still there', async () => {
+    const { svc } = service();
+    await svc.save('slot1', story({ spawnId: 'village_road_north' }));
+    const read = await svc.load('slot1');
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+
+    const resolved = registry.resolve({ zoneId: read.data.zone, spawnId: read.data.spawnId });
+    expect(resolved.ok && resolved.fallback).toBe(false);
+    expect(resolved.ok && resolved.spawn.id).toBe('village_road_north');
+  });
+
+  it('never lands a saved vehicle on a foot-only spawn', async () => {
+    const { svc } = service();
+    await svc.save('slot1', story({ spawnId: 'village_hill' })); // foot-only
+    const read = await svc.load('slot1');
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+
+    const resolved = registry.resolve({
+      zoneId: read.data.zone,
+      spawnId: read.data.spawnId,
+      withVehicle: true,
+    });
+    expect(resolved.ok && resolved.spawn.vehicleSafe).toBe(true);
   });
 });
 
