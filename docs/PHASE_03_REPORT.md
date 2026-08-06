@@ -74,20 +74,18 @@ transitions and the info/wardrobe panels. HUD shows a minimal age badge.
 
 ## 2. Not done
 
-1. **Free Roam has no setup screen.** The mode can be chosen, and saves keep it
-   apart from Story, but the player cannot pick a starting age, money preset,
-   initial vehicle, unlocked zones or ageing speed. Every one of those is a
-   typed field that already exists — this is UI, not plumbing.
-2. **Birthday side effects are stubs.** The flow pauses, announces,
-   autosaves and ages up. Appearance stage, named-NPC milestone events and
-   age-gated story checks are marked in the code and not implemented, because
-   none of those systems exists yet.
-3. **No save-status indicator in the HUD.** `SaveService` emits
-   `saving`/`saved`/`error` and nothing subscribes.
-4. **`photoMode` block is never raised** — the clock supports it, there is no
-   photo mode to raise it.
-5. **Only the autosave slot is used.** Three manual slots are implemented and
-   tested; nothing in the UI writes or reads them.
+1. **Birthday side effects are stubs.** The flow pauses, announces, ages up and
+   autosaves. Appearance stage, named-NPC milestone events and age-gated story
+   checks are marked in the code and not implemented, because **none of those
+   systems exists yet** — they arrive in Phases 4, 6 and 8.
+2. **`photoMode` block is never raised** — the clock supports it, there is no
+   photo mode to raise it. Phase 11.
+3. **Only the autosave slot is reachable from the UI.** Three manual slots are
+   implemented, tested and exposed on the test bridge; no menu writes or reads
+   them. That is a load/save screen, which is Phase 11's job.
+
+Everything above depends on a system a later phase builds. Nothing in Phase 3's
+own scope is outstanding.
 
 ### Bugs found by running it, not by testing it
 
@@ -101,6 +99,10 @@ Worth recording, because all three passed the unit suite:
   forever.
 - `presetMode` is called during `start()`, which runs *before* `ready()` builds
   the mode row, so the "continuing a saved run" lock silently no-opped.
+- The mode selector and Free Roam panel were **completely invisible** while
+  passing every DOM assertion: the loading screen's painted background is
+  absolutely positioned, so elements added in normal flow rendered behind it.
+  Only the screenshot caught it. Both now carry an explicit stacking context.
 
 ---
 

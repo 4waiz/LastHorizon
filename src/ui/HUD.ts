@@ -478,6 +478,57 @@ export class HUD {
     if (fill) fill.style.width = `${Math.round(Math.min(1, Math.max(0, yearProgress)) * 100)}%`;
   }
 
+  private saveBadge: HTMLElement | null = null;
+  private saveHideTimer = 0;
+
+  /**
+   * Save status, shown only when it has something to say.
+   *
+   * A permanent indicator is clutter — the interesting states are "writing"
+   * and "that failed". `saved` shows briefly and fades; `error` stays, because
+   * a player who does not notice a failed save finds out much later.
+   */
+  setSaveStatus(status: 'idle' | 'saving' | 'saved' | 'error'): void {
+    if (!this.saveBadge) {
+      const host = document.getElementById('hud');
+      if (!host) return;
+      const el = document.createElement('div');
+      el.id = 'saveBadge';
+      el.style.cssText =
+        'position:absolute;top:14px;left:50%;transform:translateX(-50%);' +
+        'padding:5px 12px;border-radius:999px;opacity:0;transition:opacity 0.25s;' +
+        'font:600 11px/1 system-ui,sans-serif;letter-spacing:0.08em;' +
+        'text-transform:uppercase;pointer-events:none;';
+      host.appendChild(el);
+      this.saveBadge = el;
+    }
+
+    window.clearTimeout(this.saveHideTimer);
+    const el = this.saveBadge;
+
+    if (status === 'idle') {
+      el.style.opacity = '0';
+      return;
+    }
+
+    const look = {
+      saving: { text: 'Saving', bg: 'rgba(248,244,234,0.9)', fg: '#4a463e' },
+      saved: { text: 'Saved', bg: 'rgba(248,244,234,0.9)', fg: '#4a463e' },
+      error: { text: 'Not saved', bg: '#c2705a', fg: '#f8f4ea' },
+    }[status];
+
+    el.textContent = look.text;
+    el.style.background = look.bg;
+    el.style.color = look.fg;
+    el.style.opacity = '1';
+
+    if (status === 'saved') {
+      this.saveHideTimer = window.setTimeout(() => {
+        el.style.opacity = '0';
+      }, 1400);
+    }
+  }
+
   setDebug(text: string | null): void {
     if (text === null) {
       this.debug.hidden = true;

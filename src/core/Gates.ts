@@ -1,4 +1,5 @@
 import type { ZoneId } from '../world/zones/Manifest';
+import type { LifeRate } from './clocks/LifeClock';
 
 /**
  * Age and mode gates, in one place.
@@ -15,6 +16,36 @@ import type { ZoneId } from '../world/zones/Manifest';
  */
 
 export type GameMode = 'story' | 'freeRoam';
+
+/**
+ * What the player chooses when starting a Free Roam run.
+ *
+ * Story Mode has none of these: it starts at 15, with nothing, and earns its
+ * unlocks. Free Roam is the mode where those are a choice, which is the whole
+ * reason it exists — without them it is only "Story without the chapter gate".
+ */
+export interface FreeRoamOptions {
+  /** 15..80. Adult systems still gate on this; picking 20 is how you reach them. */
+  startAge: number;
+  startMoney: number;
+  /** Real minutes per in-game year, or frozen. */
+  rate: LifeRate;
+  /** Open the city from the start rather than earning it. */
+  unlockCity: boolean;
+  /**
+   * Vehicle to begin with. Stored and saved, but inert until Phase 5 builds
+   * vehicles — recorded now so a Free Roam save made today stays valid then.
+   */
+  startVehicle: 'none' | 'bicycle' | 'scooter';
+}
+
+export const DEFAULT_FREE_ROAM: FreeRoamOptions = {
+  startAge: 18,
+  startMoney: 500,
+  rate: 60,
+  unlockCity: true,
+  startVehicle: 'bicycle',
+};
 
 /** The age at which adult-only systems become available. Not negotiable. */
 export const ADULT_AGE = 18;

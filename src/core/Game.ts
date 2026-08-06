@@ -14,7 +14,13 @@ import { StoryClock } from './clocks/StoryClock';
 import { SaveService } from '../save/SaveService';
 import { createSaveDriver } from '../save/SaveDriver';
 import { CONTENT_VERSION, type SaveData, type SaveSlotId } from '../save/SaveSchema';
-import { canEnterZone, type GameMode, type GateContext } from './Gates';
+import {
+  canEnterZone,
+  DEFAULT_FREE_ROAM,
+  type FreeRoamOptions,
+  type GameMode,
+  type GateContext,
+} from './Gates';
 import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
@@ -111,6 +117,9 @@ export class Game {
   private readonly completedChapters = new Set<string>();
   /** True once an autosave has been applied, so mode selection defers to it. */
   private resumedFromSave = false;
+  private freeRoamMoney = 0;
+  /** Recorded and saved; inert until Phase 5 builds vehicles. */
+  private startVehicle: FreeRoamOptions['startVehicle'] = 'none';
   private readonly unlockedZones = new Set<ZoneId>(['village_coast']);
 
   private running = false;
@@ -276,6 +285,12 @@ export class Game {
     // no keepsakes, so this must degrade rather than assert.
     this.minimap = new Minimap(this.runtime.mapData, () => this.village?.keepsakeMarkers ?? []);
 
+    this.gameScope.addTeardown(
+      this.saves.onStatus((s) => this.hud.setSaveStatus(s)),
+      'subscription',
+      'save-status',
+    );
+
     this.post.setEnabled(this.settings.current.quality === 'high');
     this.applyViewport();
 
@@ -329,10 +344,14 @@ export class Game {
    * one, and switching it would silently change the rules of a run in
    * progress — story gates applied to a Free Roam save, or the reverse.
    */
-  begin(mode: GameMode = 'story'): void {
+  begin(mode: GameMode = 'story', options: FreeRoamOptions = DEFAULT_FREE_ROAM): void {
     if (this.running) return;
     this.running = true;
-    if (!this.resumedFromSave) this.mode = mode;
+
+    if (!this.resumedFromSave) {
+      this.mode = mode;
+      if (mode === 'freeRoam') this.applyFreeRoamOptions(options);
+    }
 
     this.input.attach(this.canvas);
     this.hud.show();
@@ -405,6 +424,26 @@ export class Game {
    * the next birthday cannot race it. Acknowledging is the last step, and is
    * what makes the delivery once-only across a reload.
    */
+  /**
+   * Apply the Free Roam setup to a fresh run.
+   *
+   * Age goes through `LifeClock.restore` rather than a setter so it lands in
+   * the same validated path a save uses — one way in, one set of clamps.
+   */
+  private applyFreeRoamOptions(o: FreeRoamOptions): void {
+    this.life.restore({
+      ageYears: o.startAge,
+      yearProgress: 0,
+      lastHandledAge: o.startAge,
+      rate: o.rate,
+      activeSeconds: 0,
+    });
+    this.freeRoamMoney = o.startMoney;
+    this.startVehicle = o.startVehicle;
+    if (o.unlockCity) this.unlockedZones.add('city_old_market');
+    this.hud.setAge(this.life.ageYears, this.life.yearProgress);
+  }
+
   private gateContext(): GateContext {
     return {
       mode: this.mode,
@@ -445,8 +484,9 @@ export class Game {
         completedChapters: [...this.completedChapters].sort(),
         quests: {},
       },
-      money: 0,
-      inventory: [],
+      money: this.freeRoamMoney,
+      inventory:
+        this.startVehicle === 'none' ? [] : [{ id: `keys_${this.startVehicle}`, count: 1 }],
       wardrobe: { ...this.player.outfit },
       vehicles: [],
       needs: { hunger: 1, energy: 1, cleanliness: 1, mood: 1 },
@@ -482,6 +522,7 @@ export class Game {
     this.unlockedZones.clear();
     for (const z of data.unlockedZones) this.unlockedZones.add(z);
 
+    this.freeRoamMoney = data.money;
     this.village?.collectibles.restoreFound(data.collectibles);
     if (this.village) {
       this.hud.setCounter(this.village.collectibles.count, this.village.collectibles.total);

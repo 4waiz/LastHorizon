@@ -1,5 +1,5 @@
 import gsap from 'gsap';
-import type { GameMode } from '../core/Gates';
+import { DEFAULT_FREE_ROAM, type FreeRoamOptions, type GameMode } from '../core/Gates';
 
 /**
  * Branded loading screen.
@@ -29,10 +29,12 @@ export class LoadingScreen {
   private done = false;
 
   private modeRow: HTMLElement | null = null;
+  private optionsPanel: HTMLElement | null = null;
   private chosenMode: GameMode = 'story';
   private modeLocked = false;
+  private freeRoam: FreeRoamOptions = { ...DEFAULT_FREE_ROAM };
 
-  constructor(private readonly onStart: (mode: GameMode) => void) {
+  constructor(private readonly onStart: (mode: GameMode, options: FreeRoamOptions) => void) {
     this.root = document.getElementById('loading')!;
     this.fill = document.getElementById('loadingFill')!;
     this.pct = document.getElementById('loadingPct')!;
@@ -200,8 +202,12 @@ export class LoadingScreen {
 
     const row = document.createElement('div');
     row.className = 'loading__modes';
+    // `position:relative` + z-index is required, not cosmetic: the loading
+    // screen's painted background (.sky, .sunglow, the hills) is absolutely
+    // positioned, so anything added in normal flow renders *behind* it and is
+    // invisible while still passing every DOM assertion.
     row.style.cssText =
-      'display:flex;gap:8px;justify-content:center;margin:0 0 12px;';
+      'position:relative;z-index:3;display:flex;gap:8px;justify-content:center;margin:0 0 12px;';
 
     for (const mode of ['story', 'freeRoam'] as const) {
       const b = document.createElement('button');
@@ -224,6 +230,101 @@ export class LoadingScreen {
     this.syncModeRow();
   }
 
+  /**
+   * Free Roam setup.
+   *
+   * Only these five choices, presented as chips rather than inputs: every one
+   * is a small closed set, and a chip row needs no validation, no keyboard
+   * handling and no error state. Story Mode hides the panel entirely — it
+   * starts at 15 with nothing and earns its unlocks.
+   */
+  private buildOptionsPanel(): void {
+    if (this.optionsPanel || !this.startBtn.parentElement) return;
+
+    const panel = document.createElement('div');
+    panel.className = 'loading__freeroam';
+    // See buildModeRow: without a stacking context this sits behind the
+    // painted background.
+    panel.style.cssText =
+      'position:relative;z-index:3;display:none;flex-direction:column;gap:9px;' +
+      'align-items:center;margin:0 auto 14px;padding:12px 16px;border-radius:14px;' +
+      'background:rgba(248,244,234,0.72);max-width:min(92vw,440px);';
+
+    panel.appendChild(
+      this.chipRow('Age', 'startAge', [15, 18, 25, 40], (v) => String(v)),
+    );
+    panel.appendChild(
+      this.chipRow('Money', 'startMoney', [0, 500, 5000], (v) => (v === 0 ? 'None' : `$${v}`)),
+    );
+    panel.appendChild(
+      this.chipRow('Ageing', 'rate', [30, 60, 120, 'frozen'] as const, (v) =>
+        v === 'frozen' ? 'Off' : `${v}m`,
+      ),
+    );
+    panel.appendChild(
+      this.chipRow('Start with', 'startVehicle', ['none', 'bicycle', 'scooter'] as const, (v) =>
+        v === 'none' ? 'Nothing' : v === 'bicycle' ? 'Bicycle' : 'Scooter',
+      ),
+    );
+    panel.appendChild(
+      this.chipRow('City', 'unlockCity', [true, false] as const, (v) => (v ? 'Open' : 'Locked')),
+    );
+
+    this.startBtn.parentElement.insertBefore(panel, this.startBtn);
+    this.optionsPanel = panel;
+  }
+
+  /** One labelled row of mutually exclusive chips bound to a settings key. */
+  private chipRow<K extends keyof FreeRoamOptions>(
+    label: string,
+    key: K,
+    values: readonly FreeRoamOptions[K][],
+    render: (v: FreeRoamOptions[K]) => string,
+  ): HTMLElement {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;';
+
+    const name = document.createElement('span');
+    name.textContent = label;
+    name.style.cssText =
+      'min-width:74px;font:600 10px/1 system-ui,sans-serif;letter-spacing:0.1em;' +
+      'text-transform:uppercase;color:rgba(74,70,62,0.7);';
+    row.appendChild(name);
+
+    for (const v of values) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = render(v);
+      b.dataset.opt = String(key);
+      b.dataset.val = String(v);
+      b.style.cssText =
+        'padding:5px 11px;border-radius:999px;border:1px solid rgba(74,70,62,0.24);' +
+        'background:transparent;color:#4a463e;font:600 11px/1 system-ui,sans-serif;' +
+        'cursor:pointer;';
+      b.addEventListener('click', () => {
+        this.freeRoam = { ...this.freeRoam, [key]: v };
+        this.syncOptionsPanel();
+      });
+      row.appendChild(b);
+    }
+    return row;
+  }
+
+  private syncOptionsPanel(): void {
+    if (!this.optionsPanel) return;
+    const show = this.chosenMode === 'freeRoam' && !this.modeLocked;
+    this.optionsPanel.style.display = show ? 'flex' : 'none';
+    if (!show) return;
+
+    for (const b of this.optionsPanel.querySelectorAll<HTMLButtonElement>('button')) {
+      const key = b.dataset.opt as keyof FreeRoamOptions;
+      const on = String(this.freeRoam[key]) === b.dataset.val;
+      b.style.background = on ? '#4a463e' : 'transparent';
+      b.style.color = on ? '#f8f4ea' : '#4a463e';
+      b.setAttribute('aria-pressed', String(on));
+    }
+  }
+
   private syncModeRow(): void {
     if (!this.modeRow) return;
 
@@ -239,6 +340,9 @@ export class LoadingScreen {
       b.style.color = on ? '#f8f4ea' : '#4a463e';
       b.setAttribute('aria-pressed', String(on));
     }
+
+    // Switching mode shows or hides the Free Roam setup with it.
+    this.syncOptionsPanel();
   }
 
   /** Everything is loaded; wait for a gesture so audio may start. */
@@ -246,6 +350,8 @@ export class LoadingScreen {
     this.target = 1;
     this.msg.textContent = 'Ready when you are.';
     this.buildModeRow();
+    this.buildOptionsPanel();
+    this.syncOptionsPanel();
     this.startBtn.hidden = false;
     gsap.fromTo(
       this.startBtn,
@@ -269,7 +375,7 @@ export class LoadingScreen {
       .timeline({
         onComplete: () => {
           this.root.style.display = 'none';
-          this.onStart(this.chosenMode);
+          this.onStart(this.chosenMode, this.freeRoam);
         },
       })
       // one last outward swoosh as the world takes over
