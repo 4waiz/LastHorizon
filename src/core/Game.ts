@@ -933,6 +933,10 @@ export class Game {
       this.hud.infoOpen || this.hud.wardrobeOpen || this.sleeping || this.transitioning;
     if (uiBlocking) this.input.releaseAll();
 
+    // Before anything reads input: the Gamepad API is polled, not evented, so
+    // a pad that is never asked reports nothing at all.
+    this.input.pollGamepad(dt);
+
     this.advanceClocks(dt);
 
     // 1. character

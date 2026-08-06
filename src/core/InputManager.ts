@@ -1,10 +1,15 @@
 /**
- * Keyboard, mouse, wheel and touch input.
+ * Keyboard, mouse, wheel, touch and gamepad input.
  *
  * The manager only records *state*; it never touches the scene. That keeps it
  * unit-testable and means a lost window focus can be handled in one place
  * (`releaseAll`) rather than leaving a key stuck down.
+ *
+ * Every device feeds the same fields. A player can pick a controller up or put
+ * it down mid-session and nothing has to be switched over.
  */
+
+import { GamepadReader, type GamepadState, EMPTY_STATE } from './GamepadReader';
 
 export interface MoveAxis {
   x: number;
@@ -21,6 +26,15 @@ const MOVE_KEYS: Record<string, [number, number]> = {
   KeyD: [1, 0],
   ArrowRight: [1, 0],
 };
+
+/**
+ * Right stick sweep at full deflection, in look-units per second.
+ *
+ * The look field is a pointer-drag delta in pixels, so a stick has to be
+ * converted into the same currency rather than given its own path -- otherwise
+ * the camera would need to know which device moved it.
+ */
+const GAMEPAD_LOOK_RATE = 620;
 
 export class InputManager {
   readonly move: MoveAxis = { x: 0, y: 0 };
@@ -42,11 +56,38 @@ export class InputManager {
   private stick: MoveAxis = { x: 0, y: 0 };
   private stickRunning = false;
 
+  /**
+   * Gamepad, polled rather than evented.
+   *
+   * Kept as its own contributor to `move` alongside the keyboard and the touch
+   * stick, so a player can put a controller down mid-session and keep playing
+   * on the keyboard without anything having to be switched over.
+   */
+  private readonly gamepad = new GamepadReader();
+  private gamepadMove: MoveAxis = { x: 0, y: 0 };
+  private gamepadRunning = false;
+  private gamepadInteractHeld = false;
+  private gamepadState: GamepadState = EMPTY_STATE;
+
   private disposers: Array<() => void> = [];
   private element: HTMLElement | null = null;
 
   get running(): boolean {
-    return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.stickRunning;
+    return (
+      this.keys.has('ShiftLeft') ||
+      this.keys.has('ShiftRight') ||
+      this.stickRunning ||
+      this.gamepadRunning
+    );
+  }
+
+  /** Last polled pad state, for the vehicle controller's analogue axes. */
+  get pad(): GamepadState {
+    return this.gamepadState;
+  }
+
+  get gamepadConnected(): boolean {
+    return this.gamepadState.connected;
   }
 
   get anyMovement(): boolean {
@@ -125,13 +166,59 @@ export class InputManager {
       x /= len;
       y /= len;
     }
-    this.move.x = x + this.stick.x;
-    this.move.y = y + this.stick.y;
+    this.move.x = x + this.stick.x + this.gamepadMove.x;
+    this.move.y = y + this.stick.y + this.gamepadMove.y;
     const l2 = Math.hypot(this.move.x, this.move.y);
     if (l2 > 1) {
       this.move.x /= l2;
       this.move.y /= l2;
     }
+  }
+
+  /**
+   * Poll the gamepad and fold it into the shared input state.
+   *
+   * Called once per frame, because the Gamepad API has no events for axis
+   * movement -- a pad that is never polled reports nothing at all.
+   */
+  pollGamepad(dt: number): GamepadState {
+    const s = this.gamepad.poll();
+    this.gamepadState = s;
+
+    if (!s.connected) {
+      if (this.gamepadMove.x !== 0 || this.gamepadMove.y !== 0) {
+        this.gamepadMove.x = 0;
+        this.gamepadMove.y = 0;
+        this.recomputeMove();
+      }
+      this.gamepadRunning = false;
+      this.gamepadInteractHeld = false;
+      return s;
+    }
+
+    this.gamepadMove.x = s.move.x;
+    this.gamepadMove.y = s.move.y;
+    this.gamepadRunning = s.held.has('run');
+    this.recomputeMove();
+
+    // Look is a pointer-drag delta in pixels; a stick deflection is a rate, so
+    // it has to be integrated over the frame to land in the same units.
+    if (Number.isFinite(dt) && dt > 0) {
+      this.lookX += s.look.x * GAMEPAD_LOOK_RATE * dt;
+      this.lookY += s.look.y * GAMEPAD_LOOK_RATE * dt;
+    }
+
+    if (s.pressed.has('jump')) this.jumpQueued = true;
+
+    // Held, not just pressed: hold-to-act needs a release to end it, and the
+    // pad is the one device that can report both cleanly.
+    const interact = s.held.has('interact');
+    if (interact !== this.gamepadInteractHeld) {
+      this.gamepadInteractHeld = interact;
+      if (interact) this.interactQueued = true;
+    }
+
+    return s;
   }
 
   /** Called by the on-screen joystick. Components are already in [-1,1]. */
@@ -159,6 +246,7 @@ export class InputManager {
   get interactHeld(): boolean {
     return (
       this.pointerInteractHeld ||
+      this.gamepadInteractHeld ||
       this.keys.has('KeyE') ||
       this.keys.has('KeyF') ||
       this.keys.has('Enter')
@@ -245,6 +333,13 @@ export class InputManager {
     this.jumpQueued = false;
     this.interactQueued = false;
     this.pointerInteractHeld = false;
+    this.gamepadInteractHeld = false;
+    this.gamepadRunning = false;
+    this.gamepadMove.x = 0;
+    this.gamepadMove.y = 0;
+    // Forget held buttons: a release that happened while blurred was missed,
+    // and without this the next poll would see a button that never went up.
+    this.gamepad.reset();
     this.move.x = 0;
     this.move.y = 0;
     this.lookX = 0;
