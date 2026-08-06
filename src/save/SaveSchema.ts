@@ -76,6 +76,17 @@ export interface VehicleData {
   position: Vec3Data;
   facing: number;
   impounded: boolean;
+  /**
+   * Added in Phase 5. Optional rather than required, so a v2 save written
+   * before vehicles existed still loads: `VehicleRegistry.restore` fills each
+   * of these from the definition when it is absent, which is the same thing a
+   * freshly registered vehicle gets.
+   */
+  owned?: boolean;
+  locked?: boolean;
+  condition?: number;
+  /** Null for anything that never burns fuel. */
+  fuel?: number | null;
 }
 
 export interface NeedsData {

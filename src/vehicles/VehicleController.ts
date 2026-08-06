@@ -279,11 +279,13 @@ export class VehicleController {
   }
 
   /**
-   * Stand a fallen two-wheeler back up, in place.
+   * Set the vehicle back on its wheels, where it stands.
    *
-   * Keeps its heading and position: teleporting a bike to a road would be more
-   * disruptive than the fall was. Velocity is dropped so it does not carry the
-   * crash into the recovery.
+   * Works for anything, not just two-wheelers: a car on its roof is the same
+   * problem and wants the same answer. Heading and position are kept, because
+   * teleporting a vehicle to the road would be more disruptive than the roll
+   * was — it is lifted just enough to clear the ground before it drops back.
+   * Velocity is dropped so the crash is not carried into the recovery.
    */
   rightItself(): void {
     const t = this.body.translation();
@@ -309,6 +311,26 @@ export class VehicleController {
     _quat.set(r.x, r.y, r.z, r.w);
     _forward.copy(FORWARD).applyQuaternion(_quat);
     return Math.atan2(_forward.x, _forward.z);
+  }
+
+  /**
+   * Lay the vehicle on its side, where it stands.
+   *
+   * Exists so the righting path can be exercised deliberately: a car dropped
+   * from a height lands on its wheels, so "roll it over" is otherwise
+   * surprisingly hard to produce on demand.
+   */
+  rollOver(): void {
+    const t = this.body.translation();
+    const yaw = this.headingYaw();
+    const q = _quat.setFromEuler(new THREE.Euler(0, yaw, Math.PI / 2, 'YXZ'));
+    this.body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+    this.body.setTranslation(
+      { x: t.x, y: t.y + this.def.dimensions.x * 0.5, z: t.z },
+      true,
+    );
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
 
   /** Put the vehicle somewhere valid, upright and at rest. */

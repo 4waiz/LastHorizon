@@ -58,6 +58,16 @@ export interface TestSurface {
   vehicleTelemetry(id: string): VehicleSnapshot | null;
   resetVehicle(id: string, x: number, y: number, z: number, facing: number): void;
   despawnVehicle(id: string): void;
+  enterVehicle(id: string, seatId?: string): Promise<boolean>;
+  exitVehicle(): Promise<boolean>;
+  ridingVehicle(): string | null;
+  setVehicleLocked(id: string, locked: boolean): void;
+  giveItem(id: string, count: number): boolean;
+  recoverVehicle(id: string): boolean;
+  rollVehicle(id: string): void;
+  pressFlip(): void;
+  vehicleRecord(id: string): unknown;
+  setFuelEnabled(on: boolean): void;
   initPhysics(): Promise<PhysicsSnapshot>;
   physicsState(): PhysicsSnapshot;
   gestureState(): { playing: string | null; weight: number };
@@ -234,6 +244,41 @@ export interface LHTestBridge {
   resetVehicle(id: string, x: number, y: number, z: number, facing: number): void;
 
   despawnVehicle(id: string): void;
+
+  /** Get in. False when the vehicle refuses -- locked, moving, no key. */
+  enterVehicle(id: string, seatId?: string): Promise<boolean>;
+
+  /** Get out. False when there is nowhere safe to stand. */
+  exitVehicle(): Promise<boolean>;
+
+  /** Instance id of whatever the player is riding, or null. */
+  getRidingVehicle(): string | null;
+
+  setVehicleLocked(id: string, locked: boolean): void;
+
+  /**
+   * Put an item in the player's inventory. False for an unknown id.
+   *
+   * Keys are the reason this exists: a car that requires one cannot be entered
+   * in a test otherwise, and hard-coding a bypass would test a path players
+   * never take.
+   */
+  giveItem(id: string, count?: number): boolean;
+
+  /** Return a lost, flipped, submerged or impounded vehicle to the garage. */
+  recoverVehicle(id: string): boolean;
+
+  /** Lay a vehicle on its side, so the righting path can be exercised. */
+  rollVehicle(id: string): void;
+
+  /** Press the righting control, as R or the pad's d-pad down would. */
+  pressFlip(): void;
+
+  /** Ownership, condition, fuel and where it was parked. Null if unknown. */
+  getVehicleRecord(id: string): unknown;
+
+  /** Fuel is optional; switching it off stops consumption entirely. */
+  setFuelEnabled(on: boolean): void;
 
   /**
    * Bring Rapier up and hand it the zone's collision geometry.
@@ -442,6 +487,46 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     despawnVehicle(id: string): void {
       surface.despawnVehicle(id);
+    },
+
+    enterVehicle(id: string, seatId?: string): Promise<boolean> {
+      return surface.enterVehicle(id, seatId);
+    },
+
+    exitVehicle(): Promise<boolean> {
+      return surface.exitVehicle();
+    },
+
+    getRidingVehicle(): string | null {
+      return surface.ridingVehicle();
+    },
+
+    setVehicleLocked(id: string, locked: boolean): void {
+      surface.setVehicleLocked(id, locked);
+    },
+
+    giveItem(id: string, count = 1): boolean {
+      return surface.giveItem(id, count);
+    },
+
+    recoverVehicle(id: string): boolean {
+      return surface.recoverVehicle(id);
+    },
+
+    rollVehicle(id: string): void {
+      surface.rollVehicle(id);
+    },
+
+    pressFlip(): void {
+      surface.pressFlip();
+    },
+
+    getVehicleRecord(id: string): unknown {
+      return surface.vehicleRecord(id);
+    },
+
+    setFuelEnabled(on: boolean): void {
+      surface.setFuelEnabled(on);
     },
 
     initPhysics(): Promise<PhysicsSnapshot> {

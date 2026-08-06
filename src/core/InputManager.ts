@@ -45,6 +45,8 @@ export class InputManager {
 
   private keys = new Set<string>();
   private jumpQueued = false;
+  /** True once per press of the righting key. */
+  private flipQueued = false;
   private interactQueued = false;
   /** Touch or gamepad interact, which have no entry in `keys`. */
   private pointerInteractHeld = false;
@@ -142,6 +144,11 @@ export class InputManager {
         this.jumpQueued = true;
         e.preventDefault();
       }
+      // Righting a vehicle. Harmless on foot, so it needs no mode check here.
+      if (code === 'KeyR') {
+        this.flipQueued = true;
+        e.preventDefault();
+      }
       if (code in MOVE_KEYS || code === 'Space') e.preventDefault();
       this.keys.add(code);
     } else {
@@ -209,6 +216,7 @@ export class InputManager {
     }
 
     if (s.pressed.has('jump')) this.jumpQueued = true;
+    if (s.pressed.has('flip')) this.flipQueued = true;
 
     // Held, not just pressed: hold-to-act needs a release to end it, and the
     // pad is the one device that can report both cleanly.
@@ -264,6 +272,17 @@ export class InputManager {
     if (!this.interactQueued) return false;
     this.interactQueued = false;
     return true;
+  }
+
+  /** True exactly once per press of R, or the pad's righting button. */
+  consumeFlip(): boolean {
+    if (!this.flipQueued) return false;
+    this.flipQueued = false;
+    return true;
+  }
+
+  queueFlip(): void {
+    this.flipQueued = true;
   }
 
   /** True exactly once per jump press. */
@@ -331,6 +350,7 @@ export class InputManager {
     this.pointerActive = false;
     this.pointerId = -1;
     this.jumpQueued = false;
+    this.flipQueued = false;
     this.interactQueued = false;
     this.pointerInteractHeld = false;
     this.gamepadInteractHeld = false;

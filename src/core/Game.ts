@@ -16,6 +16,8 @@ import { PhysicsWorld } from '../physics/PhysicsWorld';
 import type { VehicleController } from '../vehicles/VehicleController';
 import type { VehicleId } from '../vehicles/VehicleDefinition';
 import type { VehicleInput } from '../vehicles/VehicleDynamics';
+import type { SeatSpec } from '../vehicles/VehicleDefinition';
+import { VehicleRegistry } from '../vehicles/VehicleRegistry';
 import { LifeClock } from './clocks/LifeClock';
 import { WorldClock } from './clocks/WorldClock';
 import { StoryClock } from './clocks/StoryClock';
@@ -44,7 +46,7 @@ import { Environment } from '../world/Environment';
 import { Player } from '../player/Player';
 import { Inventory, Equipment, type EquipSlot } from '../player/Inventory';
 import { Needs } from '../player/Needs';
-import { ThirdPersonCamera } from '../camera/ThirdPersonCamera';
+import { DEFAULT_CAMERA, ThirdPersonCamera } from '../camera/ThirdPersonCamera';
 import { ContactShadow } from '../graphics/StylizedShadows';
 import { PostProcessing } from '../graphics/PostProcessing';
 import { WindowPortal } from '../graphics/WindowPortal';
@@ -157,6 +159,53 @@ export class Game {
   /** Base meshes, LODs and collision proxies from vehicles.glb, by node name. */
   private vehicleModels = new Map<string, THREE.Object3D>();
   private nextVehicleSerial = 1;
+  /** Vehicles the player has locked. */
+  private readonly lockedVehicles = new Set<string>();
+  /**
+   * Ownership, condition, fuel and where each vehicle was parked.
+   *
+   * Separate from the controllers because a controller only exists while its
+   * vehicle is loaded in the current zone, and none of this may be forgotten
+   * when the player walks away or travels.
+   */
+  private readonly garage = new VehicleRegistry();
+  /** Distance each vehicle has driven since fuel was last charged, metres. */
+  private readonly odometer = new Map<string, number>();
+  /** Speed last step, to notice an impact without subscribing to contacts. */
+  private readonly lastSpeed = new Map<string, number>();
+  /**
+   * Fuel is a soft system and can be switched off entirely, per the brief.
+   * A bicycle is unaffected either way -- it has no tank to empty.
+   */
+  private fuelEnabled = true;
+
+  /**
+   * What the player is riding, if anything.
+   *
+   * The character keeps existing while seated -- hidden and held at the seat --
+   * rather than being destroyed and rebuilt. Getting out is then a matter of
+   * showing it again and teleporting it somewhere safe, and none of the
+   * inventory, needs or appearance state has to survive a round trip.
+   */
+  private riding: { id: string; seat: SeatSpec } | null = null;
+  private cameraWasReversing = false;
+
+  /**
+   * The vehicle modules, once loaded.
+   *
+   * `updateRiding` runs every frame, so it cannot await an import. It also
+   * cannot run before a vehicle exists, and a vehicle cannot exist before
+   * `spawnVehicle` has finished importing — so capturing the namespaces there
+   * makes the frame path synchronous without pulling ~19 kB of driving code
+   * into the startup bundle.
+   */
+  private vehicleApi: {
+    controls: typeof import('../vehicles/VehicleControls');
+    access: typeof import('../vehicles/VehicleAccess');
+    dynamics: typeof import('../vehicles/VehicleDynamics');
+  } | null = null;
+  private readonly camTarget = new THREE.Vector3();
+  private readonly seatPos = new THREE.Vector3();
 
   private readonly saves = new SaveService(createSaveDriver());
   private mode: GameMode = 'story';
@@ -352,6 +401,9 @@ export class Game {
     this.minimap = new Minimap(this.runtime.mapData, () => this.village?.keepsakeMarkers ?? []);
     // Needs the HUD, because the wardrobe handler opens it.
     this.syncInteractables();
+    // Somewhere for recovered vehicles to reappear: the verge by the house,
+    // clear of the road so a returned car is not dropped into traffic.
+    this.garage.setGarage('village_coast', { x: 12.6, y: this.runtime.heightAt(12.6, 28), z: 28, facing: Math.PI / 2 });
 
     this.gameScope.addTeardown(
       this.saves.onStatus((s) => this.hud.setSaveStatus(s)),
@@ -579,7 +631,7 @@ export class Game {
       money: this.freeRoamMoney,
       inventory: this.inventory.toJSON(),
       wardrobe: this.equipment.toJSON(),
-      vehicles: [],
+      vehicles: this.garage.toJSON() as SaveData['vehicles'],
       needs: this.needs.toJSON(),
       relationships: [],
       collectibles: this.village?.collectibles.foundIds ?? [],
@@ -618,6 +670,7 @@ export class Game {
     if (this.village) {
       this.hud.setCounter(this.village.collectibles.count, this.village.collectibles.total);
     }
+    this.garage.restore(data.vehicles as unknown as Array<Record<string, unknown>>);
     this.inventory.restore(data.inventory);
     this.needs.restoreFrom(data.needs);
     // Accepts both item ids and the raw hex a pre-migration save holds.
@@ -937,6 +990,23 @@ export class Game {
       resetVehicle: (id, x, y, z, facing) =>
         this.vehicles.get(id)?.resetTo(new THREE.Vector3(x, y, z), facing),
       despawnVehicle: (id) => this.despawnVehicle(id),
+      enterVehicle: (id, seatId) => this.enterVehicle(id, seatId),
+      exitVehicle: () => this.exitVehicle(),
+      ridingVehicle: () => this.ridingVehicleId,
+      setVehicleLocked: (id, locked) => this.setVehicleLocked(id, locked),
+      giveItem: (id, count) => this.inventory.add(id, count).added > 0,
+      recoverVehicle: (id) => this.recoverVehicle(id),
+      rollVehicle: (id) => {
+        this.vehicles.get(id)?.rollOver();
+      },
+      pressFlip: () => this.input.queueFlip(),
+      vehicleRecord: (id) => {
+        const r = this.garage.get(id);
+        return r ? { ...r, transform: { ...r.transform } } : null;
+      },
+      setFuelEnabled: (on) => {
+        this.fuelEnabled = on;
+      },
       initPhysics: async () => {
         await this.ensurePhysics();
         return this.physicsSnapshot();
@@ -977,6 +1047,10 @@ export class Game {
 
     this.advanceClocks(dt);
 
+    // 0. driving, before the character: while seated, the player's own
+    //    controller must not also be reading the stick.
+    this.updateRiding();
+
     // 1. character
     this.camForward.copy(this.camera.forward);
     this.camRight.copy(this.camera.right);
@@ -994,7 +1068,8 @@ export class Game {
     }
 
     // 2. camera (reads the already-resolved player position)
-    this.camera.update(dt, this.player.lookTarget, this.input, this.runtime.collision, this.scene);
+    const camTarget = this.riding ? this.vehicleCameraTarget() : this.player.lookTarget;
+    this.camera.update(dt, camTarget, this.input, this.runtime.collision, this.scene);
 
     // 3. atmosphere
     this.env.update(dt, this.elapsed, this.player.position, this.camera.camera.position);
@@ -1095,6 +1170,95 @@ export class Game {
     }
     this.physicsAlpha = tick.alpha;
     this.syncVehicleProxies();
+    if (tick.steps > 0) this.updateVehicleUpkeep(tick.steps * tick.dt);
+  }
+
+  /**
+   * Fuel, damage and where each vehicle is, once per batch of physics steps.
+   *
+   * Impacts are noticed as a sudden drop in speed rather than by subscribing
+   * to contact events: the drop is what damage is a function of anyway, and it
+   * costs one subtraction per vehicle instead of a collision callback.
+   */
+  private updateVehicleUpkeep(dt: number): void {
+    for (const [id, controller] of this.vehicles) {
+      const t = controller.telemetry;
+      const speed = Math.abs(t.forwardSpeed);
+
+      const previous = this.lastSpeed.get(id) ?? speed;
+      const lost = previous - speed;
+      // Braking sheds speed too, so only a drop far faster than the brakes can
+      // manage counts as hitting something.
+      if (lost > 4 && dt > 0 && lost / dt > 40) this.garage.damage(id, lost);
+      this.lastSpeed.set(id, speed);
+
+      const travelled = (this.odometer.get(id) ?? 0) + speed * dt;
+      if (travelled > 25) {
+        this.odometer.set(id, 0);
+        this.garage.consumeFuel(id, travelled, this.fuelEnabled);
+      } else {
+        this.odometer.set(id, travelled);
+      }
+
+      const record = this.garage.get(id);
+      if (record) {
+        controller.setCondition(record.condition);
+        const at = controller.position(this.seatPos);
+        this.garage.park(id, this.zones.activeZoneId ?? record.zone, {
+          x: at.x, y: at.y, z: at.z, facing: controller.headingYaw(),
+        });
+      }
+    }
+  }
+
+  /**
+   * Set a vehicle back on its wheels in place.
+   *
+   * Distinct from `recoverVehicle`, which returns it to the garage. Rolling a
+   * car onto its roof in a field is the common case and the player almost
+   * always wants to carry on from there rather than be sent home.
+   */
+  rightVehicle(id: string): boolean {
+    const controller = this.vehicles.get(id);
+    if (!controller) return false;
+    controller.rightItself();
+    return true;
+  }
+
+  /**
+   * Put a vehicle back somewhere sensible.
+   *
+   * One path for flipped, submerged, out of bounds, impounded or simply lost,
+   * because from the player's side they are the same problem: the thing they
+   * own is somewhere they cannot use it.
+   */
+  recoverVehicle(id: string): boolean {
+    const record = this.garage.get(id);
+    if (!record) return false;
+    const controller = this.vehicles.get(id);
+
+    const reason = controller
+      ? this.garage.needsRecovery(
+          id,
+          {
+            upright: controller.telemetry.upright,
+            y: controller.position(this.seatPos).y,
+            inBounds: this.runtime.inBounds(controller.position(this.seatPos).x, this.seatPos.z),
+          },
+          -2,
+        ) ?? 'lost'
+      : 'lost';
+
+    const moved = this.garage.recover(id, reason, this.zones.activeZoneId ?? record.zone);
+    if (!moved) return false;
+
+    if (this.riding?.id === id) void this.exitVehicle();
+    controller?.resetTo(
+      new THREE.Vector3(moved.transform.x, moved.transform.y + 0.4, moved.transform.z),
+      moved.transform.facing,
+    );
+    this.hud.showToast('Recovered', `Returned to the garage (${reason})`);
+    return true;
   }
 
   /** Draw each vehicle at its interpolated transform. */
@@ -1113,11 +1277,31 @@ export class Game {
    * settles rather than starting compressed through the road.
    */
   async spawnVehicle(kind: VehicleId, x: number, z: number, facing = 0): Promise<string | null> {
-    const [{ vehicleDef }, { VehicleController: Controller }, physics] = await Promise.all([
-      import('../vehicles/VehicleDefinition'),
-      import('../vehicles/VehicleController'),
-      this.ensurePhysics(),
-    ]);
+    const [{ vehicleDef }, { VehicleController: Controller }, controls, access, dynamics, physics] =
+      await Promise.all([
+        import('../vehicles/VehicleDefinition'),
+        import('../vehicles/VehicleController'),
+        import('../vehicles/VehicleControls'),
+        import('../vehicles/VehicleAccess'),
+        import('../vehicles/VehicleDynamics'),
+        this.ensurePhysics(),
+      ]);
+    this.vehicleApi = { controls, access, dynamics };
+    // The registry deliberately does not import the catalogue, so hand it the
+    // few rules it needs now that the catalogue is actually here. This also
+    // prunes any saved vehicle whose kind no longer exists.
+    this.garage.setRules((k) => {
+      const d = vehicleDef(k as VehicleId);
+      if (!d) return null;
+      return {
+        fuelCapacity: d.fuel?.capacity ?? null,
+        consumptionPerKm: d.fuel?.consumptionPerKm ?? 0,
+        scratchSpeed: d.damage.scratchSpeed,
+        dentSpeed: d.damage.dentSpeed,
+        repairCost: d.damage.repairCost,
+        impoundable: d.ownership.impoundable,
+      };
+    });
 
     const def = vehicleDef(kind);
     if (!def) return null;
@@ -1131,6 +1315,16 @@ export class Game {
     const visual = this.buildVehicleVisual(def, id);
     this.scene.add(visual);
     this.vehicleProxies.set(id, visual);
+    this.registerVehicleInteractable(id);
+    this.garage.register({
+      id,
+      kind,
+      zone: this.zones.activeZoneId ?? 'village_coast',
+      transform: { x: at.x, y: at.y, z: at.z, facing },
+      owned: def.ownership.ownable,
+      locked: false,
+      impounded: false,
+    });
 
     return id;
   }
@@ -1190,8 +1384,11 @@ export class Game {
   }
 
   despawnVehicle(id: string): void {
+    if (this.riding?.id === id) void this.exitVehicle();
+    this.interactions.unregister(`vehicle:${id}`);
     this.vehicles.get(id)?.dispose();
     this.vehicles.delete(id);
+    this.lockedVehicles.delete(id);
     const visual = this.vehicleProxies.get(id);
     if (visual) {
       this.scene.remove(visual);
@@ -1219,6 +1416,40 @@ export class Game {
     for (const it of worldInteractables(this.runtime.interactables, this.interactionHandlers)) {
       this.interactions.register(it);
     }
+    for (const id of this.vehicles.keys()) this.registerVehicleInteractable(id);
+  }
+
+  /**
+   * Offer "get in" near a vehicle.
+   *
+   * Registered with the same `InteractionSystem` as the doors and the bed, so
+   * a car parked by the front door goes through the selector rather than
+   * competing with it. `position()` is read per frame, which is what makes a
+   * *moving* vehicle work without any special handling.
+   */
+  private registerVehicleInteractable(id: string): void {
+    const controller = this.vehicles.get(id);
+    if (!controller) return;
+    const def = controller.def;
+    const at = new THREE.Vector3();
+
+    this.interactions.register({
+      id: `vehicle:${id}`,
+      position: () => controller.position(at),
+      actions: [
+        {
+          id: `vehicle:${id}:enter`,
+          label: `Get on the ${def.displayName.toLowerCase()}`,
+          priority: 25,
+          // Reach from the widest part of the vehicle, plus an arm's length.
+          maxDistance: Math.max(def.dimensions.x, def.dimensions.z) * 0.5 + 1.4,
+          facingTolerance: null,
+          holdSeconds: 0,
+          isAvailable: () => this.riding === null,
+          execute: () => void this.enterVehicle(id),
+        },
+      ],
+    });
   }
 
   /**
@@ -1232,6 +1463,213 @@ export class Game {
   private applyNeedsSettings(): void {
     const s = this.settings.current;
     this.needs.configure({ enabled: s.needsEnabled, decayScale: s.needsDecay });
+  }
+
+  /** Right whichever vehicle the player is standing closest to, within reach. */
+  private rightNearestVehicle(): boolean {
+    let best: string | null = null;
+    let bestDistance = 6;
+    for (const [id, controller] of this.vehicles) {
+      const at = controller.position(this.seatPos);
+      const d = Math.hypot(at.x - this.player.position.x, at.z - this.player.position.z);
+      if (d < bestDistance) {
+        best = id;
+        bestDistance = d;
+      }
+    }
+    return best ? this.rightVehicle(best) : false;
+  }
+
+  /** Where the camera looks while driving: the vehicle, at cabin height. */
+  private vehicleCameraTarget(): THREE.Vector3 {
+    const controller = this.riding ? this.vehicles.get(this.riding.id) : null;
+    if (!controller) return this.player.lookTarget;
+    const at = controller.position(this.camTarget);
+    return at.setY(at.y + controller.def.camera.height * 0.5);
+  }
+
+  /**
+   * Drive, and keep the seated character with the vehicle.
+   *
+   * Runs before the character update so the player's own controller never sees
+   * the same stick that is steering.
+   */
+  private updateRiding(): void {
+    if (!this.riding) return;
+    const controller = this.vehicles.get(this.riding.id);
+    if (!controller) {
+      // The vehicle went away underneath the rider -- despawned, or a zone
+      // change took it. Put the player back on their feet rather than leaving
+      // them attached to nothing.
+      this.riding = null;
+      this.player.root.visible = true;
+      this.hud.setVehicleReadout(null);
+      return;
+    }
+
+    const api = this.vehicleApi;
+    if (!api) return;
+
+    // R, or the pad's d-pad down: set it back on its wheels where it stands.
+    if (this.input.consumeFlip()) this.rightVehicle(this.riding.id);
+
+    const blocked = this.hud.infoOpen || this.hud.wardrobeOpen || this.transitioning;
+    controller.setInput(
+      blocked
+        ? { steer: 0, throttle: 0, brake: 1, handbrake: true }
+        : api.controls.vehicleInputFrom(this.input.move, this.input.pad, this.input.running),
+    );
+
+    // Hold the character at its seat so its shadow and anything attached to it
+    // travel with the vehicle, even though the mesh itself is hidden.
+    const t = controller.telemetry;
+    const seatAt = api.access.seatWorldPosition(
+      {
+        position: controller.position(this.seatPos),
+        yaw: controller.headingYaw(),
+        speed: t.forwardSpeed,
+      },
+      this.riding.seat,
+    );
+    this.player.motor.teleport(seatAt.x, seatAt.y, seatAt.z);
+    this.player.controller.facing = controller.headingYaw();
+
+    this.cameraWasReversing = api.controls.isReversing(t.forwardSpeed, this.cameraWasReversing);
+    Object.assign(
+      this.camera.tuning,
+      api.controls.vehicleCameraTuning(
+        controller.def.camera,
+        t.forwardSpeed,
+        controller.def.drive.maxSpeed,
+      ),
+    );
+
+    this.hud.setVehicleReadout(
+      api.controls.dashboard(
+        controller.def,
+        t.speedKmh,
+        api.dynamics.gearLabel(t.gear),
+        1,
+        null,
+      ),
+    );
+  }
+
+  /** Put the player into a vehicle. False when they may not. */
+  async enterVehicle(id: string, seatId?: string): Promise<boolean> {
+    const controller = this.vehicles.get(id);
+    if (!controller || this.riding) return false;
+
+    const access = this.vehicleApi?.access ?? (await import('../vehicles/VehicleAccess'));
+    const pose = {
+      position: controller.position(this.seatPos),
+      yaw: controller.headingYaw(),
+      speed: controller.telemetry.forwardSpeed,
+    };
+
+    const chosen = seatId
+      ? controller.def.seats.find((s) => s.id === seatId)
+      : access.nearestSeat(controller.def, pose, this.player.position, { driverOnly: true })?.seat;
+    if (!chosen) return false;
+
+    const allowed = access.canEnter(controller.def, chosen, pose, {
+      keys: new Set(this.inventory.toJSON().map((stack) => stack.id)),
+      locked: this.lockedVehicles.has(id),
+      occupied: new Set<string>(),
+    });
+    if (!allowed.ok) {
+      this.hud.showToast('Vehicle', access.entryRefusalText(allowed.reason));
+      return false;
+    }
+
+    this.riding = { id, seat: chosen };
+    this.player.root.visible = false;
+    this.player.setSitting(false);
+    this.camera.resetBehind(this.vehicleCameraTarget(), controller.headingYaw());
+    this.hud.setPrompt(null);
+    return true;
+  }
+
+  /**
+   * Get out, if there is anywhere safe to stand.
+   *
+   * Refusing is a real outcome, not an error. The acceptance criterion is that
+   * the player cannot end up in a wall or over a cliff, and the only way to
+   * honour that is sometimes to say no.
+   */
+  async exitVehicle(): Promise<boolean> {
+    if (!this.riding) return false;
+    const controller = this.vehicles.get(this.riding.id);
+    if (!controller) {
+      this.riding = null;
+      this.player.root.visible = true;
+      this.hud.setVehicleReadout(null);
+      return true;
+    }
+
+    const access = this.vehicleApi?.access ?? (await import('../vehicles/VehicleAccess'));
+    const t = controller.telemetry;
+    const placed = access.exitPlacement(
+      controller.def,
+      this.riding.seat,
+      {
+        position: controller.position(this.seatPos),
+        yaw: controller.headingYaw(),
+        speed: t.forwardSpeed,
+      },
+      this.placementProbe(),
+    );
+
+    if (!placed.ok) {
+      this.hud.showToast('Vehicle', access.exitRefusalText(placed.reason));
+      return false;
+    }
+
+    this.riding = null;
+    controller.setInput({ steer: 0, throttle: 0, brake: 1, handbrake: true });
+    this.player.root.visible = true;
+    this.player.motor.teleport(placed.position.x, placed.position.y + 0.05, placed.position.z);
+
+    // Hand the camera back its character tuning; it is one object shared by
+    // both, so leaving it on the vehicle's settings follows the player out.
+    Object.assign(this.camera.tuning, DEFAULT_CAMERA);
+    this.camera.resetBehind(this.player.lookTarget, this.player.controller.facing);
+    this.hud.setVehicleReadout(null);
+    return true;
+  }
+
+  /** Answers about the world, for `exitPlacement`. */
+  private placementProbe() {
+    return {
+      groundAt: (x: number, z: number): number | null =>
+        this.runtime.inBounds(x, z) ? this.runtime.heightAt(x, z) : null,
+      isClear: (x: number, y: number, z: number, radius: number): boolean => {
+        // Sweep the player's capsule at the candidate spot; any displacement
+        // means something solid is already there.
+        const segment = new THREE.Line3(
+          new THREE.Vector3(x, y + radius, z),
+          new THREE.Vector3(x, y + 1.75 - radius, z),
+        );
+        const resolved = this.runtime.collision.resolveCapsule(segment, radius, {
+          displacement: new THREE.Vector3(),
+          groundNormal: null,
+        });
+        return resolved.displacement.lengthSq() < 1e-4;
+      },
+    };
+  }
+
+  get ridingVehicleId(): string | null {
+    return this.riding?.id ?? null;
+  }
+
+  setVehicleLocked(id: string, locked: boolean): void {
+    if (locked) this.lockedVehicles.add(id);
+    else this.lockedVehicles.delete(id);
+  }
+
+  isVehicleLocked(id: string): boolean {
+    return this.lockedVehicles.has(id);
   }
 
   /** What actions are allowed to read when deciding whether they can run. */
@@ -1254,6 +1692,10 @@ export class Game {
   private updateInteraction(dt: number): void {
     // Consumed unconditionally, so a press aimed at nothing cannot fire later.
     const pressed = this.input.consumeInteract();
+
+    // On foot, R rights the nearest vehicle in reach. Standing beside a car on
+    // its roof and having no way to turn it over is the frustrating case.
+    if (!this.riding && this.input.consumeFlip()) this.rightNearestVehicle();
     const ctx = this.interactionContext();
 
     // Nothing may fire mid-transition, mid-nap or behind the wardrobe panel —
@@ -1262,6 +1704,26 @@ export class Game {
     if (ctx.busy) {
       this.lastInteraction = null;
       this.hud.setPrompt(null);
+      return;
+    }
+
+    // Driving: the only thing on offer is getting out. Leaving the world's
+    // interactables live would let a player open their front door from the
+    // driving seat of a car parked outside it.
+    if (this.riding) {
+      const label = 'Get out';
+      this.hud.setPrompt(label);
+      // Publish it as the interaction state too, or anything reading the
+      // system -- the HUD's own record, the test bridge -- keeps reporting
+      // last frame's "get in" while the player is already driving.
+      this.lastInteraction = {
+        primary: null,
+        candidates: [],
+        needsSelector: false,
+        holdProgress: 0,
+        prompt: label,
+      };
+      if (pressed) void this.exitVehicle();
       return;
     }
 

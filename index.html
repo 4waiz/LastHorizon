@@ -185,6 +185,16 @@
       <canvas id="minimap" class="minimap" width="320" height="320" aria-hidden="true"></canvas>
       <div id="prompt" class="prompt"><kbd>E</kbd><span id="promptText"></span></div>
       <div id="hint" class="hint">WASD to walk · Shift to run · Space to jump · drag to look</div>
+
+      <!-- Vehicle dashboard. Hidden until the player is actually driving. -->
+      <div id="dash" class="dash" hidden>
+        <div class="dash__speed"><span id="dashSpeed">0 km/h</span><span id="dashGear" class="dash__gear">N</span></div>
+        <div class="dash__bars">
+          <div class="dash__bar" title="Condition"><i id="dashCondition"></i></div>
+          <div class="dash__bar dash__bar--fuel" id="dashFuelWrap" title="Fuel"><i id="dashFuel"></i></div>
+        </div>
+        <div id="dashHints" class="dash__hints"></div>
+      </div>
       <div id="debug" class="debug" hidden></div>
     </div>
 

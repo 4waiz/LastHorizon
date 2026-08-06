@@ -36,6 +36,9 @@ const START = { x: 0, z: 30 };
 
 const KINDS = ['bicycle', 'scooter', 'hatchback', 'van', 'police'] as const;
 
+const settle = (page: Page, frames: number) =>
+  page.evaluate((f) => window.__LH_TEST__!.settle(f), frames);
+
 /** Spawn, let the suspension settle, hold throttle, and report. */
 async function accelerationRun(page: Page, kind: string, seconds = 3) {
   return page.evaluate(
@@ -346,6 +349,276 @@ test.describe('driving', () => {
 
     expect(counts.during).toBe(counts.before + 3);
     expect(counts.after).toBe(counts.before);
+    expect(errors).toEqual([]);
+  });
+});
+
+/**
+ * The playable loop: walk up, get in, drive, get out.
+ *
+ * Driving is exercised through a fake gamepad rather than `setVehicleInput`,
+ * because once the player is seated their own controls own the vehicle and the
+ * bridge's direct input is overwritten every frame. Testing the bridge path
+ * would test something no player can reach.
+ */
+test.describe('riding', () => {
+  /** Install a fake standard-mapping pad and return its mutable state key. */
+  async function installPad(page: Page) {
+    await page.evaluate(() => {
+      const w = window as unknown as { __pad: { axes: number[]; buttons: number[] } };
+      w.__pad = { axes: [0, 0, 0, 0], buttons: new Array(17).fill(0) };
+      navigator.getGamepads = () =>
+        [{
+          axes: w.__pad.axes.slice(),
+          buttons: w.__pad.buttons.map((v) => ({ pressed: v > 0.5, touched: v > 0, value: v })),
+          connected: true, id: 'Fake Pad', index: 0, mapping: 'standard',
+          timestamp: performance.now(), vibrationActuator: null,
+        } as unknown as Gamepad] as (Gamepad | null)[];
+    });
+  }
+
+  const setPad = (page: Page, axes: number[], buttons: Record<number, number> = {}) =>
+    page.evaluate(([a, b]) => {
+      const w = window as unknown as { __pad: { axes: number[]; buttons: number[] } };
+      w.__pad.axes = a as number[];
+      w.__pad.buttons = new Array(17).fill(0);
+      for (const [i, v] of Object.entries(b as Record<number, number>)) {
+        w.__pad.buttons[Number(i)] = v as number;
+      }
+    }, [axes, buttons] as const);
+
+  test('a bicycle can be walked up to, ridden and left', async ({ page }) => {
+    test.setTimeout(180_000);
+    const errors = watchConsole(page);
+    await boot(page);
+    await installPad(page);
+
+    const seen = await page.evaluate(async ([sx, sz]) => {
+      const t = window.__LH_TEST__!;
+      t.teleport(sx as number, sz as number, 0);
+      t.settle(20);
+      const id = (await t.spawnVehicle('bicycle', (sx as number) + 1.6, (sz as number) + 1.5, 0))!;
+      t.settle(90);
+
+      const offered = t.getInteraction().prompt;
+      const entered = await t.enterVehicle(id);
+      t.settle(20);
+      return { id, offered, entered, riding: t.getRidingVehicle(), prompt: t.getInteraction().prompt };
+    }, [START.x, START.z] as const);
+
+    // The bicycle needs no key, so it is the one anyone can always ride.
+    expect(seen.offered).toContain('bicycle');
+    expect(seen.entered).toBe(true);
+    expect(seen.riding).toBe(seen.id);
+    // While driving, the only thing on offer is getting out.
+    expect(seen.prompt).toBe('Get out');
+
+    const left = await page.evaluate(async () => {
+      const t = window.__LH_TEST__!;
+      const out = await t.exitVehicle();
+      t.settle(30);
+      return { out, riding: t.getRidingVehicle(), player: t.getPlayerState() };
+    });
+    expect(left.out).toBe(true);
+    expect(left.riding).toBeNull();
+    expect(left.player.indoors).toBe(false);
+    expect(errors).toEqual([]);
+  });
+
+  test('a locked car refuses until the player holds its key', async ({ page }) => {
+    test.setTimeout(180_000);
+    const errors = watchConsole(page);
+    await boot(page);
+
+    const seen = await page.evaluate(async ([sx, sz]) => {
+      const t = window.__LH_TEST__!;
+      t.teleport(sx as number, sz as number, 0);
+      t.settle(20);
+      const id = (await t.spawnVehicle('hatchback', (sx as number) + 2.2, (sz as number) + 2, 0))!;
+      t.settle(90);
+
+      const without = await t.enterVehicle(id);
+      const gave = t.giveItem('keys_hatchback', 1);
+      const withKey = await t.enterVehicle(id);
+      t.settle(20);
+      return { without, gave, withKey, riding: t.getRidingVehicle() };
+    }, [START.x, START.z] as const);
+
+    expect(seen.without).toBe(false);
+    expect(seen.gave).toBe(true);
+    expect(seen.withKey).toBe(true);
+    expect(seen.riding).not.toBeNull();
+    expect(errors).toEqual([]);
+  });
+
+  test('the player drives with the controls they walk with', async ({ page }) => {
+    test.setTimeout(240_000);
+    const errors = watchConsole(page);
+    await boot(page);
+    await installPad(page);
+
+    const id = await page.evaluate(async ([sx, sz]) => {
+      const t = window.__LH_TEST__!;
+      t.teleport(sx as number, sz as number, 0);
+      t.settle(20);
+      const vid = (await t.spawnVehicle('hatchback', (sx as number) + 2.2, (sz as number) + 2, 0))!;
+      t.settle(90);
+      t.giveItem('keys_hatchback', 1);
+      await t.enterVehicle(vid);
+      t.settle(20);
+      return vid;
+    }, [START.x, START.z] as const);
+
+    // Right trigger. Nothing about the vehicle code knows which device this is.
+    await setPad(page, [0, 0, 0, 0], { 7: 1 });
+    await settle(page, 180);
+    const driving = await page.evaluate((v) => window.__LH_TEST__!.getVehicle(v), id);
+
+    await setPad(page, [1, 0, 0, 0], { 7: 1 });
+    await settle(page, 90);
+    const turning = await page.evaluate((v) => window.__LH_TEST__!.getVehicle(v), id);
+
+    await setPad(page, [0, 0, 0, 0], { 6: 1 });
+    await settle(page, 300);
+    const stopped = await page.evaluate((v) => window.__LH_TEST__!.getVehicle(v), id);
+
+    expect(driving!.speedKmh).toBeGreaterThan(10);
+    expect(driving!.gear).toBe('drive');
+    expect(Math.abs(turning!.steerAngle)).toBeGreaterThan(0.1);
+    expect(Math.abs(turning!.heading - driving!.heading)).toBeGreaterThan(0.02);
+    expect(stopped!.speedKmh).toBeLessThan(3);
+    expect(stopped!.recoveries).toBe(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('getting out is refused while still moving', async ({ page }) => {
+    test.setTimeout(240_000);
+    const errors = watchConsole(page);
+    await boot(page);
+    await installPad(page);
+
+    await page.evaluate(async ([sx, sz]) => {
+      const t = window.__LH_TEST__!;
+      t.teleport(sx as number, sz as number, 0);
+      t.settle(20);
+      const vid = (await t.spawnVehicle('hatchback', (sx as number) + 2.2, (sz as number) + 2, 0))!;
+      t.settle(90);
+      t.giveItem('keys_hatchback', 1);
+      await t.enterVehicle(vid);
+      t.settle(20);
+    }, [START.x, START.z] as const);
+
+    await setPad(page, [0, 0, 0, 0], { 7: 1 });
+    await settle(page, 180);
+
+    const refused = await page.evaluate(async () => {
+      const t = window.__LH_TEST__!;
+      const out = await t.exitVehicle();
+      return { out, riding: t.getRidingVehicle() };
+    });
+
+    // Stepping out of a moving car either drops the player through the world
+    // or leaves them behind, so it is refused rather than allowed.
+    expect(refused.out).toBe(false);
+    expect(refused.riding).not.toBeNull();
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe('righting a rolled vehicle', () => {
+  /**
+   * R, and the pad's d-pad down, set a vehicle back on its wheels where it
+   * stands. Distinct from garage recovery: rolling into a field is the common
+   * case and the player almost always wants to carry on from there rather
+   * than be sent home.
+   */
+  test('R rights a car from the driving seat', async ({ page }) => {
+    test.setTimeout(180_000);
+    const errors = watchConsole(page);
+    await boot(page);
+
+    const seen = await page.evaluate(async ([sx, sz]) => {
+      const t = window.__LH_TEST__!;
+      t.teleport(sx as number, sz as number, 0);
+      t.settle(20);
+      const id = (await t.spawnVehicle('hatchback', (sx as number) + 2.2, (sz as number) + 2, 0))!;
+      t.settle(90);
+      t.giveItem('keys_hatchback', 1);
+      await t.enterVehicle(id);
+      t.settle(20);
+
+      t.rollVehicle(id);
+      t.settle(60);
+      const rolled = t.getVehicle(id)!;
+
+      t.pressFlip();
+      t.settle(90);
+      const righted = t.getVehicle(id)!;
+      return { rolled, righted };
+    }, [START.x, START.z] as const);
+
+    expect(seen.rolled.upright).toBe(false);
+    expect(seen.rolled.wheelsOnGround).toBe(0);
+    expect(seen.righted.upright).toBe(true);
+    expect(seen.righted.wheelsOnGround).toBe(4);
+    // Righting must not fling it: the whole point is to carry on driving.
+    expect(seen.righted.speedKmh).toBeLessThan(5);
+    expect(seen.righted.recoveries).toBe(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('R also works standing beside it', async ({ page }) => {
+    test.setTimeout(180_000);
+    const errors = watchConsole(page);
+    await boot(page);
+
+    const seen = await page.evaluate(async ([sx, sz]) => {
+      const t = window.__LH_TEST__!;
+      t.teleport(sx as number, sz as number, 0);
+      t.settle(20);
+      const id = (await t.spawnVehicle('hatchback', (sx as number) + 2.2, (sz as number) + 2, 0))!;
+      t.settle(90);
+
+      // Never got in: standing next to a car on its roof with no way to turn
+      // it over is the frustrating case.
+      t.rollVehicle(id);
+      t.settle(60);
+      const rolled = t.getVehicle(id)!;
+      t.pressFlip();
+      t.settle(90);
+      return { rolled, righted: t.getVehicle(id)! };
+    }, [START.x, START.z] as const);
+
+    expect(seen.rolled.upright).toBe(false);
+    expect(seen.righted.upright).toBe(true);
+    expect(errors).toEqual([]);
+  });
+
+  test('a rolled vehicle can also be recovered to the garage', async ({ page }) => {
+    test.setTimeout(180_000);
+    const errors = watchConsole(page);
+    await boot(page);
+
+    const seen = await page.evaluate(async ([sx, sz]) => {
+      const t = window.__LH_TEST__!;
+      t.teleport(sx as number, sz as number, 0);
+      t.settle(20);
+      const id = (await t.spawnVehicle('hatchback', (sx as number) + 2.2, (sz as number) + 2, 0))!;
+      t.settle(90);
+      const before = t.getVehicle(id)!;
+
+      t.rollVehicle(id);
+      t.settle(60);
+      const recovered = t.recoverVehicle(id);
+      t.settle(90);
+      return { before, recovered, after: t.getVehicle(id)! };
+    }, [START.x, START.z] as const);
+
+    expect(seen.recovered).toBe(true);
+    expect(seen.after.upright).toBe(true);
+    // Moved to the garage spot, not left where it rolled.
+    const moved = Math.hypot(seen.after.x - seen.before.x, seen.after.z - seen.before.z);
+    expect(moved).toBeGreaterThan(2);
     expect(errors).toEqual([]);
   });
 });

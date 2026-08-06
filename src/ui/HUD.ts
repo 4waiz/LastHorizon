@@ -1,4 +1,5 @@
 import { NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
+import type { Dashboard } from '../vehicles/VehicleControls';
 import { InputManager } from '../core/InputManager';
 import { clamp } from '../utils/MathUtils';
 import type { Outfit } from '../player/Player';
@@ -46,6 +47,13 @@ export class HUD {
   private promptText = $('promptText');
   private fade = $('fade');
   private btnAct = $<HTMLButtonElement>('btnAct');
+  private dash = $('dash');
+  private dashSpeed = $('dashSpeed');
+  private dashGear = $('dashGear');
+  private dashCondition = $('dashCondition');
+  private dashFuel = $('dashFuel');
+  private dashFuelWrap = $('dashFuelWrap');
+  private dashHints = $('dashHints');
   private wardrobe = $('wardrobe');
 
   private btnSound = $<HTMLButtonElement>('btnSound');
@@ -465,6 +473,32 @@ export class HUD {
   }
 
   /** Show or clear the "press E" prompt. Pass null to hide. */
+  /**
+   * Show or hide the vehicle dashboard.
+   *
+   * Null means the player is on foot. The fuel bar hides itself rather than
+   * showing empty, because a bicycle has no tank and a permanently empty gauge
+   * reads as a bug.
+   */
+  setVehicleReadout(readout: Dashboard | null): void {
+    if (!readout) {
+      this.dash.hidden = true;
+      return;
+    }
+    this.dash.hidden = false;
+    this.dashSpeed.textContent = readout.speed;
+    this.dashGear.textContent = readout.gear;
+    this.dashCondition.style.width = `${Math.round(readout.condition * 100)}%`;
+
+    if (readout.fuel === null) {
+      this.dashFuelWrap.hidden = true;
+    } else {
+      this.dashFuelWrap.hidden = false;
+      this.dashFuel.style.width = `${Math.round(readout.fuel * 100)}%`;
+    }
+    this.dashHints.textContent = readout.hints.join(' · ');
+  }
+
   setPrompt(text: string | null): void {
     if (text) {
       this.promptText.textContent = text;

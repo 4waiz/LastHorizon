@@ -27,6 +27,7 @@ export type GamepadAction =
   | 'lights'
   | 'handbrake'
   | 'cameraReset'
+  | 'flip'
   | 'pause';
 
 /**
@@ -45,6 +46,7 @@ const BUTTON: Record<GamepadAction, number> = {
   handbrake: 4,     // left bumper
   cameraReset: 11,  // right stick click
   lights: 12,       // d-pad up
+  flip: 13,         // d-pad down
   pause: 9,         // start
 };
 
