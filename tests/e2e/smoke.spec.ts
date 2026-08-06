@@ -87,7 +87,17 @@ test.describe('Last Horizon smoke', () => {
       await t.exitInterior();
       t.settle(40);
       const after = { state: t.getPlayerState(), stats: t.getRenderStats() };
-      return { before, inside, after };
+
+      // A second lap. The first one *builds* the interior cell -- 132 -> 156
+      // geometries, once -- so comparing after-first against before-first
+      // measures lazy initialisation, not accumulation. Two laps compared
+      // against each other is the question actually worth asking.
+      await t.enterInterior();
+      t.settle(40);
+      await t.exitInterior();
+      t.settle(40);
+      const twice = { state: t.getPlayerState(), stats: t.getRenderStats() };
+      return { before, inside, after, twice };
     });
 
     expect(result.before.state.indoors).toBe(false);
@@ -99,9 +109,13 @@ test.describe('Last Horizon smoke', () => {
     // The window portal re-renders the outdoor world: interior is the heavy case.
     expect(result.inside.stats.triangles).toBeGreaterThan(result.before.stats.triangles);
 
-    // Nothing accumulated across the round trip.
-    expect(result.after.stats.geometries).toBeLessThanOrEqual(result.before.stats.geometries + 4);
-    expect(result.after.stats.textures).toBeLessThanOrEqual(result.before.stats.textures + 2);
+    // Nothing accumulated: the second lap allocates nothing the first did not.
+    expect(result.twice.stats.geometries).toBe(result.after.stats.geometries);
+    expect(result.twice.stats.textures).toBe(result.after.stats.textures);
+    // And the one-time build is bounded -- the interior is a room, not a zone.
+    expect(result.after.stats.geometries).toBeLessThanOrEqual(
+      result.before.stats.geometries + 40,
+    );
     expect(errors).toEqual([]);
   });
 
@@ -151,7 +165,14 @@ test.describe('Last Horizon smoke', () => {
   });
 
   test('production build exposes no dev screenshot sink', async ({ page }) => {
+    // `vite preview` answers every unknown path with index.html, so a 404 is
+    // not available to assert on -- /anything-at-all returns 200 as well. What
+    // the build must not do is *serve script* there. Absence of the sink from
+    // dist itself is checked by scripts/check-budgets.mjs.
     const res = await page.request.get('/__cap.js');
-    expect(res.status()).toBeGreaterThanOrEqual(400);
+    expect(res.headers()['content-type'] ?? '').toContain('text/html');
+    const body = await res.text();
+    expect(body).not.toContain('__shot');
+    expect(body).not.toContain('lh-shot-sink');
   });
 });
