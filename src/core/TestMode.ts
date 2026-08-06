@@ -47,6 +47,9 @@ export interface TestSurface {
   advanceLife(seconds: number): LifeSnapshot;
   forceBirthday(): LifeSnapshot;
   lifeState(): LifeSnapshot;
+  completeChapter(id: string): void;
+  saveNow(slot: string): Promise<boolean>;
+  loadNow(slot: string): Promise<boolean>;
 }
 
 export interface LifeSnapshot {
@@ -115,6 +118,12 @@ export interface LHTestBridge {
   /** Jump straight to the next birthday. */
   forceBirthday(): LifeSnapshot;
   getLifeState(): LifeSnapshot;
+  /** Mark a story chapter complete, so age+chapter gates can be reached. */
+  completeChapter(id: string): void;
+  /** Write the current state to a slot. */
+  saveNow(slot?: string): Promise<boolean>;
+  /** Read a slot back into the running game. */
+  loadNow(slot?: string): Promise<boolean>;
   /** Travel to another zone. Resolves false if the journey was refused. */
   travelTo(zoneId: string): Promise<boolean>;
   getActiveZone(): string | null;
@@ -247,6 +256,18 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     getLifeState(): LifeSnapshot {
       return surface.lifeState();
+    },
+
+    completeChapter(id: string): void {
+      surface.completeChapter(id);
+    },
+
+    saveNow(slot = 'autosave'): Promise<boolean> {
+      return surface.saveNow(slot);
+    },
+
+    loadNow(slot = 'autosave'): Promise<boolean> {
+      return surface.loadNow(slot);
     },
 
     travelTo(zoneId: string): Promise<boolean> {

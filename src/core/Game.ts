@@ -11,6 +11,10 @@ import type { ZoneRuntime } from '../world/zones/ZoneRuntime';
 import { LifeClock } from './clocks/LifeClock';
 import { WorldClock } from './clocks/WorldClock';
 import { StoryClock } from './clocks/StoryClock';
+import { SaveService } from '../save/SaveService';
+import { createSaveDriver } from '../save/SaveDriver';
+import { CONTENT_VERSION, type SaveData, type SaveSlotId } from '../save/SaveSchema';
+import { canEnterZone, type GameMode, type GateContext } from './Gates';
 import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
@@ -99,6 +103,13 @@ export class Game {
   private readonly worldClock = new WorldClock();
   private readonly storyClock = new StoryClock();
   private handlingBirthday = false;
+
+  private readonly saves = new SaveService(createSaveDriver());
+  private mode: GameMode = 'story';
+  /** The spawn the player last arrived at; saved rather than a raw position. */
+  private lastSpawnId = 'village_start';
+  private readonly completedChapters = new Set<string>();
+  private readonly unlockedZones = new Set<ZoneId>(['village_coast']);
 
   private running = false;
   private paused = false;
@@ -269,6 +280,25 @@ export class Game {
     if (assetManager.failures.length) {
       console.warn('[LastHorizon] some packs failed to load:', assetManager.failures);
     }
+    // Resume the autosave if there is one. Loaded without an expected mode:
+    // there is no mode-selection screen yet, so the save's own mode is
+    // adopted. That is resuming, not mixing — the guard matters once the
+    // player has actively chosen a mode.
+    try {
+      const resumed = await this.saves.load('autosave');
+      if (resumed.ok) {
+        this.applySave(resumed.data);
+        if (resumed.recoveredFromBackup) {
+          this.hud.showToast('Recovered', 'Your last save was damaged; an earlier one was used.');
+        } else if (resumed.migratedFrom !== undefined) {
+          this.hud.showToast('Updated', 'Your save was brought up to date.');
+        }
+      }
+    } catch (err) {
+      // A broken save must never stop the game booting.
+      console.warn('[LastHorizon] could not read the autosave', err);
+    }
+
     loading.setProgress(1, 'the afternoon');
     loading.ready();
   }
@@ -349,6 +379,113 @@ export class Game {
    * the next birthday cannot race it. Acknowledging is the last step, and is
    * what makes the delivery once-only across a reload.
    */
+  private gateContext(): GateContext {
+    return {
+      mode: this.mode,
+      age: this.life.ageYears,
+      completedChapters: this.completedChapters,
+      unlockedZones: this.unlockedZones,
+    };
+  }
+
+  /**
+   * Build a save from live state.
+   *
+   * Records the spawn *id* rather than only a raw position, so a save whose
+   * spawn has since been removed can still resolve somewhere safe instead of
+   * dropping the player at stale coordinates.
+   */
+  private captureSave(slot: SaveSlotId): SaveData {
+    const p = this.player.position;
+    const story = this.storyClock.snapshot();
+    return {
+      version: 2,
+      contentVersion: CONTENT_VERSION,
+      savedAt: 0, // stamped by SaveService
+      mode: this.mode,
+      slot,
+      zone: this.zones.activeZoneId ?? 'village_coast',
+      spawnId: this.lastSpawnId,
+      player: {
+        position: { x: p.x, y: p.y, z: p.z },
+        facing: this.player.controller.facing,
+      },
+      life: this.life.snapshot(),
+      world: this.worldClock.snapshot(),
+      story: {
+        chapter: story.chapter,
+        chapterSeconds: story.chapterSeconds,
+        totalSeconds: story.totalSeconds,
+        completedChapters: [...this.completedChapters].sort(),
+        quests: {},
+      },
+      money: 0,
+      inventory: [],
+      wardrobe: { ...this.player.outfit },
+      vehicles: [],
+      needs: { hunger: 1, energy: 1, cleanliness: 1, mood: 1 },
+      relationships: [],
+      collectibles: this.village?.collectibles.foundIds ?? [],
+      unlockedZones: [...this.unlockedZones],
+    };
+  }
+
+  /**
+   * Apply a loaded save.
+   *
+   * Position is resolved through `SpawnRegistry` rather than trusted: if the
+   * saved spawn no longer exists the registry degrades to a valid one, and we
+   * use that instead of the stale transform. Restoring a raw position into a
+   * world that has moved is how a save strands a player.
+   */
+  private applySave(data: SaveData): void {
+    this.mode = data.mode;
+    this.life.restore(data.life);
+    this.worldClock.restore(data.world);
+    this.env.setMode(data.world.mode);
+    this.env.jumpTo(data.world.time);
+    this.storyClock.restore({
+      chapter: data.story.chapter,
+      chapterSeconds: data.story.chapterSeconds,
+      totalSeconds: data.story.totalSeconds,
+      timers: [],
+    });
+
+    this.completedChapters.clear();
+    for (const c of data.story.completedChapters) this.completedChapters.add(c);
+    this.unlockedZones.clear();
+    for (const z of data.unlockedZones) this.unlockedZones.add(z);
+
+    this.village?.collectibles.restoreFound(data.collectibles);
+    if (this.village) {
+      this.hud.setCounter(this.village.collectibles.count, this.village.collectibles.total);
+    }
+    this.player.setOutfit(data.wardrobe);
+    this.hud.syncOutfit(this.player.outfit);
+
+    // Only reposition when the save belongs to the zone that is actually
+    // built; a save from another zone needs travel, which is a separate step.
+    if (data.zone === this.zones.activeZoneId) {
+      const resolved = this.zones.spawns.resolve({ zoneId: data.zone, spawnId: data.spawnId });
+      if (resolved.ok && resolved.fallback) {
+        const y = this.runtime.heightAt(resolved.spawn.x, resolved.spawn.z);
+        this.player.setSpawn(
+          new THREE.Vector3(resolved.spawn.x, y + 0.05, resolved.spawn.z),
+          resolved.spawn.facing,
+        );
+        this.lastSpawnId = resolved.spawn.id;
+        this.hud.showToast('Moved', 'Your last spot is gone; you are nearby.');
+      } else {
+        const pos = data.player.position;
+        this.player.setSpawn(new THREE.Vector3(pos.x, pos.y, pos.z), data.player.facing);
+        this.lastSpawnId = data.spawnId;
+      }
+      this.camera.resetBehind(this.player.lookTarget, this.player.controller.facing);
+    }
+
+    this.hud.setAge(this.life.ageYears, this.life.yearProgress);
+  }
+
   private lifeSnapshot(): LifeSnapshot {
     return {
       ageYears: this.life.ageYears,
@@ -364,8 +501,18 @@ export class Game {
     this.handlingBirthday = true;
     try {
       this.hud.showToast('Another year', `You are ${age} today.`);
-      // Autosave, appearance stage, NPC milestones and age-gated story checks
-      // attach here as those systems land.
+
+      // Autosave while the clock is stopped. This is the safe moment by
+      // construction: nothing can age, and the next birthday cannot arrive
+      // mid-write.
+      const result = await this.saves.save('autosave', this.captureSave('autosave'));
+      if (!result.ok) {
+        console.warn('[LastHorizon] birthday autosave failed', result.reason);
+        this.hud.showToast('Could not save', 'Your progress is still here, but not written.');
+      }
+
+      // Appearance stage, NPC milestones and age-gated story checks attach
+      // here as those systems land.
       await wait(60);
       this.life.acknowledgeBirthday();
     } finally {
@@ -449,6 +596,14 @@ export class Game {
     const from = this.zones.activeZoneId;
     if (!from || from === to || this.transitioning) return false;
 
+    // The narrative gate, ahead of the mechanism. TravelService knows about
+    // routes and spawns; whether the player is *allowed* to go lives in Gates.
+    const verdict = canEnterZone(to, this.gateContext());
+    if (!verdict.allowed) {
+      this.hud.showToast('Not yet', verdict.reason ?? 'You cannot go there yet.');
+      return false;
+    }
+
     this.transitioning = true;
     this.input.releaseAll();
     try {
@@ -462,6 +617,8 @@ export class Game {
       // Land on the resolved spawn, which may differ from the requested one if
       // it was unavailable or unsafe.
       const { spawn } = result;
+      this.lastSpawnId = spawn.id;
+      this.unlockedZones.add(to);
       const y = this.runtime.heightAt(spawn.x, spawn.z);
       this.player.setLying(false);
       this.player.setSitting(false);
@@ -561,6 +718,22 @@ export class Game {
         return this.lifeSnapshot();
       },
       lifeState: () => this.lifeSnapshot(),
+      completeChapter: (id) => {
+        this.completedChapters.add(id);
+      },
+      saveNow: async (slot) => {
+        const parsed = SaveService.parseSlot(slot);
+        if (!parsed) return false;
+        return (await this.saves.save(parsed, this.captureSave(parsed))).ok;
+      },
+      loadNow: async (slot) => {
+        const parsed = SaveService.parseSlot(slot);
+        if (!parsed) return false;
+        const read = await this.saves.load(parsed);
+        if (!read.ok) return false;
+        this.applySave(read.data);
+        return true;
+      },
     };
   }
 

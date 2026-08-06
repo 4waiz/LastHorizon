@@ -60,6 +60,16 @@ export class CollectibleStore {
     }
   }
 
+  /** Found ids, sorted so a save is byte-stable between writes. */
+  get foundIds(): string[] {
+    return [...this.found].sort();
+  }
+
+  /** Replace the found set from a save. Unknown ids are dropped, not trusted. */
+  restoreFound(ids: readonly string[]): void {
+    this.found = new Set(ids.filter((id) => this.ids.includes(id)));
+  }
+
   has(id: string): boolean {
     return this.found.has(id);
   }
@@ -178,6 +188,24 @@ export class Collectibles {
 
   get total(): number {
     return this.store.total;
+  }
+
+  /** Found ids, for the save. */
+  get foundIds(): string[] {
+    return this.store.foundIds;
+  }
+
+  /**
+   * Apply a saved found-set: update the store, then hide the pickups that are
+   * already collected. Without the second step a loaded save shows keepsakes
+   * the player has already taken.
+   */
+  restoreFound(ids: readonly string[]): void {
+    this.store.restoreFound(ids);
+    for (const it of this.items) {
+      it.collected = this.store.has(it.def.id);
+      it.pivot.visible = !it.collected;
+    }
   }
 
   /** Positions and found-state, for the radar. */
