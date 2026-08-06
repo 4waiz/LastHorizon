@@ -1,3 +1,9 @@
+# Installed dependencies. Reproduced from package-lock.json by `npm ci`, which
+# is what CI runs. These were tracked until Phase 4 and it made ordinary branch
+# work unsafe: 7,860 files, including binaries like esbuild.exe that Windows
+# holds open, so a checkout or merge could abort part-way through.
+node_modules/
+
 # Dev-only screenshot sink (see the lh-shot-sink plugin in vite.config.ts).
 .shots/
 
@@ -6,4 +12,9 @@
 
 # Playwright MCP scratch output: page snapshots, console logs, baseline shots.
 .playwright-mcp/
+
+# Playwright's own failure output: traces, screenshots and error context,
+# written per failing test and regenerated on every run.
+test-results/
+playwright-report/
 
