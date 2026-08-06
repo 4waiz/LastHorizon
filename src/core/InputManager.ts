@@ -32,6 +32,8 @@ export class InputManager {
   private keys = new Set<string>();
   private jumpQueued = false;
   private interactQueued = false;
+  /** Touch or gamepad interact, which have no entry in `keys`. */
+  private pointerInteractHeld = false;
   private pointerActive = false;
   private pointerId = -1;
   private lastPointer = { x: 0, y: 0 };
@@ -148,6 +150,27 @@ export class InputManager {
     this.interactQueued = true;
   }
 
+  /**
+   * True while an interact control is down, for hold-to-act actions.
+   *
+   * The keyboard already tracks this in `keys`; touch and gamepad only produce
+   * edges, so they report through `setInteractHeld`.
+   */
+  get interactHeld(): boolean {
+    return (
+      this.pointerInteractHeld ||
+      this.keys.has('KeyE') ||
+      this.keys.has('KeyF') ||
+      this.keys.has('Enter')
+    );
+  }
+
+  /** Press and release from a control with no key state of its own. */
+  setInteractHeld(down: boolean): void {
+    this.pointerInteractHeld = down;
+    if (down) this.interactQueued = true;
+  }
+
   /** True exactly once per interact press. */
   consumeInteract(): boolean {
     if (!this.interactQueued) return false;
@@ -221,6 +244,7 @@ export class InputManager {
     this.pointerId = -1;
     this.jumpQueued = false;
     this.interactQueued = false;
+    this.pointerInteractHeld = false;
     this.move.x = 0;
     this.move.y = 0;
     this.lookX = 0;

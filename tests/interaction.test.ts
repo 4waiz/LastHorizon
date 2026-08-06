@@ -305,3 +305,78 @@ describe('execute', () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('one press does one thing', () => {
+  /**
+   * The village's actions move the player: sitting down, stepping through a
+   * door. So the frame after one fires, a *different* action is in range. With
+   * the interact button still down, a latch that keyed on the action id let
+   * that second one fire too — standing up put the chair back in reach and the
+   * next frame sat down again, off a single press.
+   */
+  it('does not fire a second action that the first one brought into range', () => {
+    const s = new InteractionSystem();
+    const fired: string[] = [];
+
+    // `stand` is offered while seated, `sit` while not. Firing either flips
+    // which is available, exactly as the chair does.
+    let seated = true;
+    s.register(
+      thing('chair', 0, 1, [
+        action({ id: 'stand', isAvailable: () => seated, execute: () => { seated = false; } }),
+        action({ id: 'sit', isAvailable: () => !seated, execute: () => { seated = true; } }),
+      ]),
+    );
+
+    const onFire = (c: Candidate) => {
+      fired.push(c.action.id);
+      c.action.execute(ctx());
+    };
+    for (let i = 0; i < 10; i++) s.update(1 / 60, at(0, 0, 0, true), ctx(), onFire);
+
+    expect(fired).toEqual(['stand']);
+    expect(seated).toBe(false);
+  });
+
+  it('fires again only after the control is released', () => {
+    const s = new InteractionSystem();
+    const fired: string[] = [];
+    s.register(thing('door', 0, 1, [action({ id: 'open' })]));
+    const onFire = (c: Candidate) => fired.push(c.action.id);
+
+    for (let i = 0; i < 5; i++) s.update(1 / 60, at(0, 0, 0, true), ctx(), onFire);
+    expect(fired).toEqual(['open']);
+
+    s.update(1 / 60, at(0, 0, 0, false), ctx(), onFire); // release
+    s.update(1 / 60, at(0, 0, 0, true), ctx(), onFire);
+    expect(fired).toEqual(['open', 'open']);
+  });
+
+  it('re-arms on a release that happens with nothing in reach', () => {
+    // The early return for "no candidates" is a separate path; missing the
+    // re-arm there leaves the button latched for good.
+    const s = new InteractionSystem();
+    const fired: string[] = [];
+    s.register(thing('door', 0, 1, [action({ id: 'open', maxDistance: 2 })]));
+    const onFire = (c: Candidate) => fired.push(c.action.id);
+
+    s.update(1 / 60, at(0, 0, 0, true), ctx(), onFire);
+    expect(fired).toEqual(['open']);
+
+    // Walk out of range, let go, come back and press again.
+    s.update(1 / 60, at(0, 50, 0, false), ctx(), onFire);
+    s.update(1 / 60, at(0, 0, 0, true), ctx(), onFire);
+    expect(fired).toEqual(['open', 'open']);
+  });
+
+  it('still completes a hold while the button stays down', () => {
+    const s = new InteractionSystem();
+    const fired: string[] = [];
+    s.register(thing('safe', 0, 1, [action({ id: 'crack', holdSeconds: 0.5 })]));
+    const onFire = (c: Candidate) => fired.push(c.action.id);
+
+    for (let i = 0; i < 20; i++) s.update(1 / 30, at(0, 0, 0, true), ctx(), onFire);
+    // Fires once at 0.5 s, then stays latched for the remaining frames.
+    expect(fired).toEqual(['crack']);
+  });
+});

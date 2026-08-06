@@ -108,6 +108,8 @@ export class InteractionSystem {
 
   private holdingId: string | null = null;
   private holdElapsed = 0;
+  /** False from a fire until the control is released. See `update`. */
+  private armed = true;
   /** Index into the candidate list when the selector is open. */
   private selection = 0;
   private selectorOpen = false;
@@ -208,6 +210,9 @@ export class InteractionSystem {
     const candidates = this.candidates(query, ctx);
 
     if (candidates.length === 0) {
+      // Re-arm here too, or releasing the button somewhere with nothing in
+      // reach leaves it latched and the next real press does nothing.
+      if (!query.held) this.armed = true;
       this.abortHold();
       if (this.selectorOpen) this.closeSelector();
       return EMPTY;
@@ -227,14 +232,19 @@ export class InteractionSystem {
     if (this.holdingId !== null && this.holdingId !== chosen.action.id) this.abortHold();
 
     let fired = false;
-    if (query.held) {
+    if (!query.held) {
+      // Releasing is what re-arms the control, and only releasing.
+      //
+      // Latching per action instead was wrong in a way no unit test caught:
+      // most of these actions *move the player*, so the frame after one fires,
+      // a different action is in range — and with the button still down that
+      // one fires too. Standing up put the chair back in reach and the very
+      // next frame sat down again, off a single press.
+      this.armed = true;
+      if (this.holdingId !== null) this.abortHold();
+    } else if (this.armed) {
       if (chosen.action.holdSeconds <= 0) {
-        // Press: fire on the leading edge only.
-        if (this.holdingId !== chosen.action.id) {
-          this.holdingId = chosen.action.id;
-          this.holdElapsed = 0;
-          fired = true;
-        }
+        fired = true;
       } else {
         this.holdingId = chosen.action.id;
         this.holdElapsed += dt;
@@ -244,8 +254,7 @@ export class InteractionSystem {
           this.holdingId = null;
         }
       }
-    } else if (this.holdingId !== null) {
-      this.abortHold();
+      if (fired) this.armed = false;
     }
 
     const holdProgress =

@@ -25,7 +25,13 @@ import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
 import { AssetManager } from './AssetManager';
-import { World, Interactable } from '../world/World';
+import { World } from '../world/World';
+import { InteractionSystem, type InteractionState } from '../interaction/InteractionSystem';
+import {
+  worldInteractables,
+  type WorldActionHandlers,
+  type WorldInteractionContext,
+} from '../interaction/WorldInteractables';
 import { Environment } from '../world/Environment';
 import { Player } from '../player/Player';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera';
@@ -133,7 +139,16 @@ export class Game {
 
   private readonly camForward = new THREE.Vector3();
   private readonly camRight = new THREE.Vector3();
-  private activeInteractable: Interactable | null = null;
+  private readonly interactions = new InteractionSystem();
+  /** Last frame's offer, for the HUD and the test bridge. */
+  private lastInteraction: InteractionState | null = null;
+  private readonly interactionHandlers: WorldActionHandlers = {
+    sleep: () => void this.sleep(),
+    enter: () => void this.enterInterior(),
+    exit: () => void this.exitInterior(),
+    sit: (on) => this.sit(on),
+    wardrobe: () => this.hud.openWardrobe(true),
+  };
   private sleeping = false;
   private transitioning = false;
   private indoors = false;
@@ -273,7 +288,7 @@ export class Game {
         this.village!.collectibles.restoreAll();
         this.hud.setCounter(0, this.village!.collectibles.total);
       },
-      onInteract: () => this.input.queueInteract(),
+      onInteract: (down) => this.input.setInteractHeld(down),
       onOutfit: (patch) => {
         this.player.setOutfit(patch);
         this.hud.syncOutfit(this.player.outfit);
@@ -284,6 +299,8 @@ export class Game {
     // Runs every frame, including while a district is active — a district has
     // no keepsakes, so this must degrade rather than assert.
     this.minimap = new Minimap(this.runtime.mapData, () => this.village?.keepsakeMarkers ?? []);
+    // Needs the HUD, because the wardrobe handler opens it.
+    this.syncInteractables();
 
     this.gameScope.addTeardown(
       this.saves.onStatus((s) => this.hud.setSaveStatus(s)),
@@ -720,7 +737,7 @@ export class Game {
       // Leaving a zone leaves these pointing at content that no longer exists.
       this.indoors = false;
       this.sleeping = false;
-      this.activeInteractable = null;
+      this.syncInteractables();
       this.hud.setPrompt(null);
       this.player.controller.boundsEnabled = true;
       this.audio.setZone('outdoor');
@@ -807,6 +824,17 @@ export class Game {
         return this.lifeSnapshot();
       },
       lifeState: () => this.lifeSnapshot(),
+      interactionState: () => {
+        const s = this.lastInteraction;
+        return {
+          prompt: s?.prompt ?? null,
+          actionId: s?.primary?.action.id ?? null,
+          candidates: s ? s.candidates.map((c) => c.action.id) : [],
+          needsSelector: s?.needsSelector ?? false,
+          holdProgress: s?.holdProgress ?? 0,
+        };
+      },
+      pressInteract: (held: boolean) => this.input.setInteractHeld(held),
       completeChapter: (id) => {
         this.completedChapters.add(id);
       },
@@ -891,64 +919,82 @@ export class Game {
     }
 
     // 7. interactables
-    this.updateInteraction();
+    this.updateInteraction(dt);
 
     // 8. audio
     this.updateAudio(dt);
   }
 
   /**
-   * Offer the nearest thing in reach, and act on it if asked.
+   * Re-register what the player can interact with.
    *
-   * Distance is measured against the player's chest rather than their feet so
-   * a bed you're standing beside still counts.
+   * Called whenever the set changes — construction and zone travel. The system
+   * holds no reference to the previous zone's content afterwards, which is what
+   * stops a stale door from being offered in the city.
    */
-  private updateInteraction(): void {
-    if (this.sleeping || this.transitioning || this.hud.wardrobeOpen) return;
+  private syncInteractables(): void {
+    this.interactions.clear();
+    for (const it of worldInteractables(this.runtime.interactables, this.interactionHandlers)) {
+      this.interactions.register(it);
+    }
+  }
 
-    // Seated, the only thing on offer is getting back up — and any attempt to
-    // walk counts as asking for that too.
-    if (this.player.isSitting) {
-      this.hud.setPrompt('Stand up');
-      this.activeInteractable = null;
-      if (this.input.consumeInteract() || this.input.anyMovement) {
-        this.sit(false);
-      }
+  /** What actions are allowed to read when deciding whether they can run. */
+  private interactionContext(): WorldInteractionContext {
+    return {
+      age: this.life.ageYears,
+      busy: this.transitioning || this.sleeping || this.hud.wardrobeOpen,
+      indoors: this.indoors,
+      sitting: this.player.isSitting,
+    };
+  }
+
+  /**
+   * Offer whatever is in reach, and act on it if asked.
+   *
+   * Position is the player's chest rather than their feet, so a bed you are
+   * standing beside still counts. Everything past that — reach, facing,
+   * availability, holds, the prompt — belongs to `InteractionSystem`.
+   */
+  private updateInteraction(dt: number): void {
+    // Consumed unconditionally, so a press aimed at nothing cannot fire later.
+    const pressed = this.input.consumeInteract();
+    const ctx = this.interactionContext();
+
+    // Nothing may fire mid-transition, mid-nap or behind the wardrobe panel —
+    // this guard has to come before standing up, or a stray WASD during the
+    // fade teleports the player out of the chair.
+    if (ctx.busy) {
+      this.lastInteraction = null;
+      this.hud.setPrompt(null);
       return;
     }
 
-    let best: Interactable | null = null;
-    let bestDist = Infinity;
-    const p = this.player.lookTarget;
-    for (const it of this.runtime.interactables) {
-      const d = it.position.distanceTo(p);
-      if (d < it.radius && d < bestDist) {
-        best = it;
-        bestDist = d;
-      }
+    // Any attempt to walk while seated is a request to stand.
+    if (this.player.isSitting && this.input.anyMovement) {
+      this.sit(false);
+      return;
     }
 
-    if (best !== this.activeInteractable) {
-      this.activeInteractable = best;
-      this.hud.setPrompt(best ? best.prompt : null);
-    }
+    const state = this.interactions.update(
+      dt,
+      {
+        position: this.player.lookTarget,
+        facing: this.player.controller.facing,
+        // A press with no key state behind it -- touch, gamepad -- still needs
+        // one frame of "held" for the system to see a leading edge.
+        held: this.input.interactHeld || pressed,
+      },
+      ctx,
+      (c) => void c.action.execute(ctx),
+    );
 
-    // Consume unconditionally so a press aimed at nothing can't fire later.
-    if (!this.input.consumeInteract()) return;
+    this.lastInteraction = state;
+    this.hud.setPrompt(state.prompt);
 
-    if (best?.kind === 'sleep') {
-      void this.sleep();
-    } else if (best?.kind === 'enter') {
-      void this.enterInterior();
-    } else if (best?.kind === 'sit') {
-      this.sit(true);
-    } else if (best?.kind === 'wardrobe') {
-      this.hud.openWardrobe(true);
-    } else if (this.indoors) {
-      // Any interact indoors that isn't the bed means "let me out". Gating
-      // this on a proximity radius is how you strand someone in a room.
-      void this.exitInterior();
-    }
+    // Indoors, an interact that found nothing means "let me out". Gating the
+    // way out on a proximity radius is how you strand someone in a room.
+    if (pressed && !state.primary && this.indoors && !ctx.busy) void this.exitInterior();
   }
 
   /**
@@ -984,7 +1030,6 @@ export class Game {
     inMs = 0.85,
   ): Promise<void> {
     this.hud.setPrompt(null);
-    this.activeInteractable = null;
     this.input.releaseAll();
 
     await this.hud.setFade(true, outMs);
@@ -1039,7 +1084,6 @@ export class Game {
     if (this.sleeping || this.transitioning) return;
     this.sleeping = true;
     this.hud.setPrompt(null);
-    this.activeInteractable = null;
     this.input.releaseAll();
 
     const room = this.village!.interiors;

@@ -21,7 +21,8 @@ export interface HUDCallbacks {
   onMuted: (muted: boolean) => void;
   onTimeMode: (mode: TimeMode) => void;
   onResetProgress: () => void;
-  onInteract: () => void;
+  /** `down` false is the release, which ends a hold. */
+  onInteract: (down: boolean) => void;
   onOutfit: (patch: Partial<Outfit>) => void;
 }
 
@@ -348,10 +349,19 @@ export class HUD {
       this.input.queueJump();
     });
 
+    // Release matters as much as press: a hold-to-act prompt has no other way
+    // to know the thumb came off the button.
     this.btnAct.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      this.cb.onInteract();
+      this.btnAct.setPointerCapture(e.pointerId);
+      this.cb.onInteract(true);
     });
+    const endAct = (e: PointerEvent) => {
+      e.preventDefault();
+      this.cb.onInteract(false);
+    };
+    this.btnAct.addEventListener('pointerup', endAct);
+    this.btnAct.addEventListener('pointercancel', endAct);
 
     this.btnRun.addEventListener('pointerdown', (e) => {
       e.preventDefault();

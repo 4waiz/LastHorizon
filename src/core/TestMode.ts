@@ -47,9 +47,25 @@ export interface TestSurface {
   advanceLife(seconds: number): Promise<LifeSnapshot>;
   forceBirthday(): Promise<LifeSnapshot>;
   lifeState(): LifeSnapshot;
+  interactionState(): InteractionSnapshot;
+  pressInteract(held: boolean): void;
   completeChapter(id: string): void;
   saveNow(slot: string): Promise<boolean>;
   loadNow(slot: string): Promise<boolean>;
+}
+
+/** A read-only view of what the interaction system is offering. */
+export interface InteractionSnapshot {
+  /** The label on screen, or null when nothing is in reach. */
+  prompt: string | null;
+  /** Action id of the thing a press would run. */
+  actionId: string | null;
+  /** Every offerable action, best first. */
+  candidates: readonly string[];
+  /** True when two or more distinct objects are offering something. */
+  needsSelector: boolean;
+  /** 0..1 through a hold. */
+  holdProgress: number;
 }
 
 export interface LifeSnapshot {
@@ -101,6 +117,14 @@ export interface LHTestBridge {
   getTime(): number;
   /** Drop the player at a world x/z, snapped to the ground. */
   teleport(x: number, z: number, facing?: number): void;
+
+  /**
+   * Teleport to an exact point, terrain ignored.
+   *
+   * `teleport` drops the player onto the ground, which is the terrain height —
+   * no use indoors, where the room floor sits 600 m above it.
+   */
+  teleportTo(x: number, y: number, z: number, facing?: number): void;
   frameCamera(facing: number, distance: number, pitch?: number): void;
   getPlayerState(): PlayerSnapshot;
   getRenderStats(): RenderStats;
@@ -115,6 +139,16 @@ export interface LHTestBridge {
    * seconds straight to the life clock, so every gate still applies.
    */
   advanceLife(seconds: number): Promise<LifeSnapshot>;
+
+  /** What the interact prompt is offering right now. */
+  getInteraction(): InteractionSnapshot;
+
+  /**
+   * Hold or release the interact control, as a device with no key state would.
+   * A press is `true` then `false`; a hold is `true`, some `step()`s, `false`.
+   */
+  pressInteract(held: boolean): void;
+
   /**
    * Jump straight to the next birthday. Resolves once it has been fully
    * handled, so consecutive calls each land instead of being dropped by the
@@ -203,6 +237,11 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
       surface.frameCamera(facing, 6.4);
     },
 
+    teleportTo(x: number, y: number, z: number, facing = 0): void {
+      surface.teleport(x, y, z, facing);
+      surface.frameCamera(facing, 6.4);
+    },
+
     frameCamera(facing: number, distance: number, pitch?: number): void {
       surface.frameCamera(facing, distance, pitch);
     },
@@ -260,6 +299,14 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     getLifeState(): LifeSnapshot {
       return surface.lifeState();
+    },
+
+    getInteraction(): InteractionSnapshot {
+      return surface.interactionState();
+    },
+
+    pressInteract(held: boolean): void {
+      surface.pressInteract(held);
     },
 
     completeChapter(id: string): void {
