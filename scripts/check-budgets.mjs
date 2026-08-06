@@ -23,7 +23,27 @@ const BUNDLE_BUDGETS = [
   { prefix: 'gsap-', ext: '.js', maxKB: 90, label: 'gsap chunk' },
   { prefix: 'bvh-', ext: '.js', maxKB: 75, label: 'bvh chunk' },
   { prefix: 'index-', ext: '.css', maxKB: 24, label: 'stylesheet' },
+  // Rapier, inlining its 1.57 MB WebAssembly as base64. Lazily imported, so
+  // this is not part of what a player downloads before they can play.
+  { prefix: 'rapier-', ext: '.js', maxKB: 2400, label: 'rapier chunk', lazy: true },
 ];
+
+/**
+ * Chunks fetched on demand rather than at startup.
+ *
+ * The distinction earns its keep from Phase 5 onward. Before Rapier every byte
+ * in dist/ was downloaded before the first frame, so one total measured both
+ * "how much do we ship" and "how long until the player is playing". Rapier
+ * broke that: it more than doubles the shipped bytes and adds nothing to
+ * startup, because a player who never gets on a bicycle never fetches it.
+ *
+ * Collapsing the two into one number would mean either failing the build over
+ * bytes nobody waits for, or raising the total until it no longer protects
+ * load time at all.
+ */
+const LAZY_CHUNK_PREFIXES = ['rapier-', 'TestMode-'];
+
+const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));
 
 const TOTAL_JS_MAX_KB = 1100;
 
@@ -32,9 +52,15 @@ const ASSET_BUDGETS = [
   { path: 'assets/audio', maxKB: 2000, label: 'audio' },
 ];
 
-// dist = JS/CSS (~939 kB) + GLB (953 kB) + audio (1668 kB) + icon + html
-// ≈ 3828 kB today. Budget carries ~10% headroom over that.
-const SHIPPED_TOTAL_MAX_KB = 4200;
+/**
+ * What a player downloads before they can play: everything in dist/ except the
+ * lazy chunks. This is the number that governs how long the loading screen
+ * lasts, and it is the one that must not creep.
+ */
+const INITIAL_LOAD_MAX_KB = 4200;
+
+/** Everything shipped, lazy chunks included. */
+const SHIPPED_TOTAL_MAX_KB = 6600;
 
 /** Dev-only surfaces that must never reach production output. */
 const FORBIDDEN_IN_DIST = ['__shot', '__cap.js', 'lh-shot-sink'];
@@ -78,8 +104,16 @@ const assetFiles = listFiles(join(dist, 'assets')).filter(
   (f) => f.endsWith('.js') || f.endsWith('.css'),
 );
 
+// JS total counts eagerly-loaded chunks only, for the same reason as above:
+// it is a startup measure, and Rapier is not part of startup.
 let totalJsBytes = 0;
-for (const f of assetFiles) if (f.endsWith('.js')) totalJsBytes += statSync(f).size;
+let lazyBytes = 0;
+for (const f of assetFiles) {
+  const name = f.split(/[\\/]/).pop() ?? '';
+  const size = statSync(f).size;
+  if (isLazyChunk(name)) lazyBytes += size;
+  else if (f.endsWith('.js')) totalJsBytes += size;
+}
 
 for (const budget of BUNDLE_BUDGETS) {
   const match = assetFiles.find((f) => {
@@ -113,11 +147,21 @@ for (const budget of ASSET_BUDGETS) {
   }
 }
 
-const shippedTotal = kb(dirSizeBytes(dist));
-notes.push(`  ${(shippedTotal > SHIPPED_TOTAL_MAX_KB ? 'FAIL' : 'ok').padEnd(4)} ${'dist total'.padEnd(14)} ${String(shippedTotal).padStart(7)} kB / ${SHIPPED_TOTAL_MAX_KB} kB`);
-if (shippedTotal > SHIPPED_TOTAL_MAX_KB) {
-  failures.push(`dist total is ${shippedTotal} kB, over the ${SHIPPED_TOTAL_MAX_KB} kB budget`);
+const shippedTotalBytes = dirSizeBytes(dist);
+const shippedTotal = kb(shippedTotalBytes);
+const initialLoad = kb(shippedTotalBytes - lazyBytes);
+
+notes.push(`  ${(initialLoad > INITIAL_LOAD_MAX_KB ? 'FAIL' : 'ok').padEnd(4)} ${'initial load'.padEnd(14)} ${String(initialLoad).padStart(7)} kB / ${INITIAL_LOAD_MAX_KB} kB`);
+if (initialLoad > INITIAL_LOAD_MAX_KB) {
+  failures.push(`initial load is ${initialLoad} kB, over the ${INITIAL_LOAD_MAX_KB} kB budget`);
 }
+
+notes.push(`  ${(shippedTotal > SHIPPED_TOTAL_MAX_KB ? 'FAIL' : 'ok').padEnd(4)} ${'shipped total'.padEnd(14)} ${String(shippedTotal).padStart(7)} kB / ${SHIPPED_TOTAL_MAX_KB} kB`);
+if (shippedTotal > SHIPPED_TOTAL_MAX_KB) {
+  failures.push(`shipped total is ${shippedTotal} kB, over the ${SHIPPED_TOTAL_MAX_KB} kB budget`);
+}
+
+notes.push(`       ${'(lazy chunks)'.padEnd(14)} ${String(kb(lazyBytes)).padStart(7)} kB fetched on demand, not at startup`);
 
 // ---- dev-only surfaces must not ship --------------------------------------
 const textFiles = listFiles(dist).filter((f) => /\.(js|css|html)$/.test(f));

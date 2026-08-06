@@ -8,6 +8,8 @@ import { buildCityChunk, buildCitySkyline } from '../world/zones/CityBuilder';
 import { CityRuntime } from '../world/zones/CityRuntime';
 import type { ZoneId } from '../world/zones/Manifest';
 import type { ZoneRuntime } from '../world/zones/ZoneRuntime';
+import { SimulationClock } from './SimulationClock';
+import { PhysicsWorld } from '../physics/PhysicsWorld';
 import { LifeClock } from './clocks/LifeClock';
 import { WorldClock } from './clocks/WorldClock';
 import { StoryClock } from './clocks/StoryClock';
@@ -117,6 +119,25 @@ export class Game {
   private readonly worldClock = new WorldClock();
   private readonly storyClock = new StoryClock();
   private handlingBirthday = false;
+
+  /**
+   * Physics, and the fixed step it runs on.
+   *
+   * Separate from the frame's `dt` on purpose. The character motor, camera and
+   * world are tuned against a variable step and work; re-timing all of them to
+   * gain rigid bodies would put the thing that already feels right at risk for
+   * the sake of the thing that does not exist yet. So the accumulator wraps
+   * physics alone, and everything else is left as it was.
+   *
+   * `physics` stays null until something actually needs it — Rapier is 2.2 MB
+   * and arrives by dynamic import, so a player who never gets on a bicycle
+   * never downloads it.
+   */
+  private readonly physicsClock = new SimulationClock({ stepSeconds: 1 / 60, maxStepsPerFrame: 5 });
+  private physics: PhysicsWorld | null = null;
+  private physicsLoading: Promise<PhysicsWorld> | null = null;
+  /** Interpolation factor for the current partial physics step. */
+  private physicsAlpha = 0;
 
   private readonly saves = new SaveService(createSaveDriver());
   private mode: GameMode = 'story';
@@ -878,6 +899,11 @@ export class Game {
       needsState: () => this.needs.toJSON(),
       appearanceState: () => this.player.appearance.snapshot(),
       playGesture: (name: string) => this.player.playGesture(name),
+      initPhysics: async () => {
+        await this.ensurePhysics();
+        return this.physicsSnapshot();
+      },
+      physicsState: () => this.physicsSnapshot(),
       gestureState: () => ({
         playing: this.player.gesture,
         weight: this.player.animator?.overlayWeight ?? 0,
@@ -969,8 +995,58 @@ export class Game {
     // 7. interactables
     this.updateInteraction(dt);
 
-    // 8. audio
+    // 8. physics, on its own fixed step
+    this.stepPhysics(dt);
+
+    // 9. audio
     this.updateAudio(dt);
+  }
+
+  /**
+   * Bring Rapier up, once, and hand it the zone's collision geometry.
+   *
+   * Shares one in-flight promise so two vehicles asking at the same moment do
+   * not each download the module.
+   */
+  async ensurePhysics(): Promise<PhysicsWorld> {
+    if (this.physics) return this.physics;
+    this.physicsLoading ??= PhysicsWorld.create(this.physicsClock.stepSeconds).then((w) => {
+      this.physics = w;
+      this.syncPhysicsGeometry();
+      this.physicsClock.reset();
+      return w;
+    });
+    return this.physicsLoading;
+  }
+
+  /**
+   * Rebuild the static world for physics from the same merged proxy geometry
+   * the BVH uses, so both agree about what is solid. Called on zone change.
+   */
+  private syncPhysicsGeometry(): void {
+    const geometry = this.runtime.collision.collider?.geometry;
+    if (this.physics && geometry) this.physics.setStaticGeometry(geometry);
+  }
+
+  private physicsSnapshot() {
+    const s = this.physics?.stats;
+    return {
+      loaded: this.physics !== null,
+      bodies: s?.bodies ?? 0,
+      colliders: s?.colliders ?? 0,
+      steps: s?.steps ?? 0,
+      recoveries: s?.recoveries ?? 0,
+      alpha: this.physicsAlpha,
+      hasWorld: this.physics?.hasStaticGeometry ?? false,
+    };
+  }
+
+  private stepPhysics(dt: number): void {
+    if (!this.physics) return;
+    this.physicsClock.setPaused(this.paused || this.transitioning);
+    const tick = this.physicsClock.advance(dt);
+    for (let i = 0; i < tick.steps; i++) this.physics.step();
+    this.physicsAlpha = tick.alpha;
   }
 
   /**

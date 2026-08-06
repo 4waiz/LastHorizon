@@ -53,6 +53,8 @@ export interface TestSurface {
   needsState(): Record<string, number>;
   appearanceState(): AppearanceSnapshot;
   playGesture(name: string): boolean;
+  initPhysics(): Promise<PhysicsSnapshot>;
+  physicsState(): PhysicsSnapshot;
   gestureState(): { playing: string | null; weight: number };
   inventoryState(): ReadonlyArray<{ id: string; count: number }>;
   completeChapter(id: string): void;
@@ -72,6 +74,21 @@ export interface InteractionSnapshot {
   needsSelector: boolean;
   /** 0..1 through a hold. */
   holdProgress: number;
+}
+
+/** What the physics world is holding. */
+export interface PhysicsSnapshot {
+  /** False until something has triggered the lazy Rapier import. */
+  loaded: boolean;
+  bodies: number;
+  colliders: number;
+  steps: number;
+  /** Times a body had to be rescued from a non-finite or absurd state. */
+  recoveries: number;
+  /** 0..1 render interpolation factor for the current partial step. */
+  alpha: number;
+  /** True once the zone's static geometry is resident in Rapier. */
+  hasWorld: boolean;
 }
 
 export interface LifeSnapshot {
@@ -166,6 +183,17 @@ export interface LHTestBridge {
 
   /** Start an upper-body overlay clip. False if the clip is not in the GLB. */
   playGesture(name: string): boolean;
+
+  /**
+   * Bring Rapier up and hand it the zone's collision geometry.
+   *
+   * Physics is lazily imported -- 2.2 MB of inlined WebAssembly -- so nothing
+   * loads it until a vehicle needs it. Tests have to ask explicitly.
+   */
+  initPhysics(): Promise<PhysicsSnapshot>;
+
+  /** Body and step counts, and the render interpolation factor. */
+  getPhysics(): PhysicsSnapshot;
 
   /** Which overlay is running, and how far its weight has ramped. */
   getGesture(): { playing: string | null; weight: number };
@@ -343,6 +371,14 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     playGesture(name: string): boolean {
       return surface.playGesture(name);
+    },
+
+    initPhysics(): Promise<PhysicsSnapshot> {
+      return surface.initPhysics();
+    },
+
+    getPhysics(): PhysicsSnapshot {
+      return surface.physicsState();
     },
 
     getGesture(): { playing: string | null; weight: number } {
