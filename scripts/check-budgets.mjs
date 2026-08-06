@@ -40,8 +40,13 @@ const BUNDLE_BUDGETS = [
  * Collapsing the two into one number would mean either failing the build over
  * bytes nobody waits for, or raising the total until it no longer protects
  * load time at all.
+ *
+ * The vehicle chunks joined the list in Phase 5 for the same reason. They are
+ * reached only from `Game.spawnVehicle`, which already has to await Rapier, so
+ * a player who never drives downloads neither. Keeping them eager would have
+ * put the app chunk at exactly its 300 kB limit with nothing left over.
  */
-const LAZY_CHUNK_PREFIXES = ['rapier-', 'TestMode-'];
+const LAZY_CHUNK_PREFIXES = ['rapier-', 'TestMode-', 'VehicleController-', 'VehicleDefinition-'];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));
 

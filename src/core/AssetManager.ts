@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
 /**
- * Loads the five generated GLB packs and indexes their root objects by name.
+ * Loads the six generated GLB packs and indexes their root objects by name.
  *
  * The environment packs each contain several root objects (HouseLarge,
  * Streetlight, TreeBig, ...) rather than one file per prop, which keeps the
@@ -20,6 +20,8 @@ export interface AssetBundle {
   props: Map<string, THREE.Object3D>;
   nature: Map<string, THREE.Object3D>;
   collectibles: Map<string, THREE.Object3D>;
+  /** Base meshes, LODs and collision proxies, keyed by node name. */
+  vehicles: Map<string, THREE.Object3D>;
 }
 
 export interface LoadProgress {
@@ -35,6 +37,7 @@ const PACKS = [
   { key: 'props', file: 'props.glb', label: 'the street' },
   { key: 'nature', file: 'nature.glb', label: 'the trees' },
   { key: 'collectibles', file: 'collectibles.glb', label: 'small treasures' },
+  { key: 'vehicles', file: 'vehicles.glb', label: 'something to ride' },
 ] as const;
 
 export class AssetManager {
@@ -57,6 +60,7 @@ export class AssetManager {
       props: new Map(),
       nature: new Map(),
       collectibles: new Map(),
+      vehicles: new Map(),
     };
 
     for (let i = 0; i < PACKS.length; i++) {

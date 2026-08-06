@@ -53,6 +53,11 @@ export interface TestSurface {
   needsState(): Record<string, number>;
   appearanceState(): AppearanceSnapshot;
   playGesture(name: string): boolean;
+  spawnVehicle(kind: string, x: number, z: number, facing?: number): Promise<string | null>;
+  setVehicleInput(id: string, input: Partial<VehicleInputData>): void;
+  vehicleTelemetry(id: string): VehicleSnapshot | null;
+  resetVehicle(id: string, x: number, y: number, z: number, facing: number): void;
+  despawnVehicle(id: string): void;
   initPhysics(): Promise<PhysicsSnapshot>;
   physicsState(): PhysicsSnapshot;
   gestureState(): { playing: string | null; weight: number };
@@ -74,6 +79,34 @@ export interface InteractionSnapshot {
   needsSelector: boolean;
   /** 0..1 through a hold. */
   holdProgress: number;
+}
+
+/** Controls, as a device-independent request. */
+export interface VehicleInputData {
+  steer: number;
+  throttle: number;
+  brake: number;
+  handbrake: boolean;
+}
+
+/** A vehicle's live state, for the dashboard and for assertions. */
+export interface VehicleSnapshot {
+  forwardSpeed: number;
+  speedKmh: number;
+  gear: string;
+  steerAngle: number;
+  wheelsOnGround: number;
+  grounded: boolean;
+  lean: number;
+  fallen: boolean;
+  fallenFor: number;
+  upright: boolean;
+  x: number;
+  y: number;
+  z: number;
+  heading: number;
+  /** Times PhysicsWorld had to rescue this body. Should stay at zero. */
+  recoveries: number;
 }
 
 /** What the physics world is holding. */
@@ -183,6 +216,24 @@ export interface LHTestBridge {
 
   /** Start an upper-body overlay clip. False if the clip is not in the GLB. */
   playGesture(name: string): boolean;
+
+  /**
+   * Put a vehicle on the ground and return its instance id.
+   *
+   * Loads physics on first use, so the first call is slower than the rest.
+   */
+  spawnVehicle(kind: string, x: number, z: number, facing?: number): Promise<string | null>;
+
+  /** Hold the controls. Fields left out are treated as released. */
+  setVehicleInput(id: string, input: Partial<VehicleInputData>): void;
+
+  /** Everything the dashboard and the tests need. Null for an unknown id. */
+  getVehicle(id: string): VehicleSnapshot | null;
+
+  /** Put a vehicle somewhere valid, upright and at rest. */
+  resetVehicle(id: string, x: number, y: number, z: number, facing: number): void;
+
+  despawnVehicle(id: string): void;
 
   /**
    * Bring Rapier up and hand it the zone's collision geometry.
@@ -371,6 +422,26 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     playGesture(name: string): boolean {
       return surface.playGesture(name);
+    },
+
+    spawnVehicle(kind: string, x: number, z: number, facing = 0): Promise<string | null> {
+      return surface.spawnVehicle(kind, x, z, facing);
+    },
+
+    setVehicleInput(id: string, input: Partial<VehicleInputData>): void {
+      surface.setVehicleInput(id, input);
+    },
+
+    getVehicle(id: string): VehicleSnapshot | null {
+      return surface.vehicleTelemetry(id);
+    },
+
+    resetVehicle(id: string, x: number, y: number, z: number, facing = 0): void {
+      surface.resetVehicle(id, x, y, z, facing);
+    },
+
+    despawnVehicle(id: string): void {
+      surface.despawnVehicle(id);
     },
 
     initPhysics(): Promise<PhysicsSnapshot> {

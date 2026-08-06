@@ -78,6 +78,26 @@ export interface DriveSpec {
   readonly maxReverseSpeed: number;
   /** Force applied by the powered wheels at full throttle, newtons. */
   readonly enginePower: number;
+  /**
+   * Braking, in Rapier's units — **not newtons**.
+   *
+   * `setWheelBrake` takes a per-wheel brake impulse, and the response is
+   * strongly non-linear. Measured on the hatchback in the browser, total force
+   * against the deceleration it actually produced:
+   *
+   * ```
+   *   140  ->  5.1 m/s²      560  -> 11.4 m/s²
+   *   280  ->  7.5 m/s²     1120  -> 47.8 m/s²   (wheels lock)
+   * ```
+   *
+   * So the usable band is roughly 140–560 for a 1,180 kg car and it saturates
+   * above that. These were originally set to 14,000 by reasoning about newtons,
+   * which is 25× into saturation: every vehicle stopped dead from 43 km/h in a
+   * quarter of a second, and pedal pressure made no difference because the
+   * wheels locked either way.
+   *
+   * Scaled by mass across the fleet, since deceleration is force over mass.
+   */
   readonly brakeForce: number;
   /** Braking applied when nothing is pressed, so a vehicle coasts to a stop. */
   readonly engineBraking: number;
@@ -355,6 +375,31 @@ export function validateDefinition(def: VehicleDefinition): string[] {
   if (def.fuel && def.fuel.capacity <= 0) errors.push(`${where} fuel capacity must be positive`);
 
   if (def.drive.maxSpeed <= 0) errors.push(`${where} maxSpeed must be positive`);
+
+  // `enginePower` and `zeroToTopSeconds` are two statements about the same
+  // thing, and nothing kept them honest until a hatchback that claimed 9.5 s
+  // to 24 m/s reached 50 km/h in two. A pure unit test cannot catch that: the
+  // force maths is correct either way, it is the *numbers* that disagree.
+  //
+  // The band is wide because the implied figure ignores drag, rolling
+  // resistance and the time spent at the limiter, all of which mean a real
+  // engine needs more force than the arithmetic suggests.
+  if (def.drive.zeroToTopSeconds > 0 && def.mass > 0) {
+    const implied = def.drive.maxSpeed / def.drive.zeroToTopSeconds;
+    const actual = def.drive.enginePower / def.mass;
+    const ratio = actual / implied;
+    // The upper bound is 3.2 because the losses are not uniform, which only
+    // became apparent from driving: measured in the browser, cars reach 80–90%
+    // of the acceleration their force implies, two-wheelers about 32%. So a
+    // bicycle legitimately needs roughly three times the naive figure, and a
+    // band tight enough to reject that would reject a working bicycle.
+    if (ratio < 1.0 || ratio > 3.2) {
+      errors.push(
+        `${where} enginePower implies ${actual.toFixed(2)} m/s² but ` +
+        `zeroToTopSeconds implies ${implied.toFixed(2)} m/s² (ratio ${ratio.toFixed(2)}, want 1.0–3.2)`,
+      );
+    }
+  }
   if (def.drive.maxReverseSpeed <= 0) errors.push(`${where} maxReverseSpeed must be positive`);
   if (def.drive.maxReverseSpeed > def.drive.maxSpeed) {
     errors.push(`${where} reverses faster than it drives forward`);
@@ -484,19 +529,21 @@ export const BICYCLE: VehicleDefinition = {
   collisionProxy: 'Bicycle_Col',
   colourVariants: ['#3f7f6f', '#b4553f', '#4a5a7a'],
 
-  mass: 14,
+  // Bike *and* rider. A 14 kg chassis is the bicycle on its own, and at that
+  // mass the solver would not move it at all: see the note on braking below.
+  mass: 92,
   dimensions: v(0.6, 1.1, 1.75),
   centreOfMass: v(0, 0.42, -0.05),
 
   wheels: twoWheels(0.53, 0.34, -0.1),
   suspension: {
-    restLength: 0.09, stiffness: 22, compression: 0.5, relaxation: 0.4,
-    maxForce: 900, maxTravel: 0.06,
+    restLength: 0.12, stiffness: 28, compression: 0.5, relaxation: 0.4,
+    maxForce: 2400, maxTravel: 0.09,
   },
   grip: { sideFriction: 1.5, speedFalloff: 0.2, lowSpeedBonus: 0.5 },
   drive: {
-    maxSpeed: 7.2, maxReverseSpeed: 1.4, enginePower: 220, brakeForce: 380,
-    engineBraking: 90, zeroToTopSeconds: 5.5,
+    maxSpeed: 7.2, maxReverseSpeed: 1.4, enginePower: 320, brakeForce: 32,
+    engineBraking: 5, zeroToTopSeconds: 5.5,
   },
   steering: { maxAngle: 0.62, speedSensitivity: 0.55, rate: 4.0, returnRate: 5.0 },
   balance: {
@@ -539,7 +586,8 @@ export const SCOOTER: VehicleDefinition = {
   collisionProxy: 'Scooter_Col',
   colourVariants: ['#d8c15a', '#8a5a8f', '#3f6f8f'],
 
-  mass: 96,
+  // Scooter and rider.
+  mass: 174,
   dimensions: v(0.68, 1.2, 1.9),
   centreOfMass: v(0, 0.38, -0.06),
 
@@ -550,8 +598,8 @@ export const SCOOTER: VehicleDefinition = {
   },
   grip: { sideFriction: 1.9, speedFalloff: 0.25, lowSpeedBonus: 0.45 },
   drive: {
-    maxSpeed: 13.5, maxReverseSpeed: 1.6, enginePower: 1500, brakeForce: 2100,
-    engineBraking: 320, zeroToTopSeconds: 6.0,
+    maxSpeed: 13.5, maxReverseSpeed: 1.6, enginePower: 1020, brakeForce: 60,
+    engineBraking: 9, zeroToTopSeconds: 6.0,
   },
   steering: { maxAngle: 0.55, speedSensitivity: 0.62, rate: 3.6, returnRate: 4.6 },
   balance: {
@@ -605,8 +653,8 @@ export const HATCHBACK: VehicleDefinition = {
   },
   grip: { sideFriction: 2.4, speedFalloff: 0.28, lowSpeedBonus: 0.35 },
   drive: {
-    maxSpeed: 24, maxReverseSpeed: 6.5, enginePower: 9200, brakeForce: 14000,
-    engineBraking: 1400, zeroToTopSeconds: 9.5,
+    maxSpeed: 24, maxReverseSpeed: 6.5, enginePower: 4470, brakeForce: 400,
+    engineBraking: 60, zeroToTopSeconds: 9.5,
   },
   steering: { maxAngle: 0.52, speedSensitivity: 0.68, rate: 3.2, returnRate: 4.2 },
   balance: null,
@@ -664,8 +712,8 @@ export const VAN: VehicleDefinition = {
   },
   grip: { sideFriction: 2.2, speedFalloff: 0.34, lowSpeedBonus: 0.3 },
   drive: {
-    maxSpeed: 20, maxReverseSpeed: 5.5, enginePower: 12500, brakeForce: 19000,
-    engineBraking: 2100, zeroToTopSeconds: 13,
+    maxSpeed: 20, maxReverseSpeed: 5.5, enginePower: 4500, brakeForce: 660,
+    engineBraking: 100, zeroToTopSeconds: 13,
   },
   steering: { maxAngle: 0.46, speedSensitivity: 0.7, rate: 2.6, returnRate: 3.6 },
   balance: null,
@@ -718,8 +766,8 @@ export const POLICE: VehicleDefinition = {
 
   mass: 1290,
   drive: {
-    maxSpeed: 28, maxReverseSpeed: 7.5, enginePower: 11800, brakeForce: 16500,
-    engineBraking: 1500, zeroToTopSeconds: 8.0,
+    maxSpeed: 28, maxReverseSpeed: 7.5, enginePower: 6770, brakeForce: 440,
+    engineBraking: 66, zeroToTopSeconds: 8.0,
   },
   grip: { sideFriction: 2.7, speedFalloff: 0.24, lowSpeedBonus: 0.35 },
 

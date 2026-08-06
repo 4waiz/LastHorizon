@@ -10,6 +10,12 @@ import type { ZoneId } from '../world/zones/Manifest';
 import type { ZoneRuntime } from '../world/zones/ZoneRuntime';
 import { SimulationClock } from './SimulationClock';
 import { PhysicsWorld } from '../physics/PhysicsWorld';
+// Type-only, so none of the vehicle system reaches the main chunk. The
+// implementations arrive through the dynamic import in `spawnVehicle`, beside
+// Rapier: a player who never gets into a vehicle downloads neither.
+import type { VehicleController } from '../vehicles/VehicleController';
+import type { VehicleId } from '../vehicles/VehicleDefinition';
+import type { VehicleInput } from '../vehicles/VehicleDynamics';
 import { LifeClock } from './clocks/LifeClock';
 import { WorldClock } from './clocks/WorldClock';
 import { StoryClock } from './clocks/StoryClock';
@@ -43,7 +49,7 @@ import { ContactShadow } from '../graphics/StylizedShadows';
 import { PostProcessing } from '../graphics/PostProcessing';
 import { WindowPortal } from '../graphics/WindowPortal';
 import { INTERIOR_ORIGIN } from '../world/Interiors';
-import { setToonPlayer, updateToonTime } from '../graphics/ToonMaterial';
+import { setToonPlayer, toonFromImported, updateToonTime } from '../graphics/ToonMaterial';
 import { HUD } from '../ui/HUD';
 import { LoadingScreen } from '../ui/LoadingScreen';
 import { Minimap } from '../ui/Minimap';
@@ -138,6 +144,19 @@ export class Game {
   private physicsLoading: Promise<PhysicsWorld> | null = null;
   /** Interpolation factor for the current partial physics step. */
   private physicsAlpha = 0;
+
+  /**
+   * Live vehicles, keyed by instance id.
+   *
+   * Physics-only until the models land: the controller drives a rigid body and
+   * a placeholder box follows it, so handling can be tuned and verified before
+   * any art exists.
+   */
+  private readonly vehicles = new Map<string, VehicleController>();
+  private readonly vehicleProxies = new Map<string, THREE.Object3D>();
+  /** Base meshes, LODs and collision proxies from vehicles.glb, by node name. */
+  private vehicleModels = new Map<string, THREE.Object3D>();
+  private nextVehicleSerial = 1;
 
   private readonly saves = new SaveService(createSaveDriver());
   private mode: GameMode = 'story';
@@ -274,6 +293,7 @@ export class Game {
     loading.setProgress(0.94, 'the explorer');
     await frame();
 
+    this.vehicleModels = assets.vehicles;
     this.player = new Player(assets.player.scene, assets.player.clips, this.input);
     this.scene.add(this.player.root);
     this.player.setSpawn(this.runtime.spawn, this.runtime.spawnFacing);
@@ -899,6 +919,24 @@ export class Game {
       needsState: () => this.needs.toJSON(),
       appearanceState: () => this.player.appearance.snapshot(),
       playGesture: (name: string) => this.player.playGesture(name),
+      spawnVehicle: (kind, x, z, facing) =>
+        this.spawnVehicle(kind as VehicleId, x, z, facing),
+      setVehicleInput: (id, input) => this.setVehicleInput(id, input),
+      vehicleTelemetry: (id) => {
+        const v = this.vehicles.get(id);
+        if (!v) return null;
+        const t = v.telemetry;
+        const pos = v.position(new THREE.Vector3());
+        return {
+          ...t,
+          x: pos.x, y: pos.y, z: pos.z,
+          heading: v.headingYaw(),
+          recoveries: this.physics?.recoveriesOf(v.bodyId) ?? 0,
+        };
+      },
+      resetVehicle: (id, x, y, z, facing) =>
+        this.vehicles.get(id)?.resetTo(new THREE.Vector3(x, y, z), facing),
+      despawnVehicle: (id) => this.despawnVehicle(id),
       initPhysics: async () => {
         await this.ensurePhysics();
         return this.physicsSnapshot();
@@ -1049,8 +1087,124 @@ export class Game {
     if (!this.physics) return;
     this.physicsClock.setPaused(this.paused || this.transitioning);
     const tick = this.physicsClock.advance(dt);
-    for (let i = 0; i < tick.steps; i++) this.physics.step();
+    for (let i = 0; i < tick.steps; i++) {
+      // Controllers first: the forces they set have to be the ones this step
+      // integrates, not the next one.
+      for (const v of this.vehicles.values()) v.update(tick.dt);
+      this.physics.step();
+    }
     this.physicsAlpha = tick.alpha;
+    this.syncVehicleProxies();
+  }
+
+  /** Draw each vehicle at its interpolated transform. */
+  private syncVehicleProxies(): void {
+    for (const [id, controller] of this.vehicles) {
+      const mesh = this.vehicleProxies.get(id);
+      if (!mesh) continue;
+      controller.sample(this.physicsAlpha, mesh.position, mesh.quaternion);
+    }
+  }
+
+  /**
+   * Put a vehicle in the world.
+   *
+   * Drops it on the ground at `x, z` with a little clearance so the suspension
+   * settles rather than starting compressed through the road.
+   */
+  async spawnVehicle(kind: VehicleId, x: number, z: number, facing = 0): Promise<string | null> {
+    const [{ vehicleDef }, { VehicleController: Controller }, physics] = await Promise.all([
+      import('../vehicles/VehicleDefinition'),
+      import('../vehicles/VehicleController'),
+      this.ensurePhysics(),
+    ]);
+
+    const def = vehicleDef(kind);
+    if (!def) return null;
+    const y = this.runtime.heightAt(x, z) + def.dimensions.y * 0.5 + 0.15;
+    const at = new THREE.Vector3(x, y, z);
+
+    const id = `${kind}_${this.nextVehicleSerial++}`;
+    const controller = new Controller(physics, def, at, facing);
+    this.vehicles.set(id, controller);
+
+    const visual = this.buildVehicleVisual(def, id);
+    this.scene.add(visual);
+    this.vehicleProxies.set(id, visual);
+
+    return id;
+  }
+
+  /**
+   * The mesh that follows a vehicle body.
+   *
+   * Falls back to a plain box if the model is missing, so a failed asset load
+   * leaves something visible to drive rather than an invisible car — the
+   * physics would be working and nothing would look wrong except the screen.
+   */
+  private buildVehicleVisual(
+    def: { model: string; dimensions: { x: number; y: number; z: number }; colourVariants: readonly string[] },
+    id: string,
+  ): THREE.Object3D {
+    const proto = this.vehicleModels.get(def.model);
+    if (!proto) {
+      const d = def.dimensions;
+      const box = new THREE.Mesh(
+        new THREE.BoxGeometry(d.x, d.y, d.z),
+        new THREE.MeshToonMaterial({ color: 0xc94f3d }),
+      );
+      box.name = `vehicle:${id}`;
+      return box;
+    }
+
+    const obj = proto.clone(true);
+    obj.name = `vehicle:${id}`;
+
+    // Colour variants are a material parameter, not a mesh: every body shares
+    // `vehicle_paint` and only the tint differs.
+    const variant = def.colourVariants[0];
+    obj.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      const source = mesh.material as THREE.Material;
+      const converted = toonFromImported(source, `vehicle_${def.model}`);
+      if (variant && source.name === 'vehicle_paint') {
+        const tinted = converted.clone() as THREE.MeshToonMaterial;
+        tinted.color = new THREE.Color(variant);
+        mesh.material = tinted;
+      } else {
+        mesh.material = converted;
+      }
+    });
+    return obj;
+  }
+
+  vehicle(id: string): VehicleController | null {
+    return this.vehicles.get(id) ?? null;
+  }
+
+  setVehicleInput(id: string, input: Partial<VehicleInput>): void {
+    this.vehicles.get(id)?.setInput(input);
+  }
+
+  despawnVehicle(id: string): void {
+    this.vehicles.get(id)?.dispose();
+    this.vehicles.delete(id);
+    const visual = this.vehicleProxies.get(id);
+    if (visual) {
+      this.scene.remove(visual);
+      visual.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.geometry.dispose();
+        const m = mesh.material;
+        if (Array.isArray(m)) m.forEach((x) => x.dispose());
+        else m?.dispose();
+      });
+      this.vehicleProxies.delete(id);
+    }
   }
 
   /**
