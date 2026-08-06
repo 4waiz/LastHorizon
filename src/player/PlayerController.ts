@@ -51,6 +51,14 @@ export class PlayerController {
   respawnedThisFrame = false;
   /** Off while the player is in the interior cell, which sits off-map. */
   boundsEnabled = true;
+  /**
+   * Multiplier on walk and run speed, driven by `Needs`.
+   *
+   * Applied to the *target* speed rather than the resulting velocity, so
+   * acceleration and damping still behave — a tired player accelerates to a
+   * lower top speed rather than being dragged back each frame.
+   */
+  speedScale = 1;
 
   private timeSinceGrounded = Infinity;
   private jumpBufferedFor = Infinity;
@@ -112,7 +120,7 @@ export class PlayerController {
     const inputMag = clamp(this.desired.length(), 0, 1);
     if (inputMag > 1e-4) this.desired.normalize();
 
-    const targetSpeed = (this.input.running ? t.runSpeed : t.walkSpeed) * inputMag;
+    const targetSpeed = (this.input.running ? t.runSpeed : t.walkSpeed) * inputMag * this.speedScale;
     const targetVel = this.desired.multiplyScalar(targetSpeed);
 
     // Acceleration toward the target, with reduced authority in the air.

@@ -34,6 +34,8 @@ import {
 } from '../interaction/WorldInteractables';
 import { Environment } from '../world/Environment';
 import { Player } from '../player/Player';
+import { Inventory, Equipment, type EquipSlot } from '../player/Inventory';
+import { Needs } from '../player/Needs';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera';
 import { ContactShadow } from '../graphics/StylizedShadows';
 import { PostProcessing } from '../graphics/PostProcessing';
@@ -123,9 +125,10 @@ export class Game {
   private readonly completedChapters = new Set<string>();
   /** True once an autosave has been applied, so mode selection defers to it. */
   private resumedFromSave = false;
+  private readonly inventory = new Inventory();
+  private readonly equipment = new Equipment();
+  private readonly needs = new Needs();
   private freeRoamMoney = 0;
-  /** Recorded and saved; inert until Phase 5 builds vehicles. */
-  private startVehicle: FreeRoamOptions['startVehicle'] = 'none';
   private readonly unlockedZones = new Set<ZoneId>(['village_coast']);
 
   private running = false;
@@ -290,7 +293,14 @@ export class Game {
       },
       onInteract: (down) => this.input.setInteractHeld(down),
       onOutfit: (patch) => {
-        this.player.setOutfit(patch);
+        // The panel still speaks in colours; Equipment resolves each one back
+        // to its catalogue item so the two representations cannot drift.
+        for (const slot of ['shirt', 'trousers', 'hat'] as const) {
+          const colour = patch[slot];
+          if (typeof colour === 'string') this.equipment.equipColour(slot as EquipSlot, colour);
+        }
+        if (typeof patch.hatOn === 'boolean') this.equipment.setHatOn(patch.hatOn);
+        this.player.setOutfit(this.equipment.toOutfit());
         this.hud.syncOutfit(this.player.outfit);
       },
     });
@@ -431,6 +441,12 @@ export class Game {
     const tick = this.life.advance(dt);
     if (tick.birthdayReached !== null) void this.handleBirthday(tick.birthdayReached);
 
+    // Needs drain on the life clock's *active* seconds, not on dt: a paused or
+    // backgrounded game must not leave the player starving on return, and the
+    // two would drift apart the moment a gate blocked one and not the other.
+    this.needs.advance(tick.consumed);
+    this.player.controller.speedScale = this.needs.modifiers().moveSpeed;
+
     this.hud.setAge(this.life.ageYears, this.life.yearProgress);
   }
 
@@ -456,7 +472,12 @@ export class Game {
       activeSeconds: 0,
     });
     this.freeRoamMoney = o.startMoney;
-    this.startVehicle = o.startVehicle;
+
+    // A fresh run starts from a known inventory, not whatever the last one
+    // left behind — this path is also reached when restarting from the menu.
+    this.inventory.clear();
+    if (o.startVehicle !== 'none') this.inventory.add(`keys_${o.startVehicle}`, 1);
+
     if (o.unlockCity) this.unlockedZones.add('city_old_market');
     this.hud.setAge(this.life.ageYears, this.life.yearProgress);
   }
@@ -502,11 +523,10 @@ export class Game {
         quests: {},
       },
       money: this.freeRoamMoney,
-      inventory:
-        this.startVehicle === 'none' ? [] : [{ id: `keys_${this.startVehicle}`, count: 1 }],
-      wardrobe: { ...this.player.outfit },
+      inventory: this.inventory.toJSON(),
+      wardrobe: this.equipment.toJSON(),
       vehicles: [],
-      needs: { hunger: 1, energy: 1, cleanliness: 1, mood: 1 },
+      needs: this.needs.toJSON(),
       relationships: [],
       collectibles: this.village?.collectibles.foundIds ?? [],
       unlockedZones: [...this.unlockedZones],
@@ -544,7 +564,11 @@ export class Game {
     if (this.village) {
       this.hud.setCounter(this.village.collectibles.count, this.village.collectibles.total);
     }
-    this.player.setOutfit(data.wardrobe);
+    this.inventory.restore(data.inventory);
+    this.needs.restoreFrom(data.needs);
+    // Accepts both item ids and the raw hex a pre-migration save holds.
+    this.equipment.restore(data.wardrobe);
+    this.player.setOutfit(this.equipment.toOutfit());
     this.hud.syncOutfit(this.player.outfit);
 
     // Only reposition when the save belongs to the zone that is actually
@@ -815,6 +839,9 @@ export class Game {
       // have it silently dropped.
       advanceLife: async (seconds) => {
         const tick = this.life.advance(seconds);
+        // Same consequence as a frame's worth of active time, or the bridge
+        // would report seconds passing with the needs untouched.
+        this.needs.advance(tick.consumed);
         if (tick.birthdayReached !== null) await this.handleBirthday(tick.birthdayReached);
         return this.lifeSnapshot();
       },
@@ -835,6 +862,8 @@ export class Game {
         };
       },
       pressInteract: (held: boolean) => this.input.setInteractHeld(held),
+      needsState: () => this.needs.toJSON(),
+      inventoryState: () => this.inventory.toJSON(),
       completeChapter: (id) => {
         this.completedChapters.add(id);
       },
@@ -1107,6 +1136,9 @@ export class Game {
     this.env.setMode('cycle');
     this.settings.setTimeMode('cycle');
     this.env.jumpTo(0.285); // just after first light
+
+    // A night's sleep fills energy and lifts mood. It does not feed you.
+    this.needs.sleep();
 
     this.player.setLying(false);
     this.player.motor.teleport(room.bedside.x, room.bedside.y, room.bedside.z);

@@ -49,6 +49,8 @@ export interface TestSurface {
   lifeState(): LifeSnapshot;
   interactionState(): InteractionSnapshot;
   pressInteract(held: boolean): void;
+  needsState(): Record<string, number>;
+  inventoryState(): ReadonlyArray<{ id: string; count: number }>;
   completeChapter(id: string): void;
   saveNow(slot: string): Promise<boolean>;
   loadNow(slot: string): Promise<boolean>;
@@ -148,6 +150,12 @@ export interface LHTestBridge {
    * A press is `true` then `false`; a hold is `true`, some `step()`s, `false`.
    */
   pressInteract(held: boolean): void;
+
+  /** The four soft needs, 0..1. */
+  getNeeds(): Record<string, number>;
+
+  /** Carried stacks, for save round-trip assertions. */
+  getInventory(): ReadonlyArray<{ id: string; count: number }>;
 
   /**
    * Jump straight to the next birthday. Resolves once it has been fully
@@ -307,6 +315,14 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     pressInteract(held: boolean): void {
       surface.pressInteract(held);
+    },
+
+    getNeeds(): Record<string, number> {
+      return surface.needsState();
+    },
+
+    getInventory(): ReadonlyArray<{ id: string; count: number }> {
+      return surface.inventoryState();
     },
 
     completeChapter(id: string): void {
