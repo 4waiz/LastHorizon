@@ -25,9 +25,18 @@ export interface FeatureFlags {
    * so this is a research switch and must fall back cleanly.
    */
   readonly webgpu: boolean;
+
+  /**
+   * The vehicle proving ground (`?testroad=1`).
+   *
+   * A closed course with known gradients, square kerbs, a barrier and a ramp.
+   * Development only: the village is a nice place to drive and a poor place to
+   * *measure* driving, because every slope in it is incidental.
+   */
+  readonly testRoad: boolean;
 }
 
-const OFF: FeatureFlags = { e2e: false, webgpu: false };
+const OFF: FeatureFlags = { e2e: false, webgpu: false, testRoad: false };
 
 /** `?flag=1`, `?flag=true` and bare `?flag` all count as on. */
 function isOn(params: URLSearchParams, name: string): boolean {
@@ -46,6 +55,7 @@ export function resolveFeatureFlags(search: string): FeatureFlags {
   return {
     e2e: isOn(params, 'e2e'),
     webgpu: isOn(params, 'webgpu'),
+    testRoad: isOn(params, 'testroad'),
   };
 }
 

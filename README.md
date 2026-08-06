@@ -31,7 +31,7 @@ Then open <http://localhost:5173>.
 | `npm run dev` | Vite dev server with HMR |
 | `npm run build` | Type-check, then bundle to `dist/` |
 | `npm run preview` | Serve the production bundle |
-| `npm test` | Vitest suite (433 tests, no WebGL needed) |
+| `npm test` | Vitest suite (724 tests, no WebGL needed) |
 | `npm run test:e2e` | Playwright smoke tests against the production build |
 | `npm run typecheck` | `tsc --noEmit` under strict mode |
 | `npm run lint` | ESLint (flat config) over `src/` and `tests/` |
@@ -265,7 +265,7 @@ make the player sink or float.
 
 ## Tests
 
-`npm test` runs 433 tests across 21 files, covering the logic that doesn't
+`npm test` runs 724 tests across 29 files, covering the logic that doesn't
 need a GPU. The largest groups:
 
 | File | Covers |
@@ -278,6 +278,11 @@ need a GPU. The largest groups:
 | `world.test.ts` | Terrain/road continuity and corridor flatness, plus the character motor against a real BVH |
 | `animationLayers.test.ts` | Layer weights, additive conversion on a clone, foot placement, sockets against the rig |
 | `ageAppearance.test.ts` | Age proportions written only to bone channels the clips leave alone |
+| `vehicleDefinition.test.ts` | The five vehicle classes as data, and the consistency checks that stop a car claiming two different top speeds |
+| `vehicleDynamics.test.ts` | Steering falloff, the arcade automatic, and capped two-wheel balance |
+| `vehicleAccess.test.ts` | Getting in and out without ending up in a wall, under a vehicle or over a cliff |
+| `vehicleRegistry.test.ts` | Ownership, parking, cosmetic damage, optional fuel and garage recovery |
+| `gamepad.test.ts` | Radial deadzones, analogue triggers, and one press firing once |
 | `toonMaterial.test.ts` | Wind is opt-in — palette colour names like `leaf_mid` must not hand furniture the foliage shader |
 | `featureFlags.test.ts` | Flags default off; only the documented on-forms enable them |
 

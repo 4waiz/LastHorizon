@@ -13,10 +13,18 @@
 
 ## Current state
 
-**433 tests across 21 files**, all passing. Measured 2026-08-06, after Phase 4.
+**724 tests across 29 files**, all passing. Measured 2026-08-07, after Phase 5.
 
 | File | Tests | Covers |
 | --- | --- | --- |
+| `vehicleDefinition.test.ts` | 57 | The five vehicle classes as data; the check that `enginePower` and `zeroToTopSeconds` agree, which every vehicle once failed |
+| `vehicleDynamics.test.ts` | 51 | Steering rate and falloff, the arcade automatic, capped balance torque, symmetry in both directions |
+| `vehicleAccess.test.ts` | 38 | Exit placement as a search over candidates: moving, cliff, drop and blocked each refused distinctly |
+| `vehicleRegistry.test.ts` | 38 | Ownership, parking, cosmetic damage, optional fuel, impound and garage recovery |
+| `vehicleControls.test.ts` | 29 | Three input devices merged per axis; camera pullback and reverse hysteresis |
+| `gamepad.test.ts` | 29 | Radial deadzone with rescaling, analogue triggers, edge detection |
+| `vehicleAssets.test.ts` | 25 | The generated GLB against the definitions that describe it |
+| `physicsWorld.test.ts` | 23 | Interpolation, the safety ceilings, and the rescue path, against a stub |
 | `clocks.test.ts` | 41 | Life, world and story clocks; gating sets, birthday carry-over, why none derives from another |
 | `inventory.test.ts` | 39 | Stacks, slot limits and exempt kinds, equipment/wardrobe migration, the four soft needs and their accessibility switches |
 | `zones.test.ts` | 37 | Manifests, streaming hysteresis, spawn resolution, disposal ownership |
@@ -41,11 +49,13 @@
 
 ### Browser scenarios
 
-**25 Playwright scenarios**, green in Chromium, each asserting zero console
+**51 Playwright scenarios across 7 specs**, green in Chromium, each asserting zero console
 errors.
 
 | Spec | Scenarios | Covers |
 | --- | --- | --- |
+| `driving.spec.ts` | 18 | Every vehicle settling and moving, braking, reverse, steering symmetry, tunnelling, riding, righting |
+| `gamepad.spec.ts` | 8 | Analogue movement, deadzone drift, unplugging mid-stride |
 | `interaction.spec.ts` | 7 | Prompts, facing, priority, seated, the selector, busy states |
 | `smoke.spec.ts` | 6 | Boot, day/night, interior round trip, sit/wardrobe/lie, bridge absence |
 | `persistence.spec.ts` | 4 | Needs drain on active seconds, blocked clock, save round trip |

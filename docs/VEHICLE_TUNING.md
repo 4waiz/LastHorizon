@@ -3,8 +3,21 @@
 Every number here was measured by driving in a browser against real Rapier, not
 derived. The first set was derived, and all of it was wrong — see §2.
 
-Measured on the Phase 5 reference build, village zone, flat stretch of the coast
-road at `(0, 30)`, Chromium via Playwright.
+Measured on the Phase 5 reference build, Chromium via Playwright.
+
+Two sets of numbers, and the difference between them is the point. The village
+figures were taken on what looked like a flat stretch of the coast road and were
+not: it slopes. The proving ground (`?testroad=1`) has a genuinely level 120 m
+straight, and it exists because of exactly this.
+
+| Hatchback | Village "flat" | Proving ground |
+| --- | --- | --- |
+| Acceleration | 3.02 m/s² | **3.52 m/s²** |
+| Braking | 11.6 m/s² | **7.5 m/s²** |
+| Stop from ~38 km/h | 1.30 s | **1.40 s** |
+
+The proving-ground figures are the honest ones. Holding a 12° grade on the
+handbrake drifts **0.5 m over five seconds**.
 
 ---
 

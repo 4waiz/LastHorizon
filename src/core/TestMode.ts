@@ -53,7 +53,7 @@ export interface TestSurface {
   needsState(): Record<string, number>;
   appearanceState(): AppearanceSnapshot;
   playGesture(name: string): boolean;
-  spawnVehicle(kind: string, x: number, z: number, facing?: number): Promise<string | null>;
+  spawnVehicle(kind: string, x: number, z: number, facing?: number, atY?: number): Promise<string | null>;
   setVehicleInput(id: string, input: Partial<VehicleInputData>): void;
   vehicleTelemetry(id: string): VehicleSnapshot | null;
   resetVehicle(id: string, x: number, y: number, z: number, facing: number): void;
@@ -66,6 +66,7 @@ export interface TestSurface {
   recoverVehicle(id: string): boolean;
   rollVehicle(id: string): void;
   pressFlip(): void;
+  testRoadMark(name: string): Promise<{ x: number; y: number; z: number; facing: number } | null>;
   vehicleRecord(id: string): unknown;
   setFuelEnabled(on: boolean): void;
   initPhysics(): Promise<PhysicsSnapshot>;
@@ -232,7 +233,7 @@ export interface LHTestBridge {
    *
    * Loads physics on first use, so the first call is slower than the rest.
    */
-  spawnVehicle(kind: string, x: number, z: number, facing?: number): Promise<string | null>;
+  spawnVehicle(kind: string, x: number, z: number, facing?: number, atY?: number): Promise<string | null>;
 
   /** Hold the controls. Fields left out are treated as released. */
   setVehicleInput(id: string, input: Partial<VehicleInputData>): void;
@@ -273,6 +274,15 @@ export interface LHTestBridge {
 
   /** Press the righting control, as R or the pad's d-pad down would. */
   pressFlip(): void;
+
+  /**
+   * World position of a named spot on the dev proving ground.
+   *
+   * Null unless the page was loaded with `?testroad=1`. Marks are `start`,
+   * `slope5`, `slope12`, `slope20`, `junction`, `parking`, `jump` and
+   * `barrierRun`.
+   */
+  getTestRoadMark(name: string): Promise<{ x: number; y: number; z: number; facing: number } | null>;
 
   /** Ownership, condition, fuel and where it was parked. Null if unknown. */
   getVehicleRecord(id: string): unknown;
@@ -469,8 +479,14 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
       return surface.playGesture(name);
     },
 
-    spawnVehicle(kind: string, x: number, z: number, facing = 0): Promise<string | null> {
-      return surface.spawnVehicle(kind, x, z, facing);
+    spawnVehicle(
+      kind: string,
+      x: number,
+      z: number,
+      facing = 0,
+      atY?: number,
+    ): Promise<string | null> {
+      return surface.spawnVehicle(kind, x, z, facing, atY);
     },
 
     setVehicleInput(id: string, input: Partial<VehicleInputData>): void {
@@ -519,6 +535,10 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     pressFlip(): void {
       surface.pressFlip();
+    },
+
+    getTestRoadMark(name: string) {
+      return surface.testRoadMark(name);
     },
 
     getVehicleRecord(id: string): unknown {

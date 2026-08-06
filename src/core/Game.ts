@@ -56,6 +56,7 @@ import { HUD } from '../ui/HUD';
 import { LoadingScreen } from '../ui/LoadingScreen';
 import { Minimap } from '../ui/Minimap';
 import { clamp } from '../utils/MathUtils';
+import { featureFlags } from './FeatureFlags';
 
 /**
  * Owns the frame loop and wires every subsystem together.
@@ -178,6 +179,8 @@ export class Game {
    * A bicycle is unaffected either way -- it has no tank to empty.
    */
   private fuelEnabled = true;
+  /** Set when the dev proving ground is built. */
+  private testRoadOrigin: THREE.Vector3 | null = null;
 
   /**
    * What the player is riding, if anything.
@@ -399,6 +402,10 @@ export class Game {
     // Runs every frame, including while a district is active — a district has
     // no keepsakes, so this must degrade rather than assert.
     this.minimap = new Minimap(this.runtime.mapData, () => this.village?.keepsakeMarkers ?? []);
+    // The proving ground, if asked for. Built before the interactables are
+    // synced so its collision is in place before anything can drive at it.
+    if (featureFlags().testRoad) await this.buildTestRoad();
+
     // Needs the HUD, because the wardrobe handler opens it.
     this.syncInteractables();
     // Somewhere for recovered vehicles to reappear: the verge by the house,
@@ -972,8 +979,8 @@ export class Game {
       needsState: () => this.needs.toJSON(),
       appearanceState: () => this.player.appearance.snapshot(),
       playGesture: (name: string) => this.player.playGesture(name),
-      spawnVehicle: (kind, x, z, facing) =>
-        this.spawnVehicle(kind as VehicleId, x, z, facing),
+      spawnVehicle: (kind, x, z, facing, atY) =>
+        this.spawnVehicle(kind as VehicleId, x, z, facing, atY),
       setVehicleInput: (id, input) => this.setVehicleInput(id, input),
       vehicleTelemetry: (id) => {
         const v = this.vehicles.get(id);
@@ -1000,6 +1007,7 @@ export class Game {
         this.vehicles.get(id)?.rollOver();
       },
       pressFlip: () => this.input.queueFlip(),
+      testRoadMark: (name: string) => this.testRoadMark(name),
       vehicleRecord: (id) => {
         const r = this.garage.get(id);
         return r ? { ...r, transform: { ...r.transform } } : null;
@@ -1276,7 +1284,13 @@ export class Game {
    * Drops it on the ground at `x, z` with a little clearance so the suspension
    * settles rather than starting compressed through the road.
    */
-  async spawnVehicle(kind: VehicleId, x: number, z: number, facing = 0): Promise<string | null> {
+  async spawnVehicle(
+    kind: VehicleId,
+    x: number,
+    z: number,
+    facing = 0,
+    atY?: number,
+  ): Promise<string | null> {
     const [{ vehicleDef }, { VehicleController: Controller }, controls, access, dynamics, physics] =
       await Promise.all([
         import('../vehicles/VehicleDefinition'),
@@ -1305,7 +1319,15 @@ export class Game {
 
     const def = vehicleDef(kind);
     if (!def) return null;
-    const y = this.runtime.heightAt(x, z) + def.dimensions.y * 0.5 + 0.15;
+    // An explicit height wins outright. Probing is right for ordinary spawns,
+    // but the proving ground knows exactly how high its own tarmac is and
+    // should not have to hope a downward ray agrees.
+    const terrain = this.runtime.heightAt(x, z);
+    const ground = atY ?? Math.max(
+      terrain,
+      this.runtime.collision.groundBelow(x, terrain + 80, z, 160) ?? terrain,
+    );
+    const y = ground + def.dimensions.y * 0.5 + 0.15;
     const at = new THREE.Vector3(x, y, z);
 
     const id = `${kind}_${this.nextVehicleSerial++}`;
@@ -1463,6 +1485,65 @@ export class Game {
   private applyNeedsSettings(): void {
     const s = this.settings.current;
     this.needs.configure({ enabled: s.needsEnabled, decayScale: s.needsDecay });
+  }
+
+  /**
+   * Build the dev proving ground and fold it into collision.
+   *
+   * The road's boxes are added to the *existing* merged BVH rather than a
+   * second collision world: the character motor and the vehicle wheels both
+   * read one collider, and giving the road its own would mean a car could
+   * drive on it while the player walked through it.
+   */
+  private async buildTestRoad(): Promise<void> {
+    const { buildTestRoad, TEST_ROAD_MARKS } = await import('../vehicles/TestRoad');
+    // Off to the side of the village, clear of anything it could intersect.
+    //
+    // Height is the *highest* terrain under the whole 120 m footprint, not a
+    // single sample: taken at one point, most of the road ends up buried and
+    // a vehicle "on" it is really driving on the hillside underneath, which
+    // is exactly the contamination the proving ground exists to remove.
+    // Sat on the terrain under its own start line, not over the highest point
+    // in the footprint: that put it fifteen metres in the air. The far end may
+    // clip a rise, which is acceptable for a dev tool whose purpose is the
+    // flat straight.
+    const origin = new THREE.Vector3(-140, this.runtime.heightAt(-140, -56) + 0.25, -60);
+    const { group, colliders } = buildTestRoad(origin);
+
+    this.scene.add(group);
+    this.testRoadOrigin = origin;
+    this.gameScope.addTeardown(() => {
+      this.scene.remove(group);
+      group.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (mesh.isMesh) mesh.geometry.dispose();
+      });
+    });
+
+    // `build` disposes the current collider before merging, so the existing
+    // geometry has to be copied out first -- passing the live collider back in
+    // hands the merger a buffer that is freed underneath it, and the road
+    // silently fails to become solid.
+    const existing = this.runtime.collision.collider;
+    const carried = existing ? new THREE.Mesh(existing.geometry.clone()) : null;
+    carried?.updateMatrixWorld(true);
+    this.runtime.collision.build([...(carried ? [carried] : []), ...colliders]);
+    if (this.physics) this.syncPhysicsGeometry();
+    void TEST_ROAD_MARKS;
+  }
+
+  /** World position of a named spot on the proving ground, or null. */
+  async testRoadMark(name: string): Promise<{ x: number; y: number; z: number; facing: number } | null> {
+    if (!this.testRoadOrigin) return null;
+    const { TEST_ROAD_MARKS } = await import('../vehicles/TestRoad');
+    const mark = (TEST_ROAD_MARKS as Record<string, { x: number; z: number; facing: number }>)[name];
+    if (!mark) return null;
+    return {
+      x: this.testRoadOrigin.x + mark.x,
+      y: this.testRoadOrigin.y + 0.6,
+      z: this.testRoadOrigin.z + mark.z,
+      facing: mark.facing,
+    };
   }
 
   /** Right whichever vehicle the player is standing closest to, within reach. */

@@ -8,8 +8,10 @@ import { resolveFeatureFlags } from '../src/core/FeatureFlags';
  */
 describe('resolveFeatureFlags', () => {
   it('is entirely off for a plain visit', () => {
-    expect(resolveFeatureFlags('')).toEqual({ e2e: false, webgpu: false });
-    expect(resolveFeatureFlags('?')).toEqual({ e2e: false, webgpu: false });
+    // Exhaustive on purpose: a flag added without a default of `false` should
+    // fail here rather than ship quietly switched on.
+    expect(resolveFeatureFlags('')).toEqual({ e2e: false, webgpu: false, testRoad: false });
+    expect(resolveFeatureFlags('?')).toEqual({ e2e: false, webgpu: false, testRoad: false });
   });
 
   it('accepts the documented on-forms', () => {
@@ -32,7 +34,13 @@ describe('resolveFeatureFlags', () => {
 
   it('is unaffected by unrelated query parameters', () => {
     const f = resolveFeatureFlags('?utm_source=x&quality=high&e2e=1');
-    expect(f).toEqual({ e2e: true, webgpu: false });
+    expect(f).toEqual({ e2e: true, webgpu: false, testRoad: false });
+  });
+
+  it('gates the dev proving ground, which defaults off', () => {
+    expect(resolveFeatureFlags('?testroad=1').testRoad).toBe(true);
+    expect(resolveFeatureFlags('?testroad').testRoad).toBe(true);
+    expect(resolveFeatureFlags('?e2e=1').testRoad).toBe(false);
   });
 
   it('does not match on a substring of another parameter', () => {
