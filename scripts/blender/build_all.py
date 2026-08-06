@@ -10,7 +10,7 @@ driven over Blender MCP):
 
     exec(open("scripts/blender/build_all.py").read())
 
-Writes five GLBs into public/assets/models/. Everything is procedural, so the
+Writes six GLBs into public/assets/models/. Everything is procedural, so the
 kit is reproducible and no binary source assets need to live in the repo.
 """
 
@@ -33,6 +33,7 @@ MODULES = [
     "build_props",
     "build_nature",
     "build_collectibles",
+    "build_vehicles",
 ]
 
 

@@ -119,6 +119,23 @@ PALETTE = {
     "grass_green":  "#93B87C",
     "grass_dry":    "#C4BE8A",
 
+    # vehicles
+    #
+    # `vehicle_paint` is the one the runtime retints per colour variant, so the
+    # body of every car shares a single material and a red hatchback and a blue
+    # one are the same mesh with a different parameter -- not two models.
+    "vehicle_paint":  "#C94F3D",
+    "vehicle_trim":   "#3A3A3C",
+    "vehicle_glass":  "#5E7A80",
+    "tyre":           "#2A2A2C",
+    "rim":            "#B9BCB8",
+    "frame_steel":    "#8E9490",
+    "seat_dark":      "#4A443E",
+    "light_lens":     "#F2E6C8",
+    "brake_lens":     "#C4463A",
+    "beacon_blue":    "#3A6CFF",
+    "beacon_red":     "#FF3A3A",
+
     # collectibles
     "paper_white":  "#F4F1E6",
     "boat_red":     "#C9584B",
