@@ -90,8 +90,14 @@ export const ITEMS: readonly ItemDef[] = [
   { id: 'grocery_bag', name: 'Grocery bag', kind: 'stackable', maxStack: 1 },
   { id: 'phone', name: 'Phone', kind: 'key', maxStack: 1 },
   { id: 'house_key', name: 'House key', kind: 'key', maxStack: 1 },
+  // One per vehicle that asks for a key. `vehicleDefinition.test.ts` checks
+  // every `ownership.keyItem` resolves here — a key that does not exist is a
+  // vehicle nobody can ever get into, and it fails silently at the door.
   { id: 'keys_bicycle', name: 'Bicycle', kind: 'vehicleKey', maxStack: 1 },
   { id: 'keys_scooter', name: 'Scooter key', kind: 'vehicleKey', maxStack: 1 },
+  { id: 'keys_hatchback', name: 'Car key', kind: 'vehicleKey', maxStack: 1 },
+  { id: 'keys_van', name: 'Van key', kind: 'vehicleKey', maxStack: 1 },
+  { id: 'keys_police', name: 'Patrol car key', kind: 'vehicleKey', maxStack: 1 },
   { id: 'ammo_pistol', name: 'Pistol rounds', kind: 'ammo', maxStack: 60 },
 ];
 
