@@ -1,13 +1,13 @@
 # Phase 3 report — Life clock, aging, modes, and durable saves
 
-**Status: PARTIAL.** The systems are built and tested; two of them are not yet
-consulted by the running game. This document says which is which, per
-criterion, because a report that rounds partial work up to "done" is worse than
-no report.
+**Status: all seven acceptance criteria met.** Parts of the *phase description*
+beyond those criteria are not built — Free Roam's setup options, the birthday's
+appearance/NPC/story side effects, and a save-status indicator. Those are listed
+in §2 rather than rounded away.
 
 **Date:** 2026-08-06
 **Base:** `main` at the Phase 2 work (`646cd35`)
-**Gate:** `npm run verify` green — **272 tests**, up from 179.
+**Gate:** `npm run verify` green — **275 tests**, up from 179.
 
 ---
 
@@ -74,23 +74,33 @@ transitions and the info/wardrobe panels. HUD shows a minimal age badge.
 
 ## 2. Not done
 
-1. **SaveService is not wired into `Game`.** No autosave on birthday, no load
-   on start, no save-status indicator in the HUD. The service is complete and
-   tested; nothing calls it yet.
-2. **No mode selection in the main menu.** `GameMode` exists and saves carry
-   it, but there is no screen to pick Story or Free Roam, and no Free Roam
-   setup (starting age, money, vehicle, zones, ageing speed).
-3. **Gates are not consulted by `travelTo`.** `canEnterZone` is implemented and
-   tested but `Game.travelTo` does not call it, so the city is currently
-   reachable regardless of age or chapter.
-4. **Birthday side effects are stubs.** The flow pauses, toasts and
-   acknowledges. Autosave, appearance stage, NPC milestones and age-gated story
-   checks are marked in the code and not implemented.
-5. **`saveMigration` and `photoMode` blocks are never set** by the game — the
-   clock supports them, nothing raises them yet.
-6. **Safe spawn fallback on a missing chunk is untested end-to-end.**
-   `SpawnRegistry` already degrades and is unit-tested from Phase 2, but no test
-   loads a save whose `spawnId` has since been removed.
+1. **Free Roam has no setup screen.** The mode can be chosen, and saves keep it
+   apart from Story, but the player cannot pick a starting age, money preset,
+   initial vehicle, unlocked zones or ageing speed. Every one of those is a
+   typed field that already exists — this is UI, not plumbing.
+2. **Birthday side effects are stubs.** The flow pauses, announces,
+   autosaves and ages up. Appearance stage, named-NPC milestone events and
+   age-gated story checks are marked in the code and not implemented, because
+   none of those systems exists yet.
+3. **No save-status indicator in the HUD.** `SaveService` emits
+   `saving`/`saved`/`error` and nothing subscribes.
+4. **`photoMode` block is never raised** — the clock supports it, there is no
+   photo mode to raise it.
+5. **Only the autosave slot is used.** Three manual slots are implemented and
+   tested; nothing in the UI writes or reads them.
+
+### Bugs found by running it, not by testing it
+
+Worth recording, because all three passed the unit suite:
+
+- The birthday autosave ran **before** `acknowledgeBirthday`, recording the
+  pre-birthday state. A reload re-armed and re-fired the same birthday — the
+  exact duplicate event criterion 2 forbids.
+- A save written between reaching a birthday and acknowledging it restored with
+  one still armed and **nothing ever delivered it**, leaving the clock blocked
+  forever.
+- `presetMode` is called during `start()`, which runs *before* `ready()` builds
+  the mode row, so the "continuing a saved run" lock silently no-opped.
 
 ---
 
@@ -98,33 +108,31 @@ transitions and the info/wardrobe panels. HUD shows a minimal age badge.
 
 | # | Criterion | Status |
 | --- | --- | --- |
-| 1 | 60 active minutes produces exactly one birthday | **Met** — unit-tested and verified in-engine: age 15 → pending 16 → settled 16 |
-| 2 | Refreshing restores age and state without duplicate events | **Partially met** — `LifeClock.restore` is tested for exactly this, but `SaveService` is not wired in, so a refresh does not actually restore yet |
-| 3 | No offline aging | **Met** — verified in-engine: hidden tab reports blocked `['hidden']` and year progress does not move |
-| 4 | Story and Free Roam saves cannot be mixed | **Met at the service level** — `load` refuses a mode mismatch, both directions tested. No mode-selection UI exists to reach it |
-| 5 | A corrupted autosave recovers from a valid backup | **Met** — tested, including automatic fallback and explicit `recoverFromBackup` |
-| 6 | City access through typed gates, not scattered conditionals | **Partially met** — gates implemented and tested, but `travelTo` does not call them yet |
+| 1 | 60 active minutes produces exactly one birthday | **Met** — unit-tested, and verified in-engine: 15 → pending 16 → settled 16 |
+| 2 | Refreshing restores age and state without duplicate events | **Met** — verified on a cleared database: three birthdays take 15 → 18, a reload restores **18** with no pending birthday, and settling 120 frames does not replay one |
+| 3 | No offline aging | **Met** — verified: a hidden tab reports blocked `['hidden']` and year progress does not move |
+| 4 | Story and Free Roam saves cannot be mixed | **Met** — `load` refuses a mode mismatch both directions (tested); the selector persists the chosen mode and **locks** on a resumed run |
+| 5 | A corrupted autosave recovers from a valid backup | **Met at the unit level** — automatic fallback and explicit `recoverFromBackup` are tested. Not reproduced in a browser: corrupting IndexedDB by hand was not worth the risk to a working save |
+| 6 | City access through typed gates, not scattered conditionals | **Met** — `travelTo` calls `canEnterZone`; verified refused at 15, still refused at 18 without the departure chapter, and allowed once both hold |
 | 7 | `PHASE_03_REPORT.md` and a save schema reference | **Met** — this and `SAVE_FORMAT.md` |
 
-**Three fully met, three partial, one not applicable.** The pattern is
-consistent: the logic is built and tested, the integration into the running game
-is where the gap sits.
+**Seven met.** Criterion 5 is the one leaning on unit tests rather than an
+in-engine reproduction, and the report says so rather than implying otherwise.
 
 ---
 
 ## 4. Recommended next step
 
-Wire `SaveService` into `Game`, in this order:
+The remaining §2 items are UI-shaped and can follow the next phase's needs. The
+one worth doing before Phase 4 is the **Free Roam setup screen**, because every
+field it sets — starting age, money, vehicle, unlocked zones, ageing rate —
+already exists as typed state and is already saved. Leaving it unbuilt means
+Free Roam is currently just "Story without the chapter gate", which is not the
+mode the vision describes.
 
-1. **Autosave on birthday**, inside the existing `handleBirthday` pause — the
-   clock is already stopped there, which is exactly the safe moment.
-2. **Load on start**, with `SpawnRegistry` resolving `spawnId` so a removed
-   spawn degrades instead of stranding. That closes criterion 2 and gives
-   criterion 6's test something to load into.
-3. **Call `canEnterZone` from `travelTo`**, which closes criterion 6 and makes
-   the city gate real rather than declared.
-
-Then mode selection, which is UI work and can follow.
+Phase 4 (player growth and animation layers) depends on the age stages this
+phase produces, so the birthday's appearance-stage hook is the natural first
+thing it wires into.
 
 ---
 
