@@ -10,7 +10,8 @@ full-detail mesh rather than a decimated one.
 
 **Date:** 2026-08-09
 **Base:** `phase-05-vehicles`, plus one commit to green the gate
-**Gate:** `npm run verify` green — **980 unit tests**, up from 743
+**Gate:** `npm run verify` green — **999 unit tests**, up from 743;
+**68 Playwright scenarios green in 8.5 minutes**
 **Branch:** `phase-06-population`
 
 ---
@@ -394,7 +395,7 @@ would save ~390 kB and is a dependency change that belongs on its own commit.
 | 1 | Named NPCs are findable at sensible places by time | **Met.** `population.spec.ts` walks Maryam through five hours of `early_trade` and follows her from her doorstep to the stall. |
 | 2 | No NPC walks through closed walls, floats, or blocks a doorway | **Met.** Roof triangles are out of the navmesh (worst deviation 0.27 m); recovery abandons rather than warping into geometry; sleeping residents go indoors so a doorstep is never camped overnight. |
 | 3 | Traffic does not deadlock and has a watchdog | **Met.** Barge then remove, with red lights exempted from the stall timer. |
-| 4 | Far simulation cost is bounded and documented | **Met.** 2 Hz, capped per tick, measured at 0.0–0.1 ms. §5. |
+| 4 | Far simulation cost is bounded and documented | **Met.** 2 Hz, capped per tick, measured at 0.0–0.1 ms. See §5. |
 | 5 | Relationships and schedules persist through save/load and birthdays | **Met.** Round-tripped in `population.spec.ts` and in `save.test.ts`; `npcs` is an optional save field so a pre-Phase-6 save still loads. |
 | 6 | `docs/PHASE_06_REPORT.md` with AI budgets and profiler evidence | This document. |
 
@@ -414,18 +415,18 @@ enforced rather than merely observed:
 
 ## 7. Verification
 
-**Unit:** 980 tests across 40 files. Ten new files, 232 new tests.
+**Unit:** 999 tests across 41 files. Eleven new files, 256 new tests.
 
-**Browser:** `tests/e2e/population.spec.ts`, 15 scenarios, against the
-production build. Covers: the village inhabited and the navmesh real; crowd
-agents taken and given back with distance; a named resident through five hours
-of routine; the same resident walking home-to-work; nobody floating; a resident
-sent into a wall staying out of it; residents still moving over a long stretch;
-traffic running without deadlock; traffic never appearing in front of the
-player; a disturbance witnessed and a greeting remembered; a wall stopping a
-witness; relationships and ages surviving save/reload and a birthday; leaving
-the zone and coming back; driving through the village; and no duplicate
-three.js.
+**Browser:** 68 scenarios across 8 specs, green in Chromium in 8.5 minutes,
+against the production build. `population.spec.ts` contributes 8, grouped
+several scenarios to a test: the navmesh is real and the village inhabited;
+crowd agents taken and given back with distance; nobody floating; a routine
+across five hours and the walk to it; a resident sent into a wall staying out
+of it; somebody standing in the way not stopping them; traffic running without
+deadlock and never first appearing in front of the player; perception falling
+off with distance and a greeting remembered; relationships and ages surviving a
+birthday, a save and a reload; leaving the zone and coming back; a car driven
+through the village; and no duplicate three.js.
 
 **Screenshots:** `.shots/p6_street.jpg`, `p6_stall.jpg`, `p6_road.jpg` and
 `p6_city2.jpg` — the village and Old Market with residents and traffic in them,
@@ -474,7 +475,48 @@ Listed rather than rounded away.
   screenshots were taken by an inline equivalent. Not fixed here because it is
   a dev-only surface and touching the Vite config mid-phase is the wrong risk.
 
-## 9. Remaining risk
+## 9. The browser suite, and three wrong theories
+
+Worth recording because most of the time in this phase went here, and three
+attempts at it were argued from the wrong cause.
+
+The population scenarios kept timing out. In order I tried: sharing one page
+across the file (worse — 10 minutes became 22, because state accumulated);
+turning retries on; and regrouping sixteen scenarios into eight. Each was
+argued from a plausible theory about page count and WebGL contexts. Then the
+regrouped file still took 17.8 minutes for eight tests, which killed the
+theory, and reading the function being called nine hundred times found it in
+about a minute:
+
+```ts
+step: (dt) => { this.update(dt); this.render(); }
+```
+
+Headless Chromium has no GPU. `settle(900)` was nine hundred *software*
+rasterisations of a ~600 k-triangle scene nobody looks at — and the population
+is exactly what made it expensive, since it adds the +56 draw calls and
++123 k triangles measured above, nine hundred times over. It also explains why
+the dev-browser profile said 3.7 ms a frame and the headless one behaved like
+40: that machine has a GPU.
+
+`settle` now draws only its final frame.
+
+| | Before | After |
+| --- | --- | --- |
+| `population.spec.ts` | 17.8 min, failing | **1.4 min, green** |
+| Whole suite | 1.1 h, 5 failures | **8.5 min, 68 green** |
+
+The last failure after that was a genuine one and it was in the test: "traffic
+never appears in front of the player" identified cars by rounded position, so a
+car *driving* toward you minted a new key every eight metres and was then
+reported as having appeared at 14.5 m. Traffic snapshots carry a stable id now.
+
+Retries and the regrouping are kept — fewer boots and a tolerance for a loaded
+machine are both worth having — but the page-pressure explanation that
+motivated them was wrong, and the honest record is that the measurement was
+available the whole time.
+
+## 10. Remaining risk
 
 - **The occlusion raycast is still the frame's largest item.** Taking the
   characters out of it helped and did not solve it. Until `CameraCollision`
@@ -486,6 +528,10 @@ Listed rather than rounded away.
   baseline scenes is worth doing before Phase 7 adds interiors.
 - **The frame budget has never been measured on real mid-tier hardware.** That
   caveat is inherited from Phase 1 and this phase does not lift it.
+- **The browser suite is 8.5 minutes and one browser process.** Comfortable
+  now, but it grows every phase, and the failure mode when it stops being
+  comfortable is timeouts that look like defects. Sharding across workers is
+  the answer when it next hurts.
 - **A district's navmesh does not follow its streaming.** It is baked once,
   from whatever chunks are resident at that moment. Probed in Old Market: a
   point in a chunk that streamed in *later* returns no navmesh sample, while
@@ -497,7 +543,7 @@ Listed rather than rounded away.
   residents, eighteen pedestrians, eight cars and a 94 ms navmesh, checked by
   hand and by the travel scenario; nobody has walked a full day there.
 
-## 10. Next safe phase
+## 11. Next safe phase
 
 Phase 7 — enterable services, modular interiors, economy and jobs. It attaches
 cleanly: `InteriorLink` already produces door off-mesh links, named residents

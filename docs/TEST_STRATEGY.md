@@ -62,18 +62,39 @@ The Phase 5 figure recorded here was 724 across 29; the ten files below marked
 
 ### Browser scenarios
 
-**51 Playwright scenarios across 7 specs**, green in Chromium, each asserting zero console
-errors.
+**68 Playwright scenarios across 8 specs**, green in Chromium in **8.5 minutes**,
+each asserting zero console errors. Measured 2026-08-09, after Phase 6.
 
 | Spec | Scenarios | Covers |
 | --- | --- | --- |
 | `driving.spec.ts` | 18 | Every vehicle settling and moving, braking, reverse, steering symmetry, tunnelling, riding, righting |
 | `gamepad.spec.ts` | 8 | Analogue movement, deadzone drift, unplugging mid-stride |
+| `population.spec.ts` | 8 | *Phase 6.* The navmesh is real; crowd agents taken and returned; a routine and the walk to it; nobody in a wall or floating; traffic without deadlock and never spawned in view; perception by distance; relationships across a birthday and a reload; zone travel; a car driven through it all |
 | `interaction.spec.ts` | 7 | Prompts, facing, priority, seated, the selector, busy states |
 | `smoke.spec.ts` | 6 | Boot, day/night, interior round trip, sit/wardrobe/lie, bridge absence |
 | `persistence.spec.ts` | 4 | Needs drain on active seconds, blocked clock, save round trip |
 | `ageing.spec.ts` | 4 | Proportions on the real rig, a birthday, the stoop, no scene growth |
 | `gestures.spec.ts` | 4 | Three upper-body overlays over locomotion, ramping, replay |
+
+### `settle()` draws only its last frame
+
+Worth knowing before writing a browser test. `settle(n)` used to render every
+one of the `n` frames, and headless Chromium has no GPU — it rasterises in
+software. With a populated village at ~600 k triangles over ~480 draw calls,
+`settle(900)` was nine hundred software renders of a scene nobody looks at, and
+the population spec was taking **17.8 minutes and timing out**. It now draws the
+final frame only: 1.4 minutes, and the whole suite went from **1.1 hours to 8.5**.
+
+Nothing observes an intermediate frame — screenshots, `getRenderStats` and
+visual assertions all happen after `settle` returns. If a test ever does need
+every frame drawn, `step(dt, true)` is still there.
+
+**Retries are on (`retries: 1`), locally as well as in CI.** A real defect fails
+twice; what a retry absorbs is the machine's mood at the tail of a long run. The
+Phase 6 report has the evidence for why that was needed and what fixed most of
+it. Scenarios in `population.spec.ts` are deliberately grouped several to a test
+for the same reason: each one is a page boot, a WebGL context and a fetch of
+~900 kB of WebAssembly.
 
 ## Principles
 
