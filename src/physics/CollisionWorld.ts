@@ -36,6 +36,22 @@ export interface CapsuleResolveResult {
 export class CollisionWorld {
   collider: THREE.Mesh | null = null;
   private bvh: MeshBVH | null = null;
+  /**
+   * A second, small tree for whichever interior is currently open.
+   *
+   * The world's BVH is the whole neighbourhood and takes a few hundred
+   * milliseconds to build; a room is about forty boxes. Rebuilding the world
+   * every time somebody opens a door would be absurd, and building all nine
+   * interiors up front would keep nine rooms resident for the eight you are
+   * not in. So the active room gets its own tree, swapped on entry and
+   * dropped on exit.
+   *
+   * Both trees are consulted on every query. That is close to free outdoors:
+   * the interior cell sits hundreds of metres away, so the root bounds test
+   * rejects it immediately.
+   */
+  private overlay: MeshBVH | null = null;
+  private overlayMesh: THREE.Mesh | null = null;
   private readonly box = new THREE.Box3();
   private readonly normal = new THREE.Vector3();
 
@@ -54,6 +70,50 @@ export class CollisionWorld {
     this.dispose();
     if (meshes.length === 0) return;
 
+    const built = this.mergeAndBuild(meshes, 'CollisionProxy');
+    if (!built) return;
+    this.bvh = built.bvh;
+    this.collider = built.mesh;
+    this.refreshCameraTargets();
+  }
+
+  /**
+   * Hand over the active interior's collision, or `null` to drop it.
+   *
+   * Idempotent: passing new meshes disposes whatever was there first, so a
+   * player who walks in and out of nine buildings leaves one tree behind, not
+   * nine.
+   */
+  setOverlay(meshes: THREE.Mesh[] | null): void {
+    if (this.overlayMesh) {
+      this.overlayMesh.geometry.disposeBoundsTree?.();
+      this.overlayMesh.geometry.dispose();
+      (this.overlayMesh.material as THREE.Material).dispose();
+      this.overlayMesh = null;
+    }
+    this.overlay = null;
+
+    if (meshes && meshes.length > 0) {
+      const built = this.mergeAndBuild(meshes, 'InteriorCollisionProxy');
+      if (built) {
+        this.overlay = built.bvh;
+        this.overlayMesh = built.mesh;
+      }
+    }
+    this.refreshCameraTargets();
+  }
+
+  get overlayTriangleCount(): number {
+    const idx = this.overlayMesh?.geometry.getIndex();
+    if (idx) return idx.count / 3;
+    const pos = this.overlayMesh?.geometry.getAttribute('position');
+    return pos ? pos.count / 3 : 0;
+  }
+
+  private mergeAndBuild(
+    meshes: THREE.Mesh[],
+    name: string,
+  ): { bvh: MeshBVH; mesh: THREE.Mesh } | null {
     for (const m of meshes) m.updateWorldMatrix(true, false);
 
     const generator = new StaticGeometryGenerator(meshes);
@@ -68,12 +128,17 @@ export class CollisionWorld {
     // — a straight rename, same leaf-capacity threshold in buildTree.
     const bvh = new MeshBVH(merged, { targetLeafSize: 8 });
     merged.boundsTree = bvh;
-    this.bvh = bvh;
-    this.collider = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ visible: false }));
-    this.collider.name = 'CollisionProxy';
-    this.collider.matrixAutoUpdate = false;
-    this.collider.updateMatrixWorld(true);
-    this.cameraTargets = [this.collider];
+    const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ visible: false }));
+    mesh.name = name;
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrixWorld(true);
+    return { bvh, mesh };
+  }
+
+  private refreshCameraTargets(): void {
+    this.cameraTargets = [this.collider, this.overlayMesh].filter(
+      (m): m is THREE.Mesh => m !== null,
+    );
   }
 
   get triangleCount(): number {
@@ -98,56 +163,65 @@ export class CollisionWorld {
   ): CapsuleResolveResult {
     out.displacement.set(0, 0, 0);
     out.groundNormal = null;
-    if (!this.bvh) return out;
+    if (!this.bvh && !this.overlay) return out;
 
     const before = segment.start.clone();
-
-    this.box.makeEmpty();
-    this.box.expandByPoint(segment.start);
-    this.box.expandByPoint(segment.end);
-    this.box.min.addScalar(-radius);
-    this.box.max.addScalar(radius);
 
     let bestUp = -1;
     const normal = this.normal;
 
-    this.bvh.shapecast({
-      intersectsBounds: (bounds) => bounds.intersectsBox(this.box),
-      intersectsTriangle: (tri) => {
-        const distance = tri.closestPointToSegment(segment, _tri, _cap);
-        if (distance < radius) {
-          const depth = radius - distance;
-          _dir.copy(_cap).sub(_tri);
-          if (_dir.lengthSq() < 1e-12) {
-            tri.getNormal(_dir);
-          } else {
-            _dir.normalize();
-          }
-          segment.start.addScaledVector(_dir, depth);
-          segment.end.addScaledVector(_dir, depth);
+    // The box has to be recomputed per tree: the first pass moves the segment,
+    // and the second must test against where it ended up, not where it began.
+    const castAgainst = (bvh: MeshBVH): void => {
+      this.box.makeEmpty();
+      this.box.expandByPoint(segment.start);
+      this.box.expandByPoint(segment.end);
+      this.box.min.addScalar(-radius);
+      this.box.max.addScalar(radius);
 
-          tri.getNormal(normal);
-          if (normal.y > bestUp) {
-            bestUp = normal.y;
-            out.groundNormal = (out.groundNormal ?? new THREE.Vector3()).copy(normal);
+      bvh.shapecast({
+        intersectsBounds: (bounds) => bounds.intersectsBox(this.box),
+        intersectsTriangle: (tri) => {
+          const distance = tri.closestPointToSegment(segment, _tri, _cap);
+          if (distance < radius) {
+            const depth = radius - distance;
+            _dir.copy(_cap).sub(_tri);
+            if (_dir.lengthSq() < 1e-12) {
+              tri.getNormal(_dir);
+            } else {
+              _dir.normalize();
+            }
+            segment.start.addScaledVector(_dir, depth);
+            segment.end.addScaledVector(_dir, depth);
+
+            tri.getNormal(normal);
+            if (normal.y > bestUp) {
+              bestUp = normal.y;
+              out.groundNormal = (out.groundNormal ?? new THREE.Vector3()).copy(normal);
+            }
           }
-        }
-        return false;
-      },
-    });
+          return false;
+        },
+      });
+    };
+
+    if (this.bvh) castAgainst(this.bvh);
+    if (this.overlay) castAgainst(this.overlay);
 
     out.displacement.copy(segment.start).sub(before);
     return out;
   }
 
-  /** First hit along a ray, or null. */
+  /** First hit along a ray across both trees, or null. */
   raycast(origin: THREE.Vector3, direction: THREE.Vector3, far: number): THREE.Intersection | null {
-    if (!this.collider) return null;
+    if (this.cameraTargets.length === 0) return null;
     _ray.set(origin, direction);
     _ray.near = 0;
     _ray.far = far;
     _ray.firstHitOnly = true;
-    const hits = _ray.intersectObject(this.collider, false);
+    // `intersectObjects` sorts by distance, so the nearest hit across the
+    // world and the open room comes out first without a manual compare.
+    const hits = _ray.intersectObjects(this.cameraTargets, false);
     return hits.length ? hits[0] : null;
   }
 
@@ -166,6 +240,7 @@ export class CollisionWorld {
   }
 
   dispose(): void {
+    this.setOverlay(null);
     if (this.collider) {
       this.collider.geometry.disposeBoundsTree?.();
       this.collider.geometry.dispose();

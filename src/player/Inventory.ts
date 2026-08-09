@@ -84,7 +84,24 @@ export const ITEMS: readonly ItemDef[] = [
   { id: 'bread', name: 'Bread', kind: 'food', maxStack: 5, restores: { hunger: 0.35 } },
   { id: 'apple', name: 'Apple', kind: 'food', maxStack: 8, restores: { hunger: 0.18, mood: 0.05 } },
   { id: 'coffee', name: 'Coffee', kind: 'food', maxStack: 3, restores: { energy: 0.3, mood: 0.08 } },
+  { id: 'tea', name: 'Tea', kind: 'food', maxStack: 3, restores: { energy: 0.18, mood: 0.12 } },
+  { id: 'meal', name: 'Hot meal', kind: 'food', maxStack: 2, restores: { hunger: 0.6, mood: 0.15 } },
   { id: 'soap', name: 'Soap', kind: 'stackable', maxStack: 4, restores: { cleanliness: 0.5 } },
+
+  // Phase 7. Caught rather than bought; the grocery and the cafe take them.
+  { id: 'fish_small', name: 'Small fish', kind: 'food', maxStack: 6, restores: { hunger: 0.25 } },
+  { id: 'fish_large', name: 'Large fish', kind: 'food', maxStack: 3, restores: { hunger: 0.5 } },
+
+  // Job goods. A parcel is deliberately `stackable`, not `mission` — losing a
+  // courier run to a full bag is a job you failed, not a quest you broke.
+  { id: 'parcel', name: 'Parcel', kind: 'stackable', maxStack: 4 },
+  { id: 'stock_box', name: 'Stock box', kind: 'stackable', maxStack: 3 },
+  { id: 'repair_kit', name: 'Repair kit', kind: 'stackable', maxStack: 2 },
+
+  // Apartment decorations. Each names a kit part; see DECOR_PARTS.
+  { id: 'decor_plant', name: 'Potted plant', kind: 'stackable', maxStack: 3 },
+  { id: 'decor_shelf', name: 'Bookshelf', kind: 'stackable', maxStack: 3 },
+  { id: 'decor_table', name: 'Side table', kind: 'stackable', maxStack: 3 },
 
   // Everything else.
   { id: 'grocery_bag', name: 'Grocery bag', kind: 'stackable', maxStack: 1 },
