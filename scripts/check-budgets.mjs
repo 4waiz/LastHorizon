@@ -69,9 +69,25 @@ const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p)
 const TOTAL_JS_MAX_KB = 1100;
 
 const ASSET_BUDGETS = [
-  { path: 'assets/models', maxKB: 1200, label: 'GLB models' },
+  // Raised 1200 -> 1360 in Phase 7 for `interior_kit.glb` (138.6 kB). The
+  // number that governs how long a player waits — `initial load` — did not
+  // move, because the kit is in LAZY_ASSET_FILES below.
+  { path: 'assets/models', maxKB: 1360, label: 'GLB models' },
   { path: 'assets/audio', maxKB: 2000, label: 'audio' },
 ];
+
+/**
+ * Assets fetched on demand rather than during the loading screen.
+ *
+ * The same distinction the lazy *chunks* make, applied to art. The interior
+ * kit is reached only by walking through a door, and that transition already
+ * fades to black — which is both where the fetch is hidden and why it must not
+ * be paid by every player who never goes inside.
+ *
+ * These still count toward `GLB models` and `shipped total`. They are excluded
+ * only from `initial load`.
+ */
+const LAZY_ASSET_FILES = ['interior_kit.glb'];
 
 /**
  * What a player downloads before they can play: everything in dist/ except the
@@ -179,7 +195,14 @@ for (const budget of ASSET_BUDGETS) {
 
 const shippedTotalBytes = dirSizeBytes(dist);
 const shippedTotal = kb(shippedTotalBytes);
-const initialLoad = kb(shippedTotalBytes - lazyBytes);
+
+let lazyAssetBytes = 0;
+for (const f of listFiles(join(dist, 'assets'))) {
+  const name = f.split(/[\\/]/).pop() ?? '';
+  if (LAZY_ASSET_FILES.includes(name)) lazyAssetBytes += statSync(f).size;
+}
+
+const initialLoad = kb(shippedTotalBytes - lazyBytes - lazyAssetBytes);
 
 notes.push(`  ${(initialLoad > INITIAL_LOAD_MAX_KB ? 'FAIL' : 'ok').padEnd(4)} ${'initial load'.padEnd(14)} ${String(initialLoad).padStart(7)} kB / ${INITIAL_LOAD_MAX_KB} kB`);
 if (initialLoad > INITIAL_LOAD_MAX_KB) {
@@ -192,6 +215,7 @@ if (shippedTotal > SHIPPED_TOTAL_MAX_KB) {
 }
 
 notes.push(`       ${'(lazy chunks)'.padEnd(14)} ${String(kb(lazyBytes)).padStart(7)} kB fetched on demand, not at startup`);
+notes.push(`       ${'(lazy assets)'.padEnd(14)} ${String(kb(lazyAssetBytes)).padStart(7)} kB fetched on demand, not at startup`);
 
 // ---- dev-only surfaces must not ship --------------------------------------
 const textFiles = listFiles(dist).filter((f) => /\.(js|css|html)$/.test(f));

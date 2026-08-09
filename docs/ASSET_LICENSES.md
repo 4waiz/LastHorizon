@@ -18,10 +18,16 @@ Generated procedurally by Python scripts driving Blender. The scripts in
 `scripts/blender/` are the source of truth; the `.glb` files are committed
 build output.
 
+Sizes below were re-measured in Phase 7. Two rows were wrong before that:
+`player.glb` was recorded at 348.8 kB against an actual 361.1 kB, and
+`vehicles.glb` had no row at all despite shipping since Phase 5.
+
 | File | Size | Source script | Contents |
 | --- | --- | --- | --- |
-| `buildings.glb` | 353.8 kB | `build_buildings.py` | HouseLarge, HouseSmall, HouseSolar, PorchHouse, Shed, HouseOpen |
-| `player.glb` | 348.8 kB | `build_character.py` | The explorer: ~5.0k tris, 20 bones, 6 clips, blink morph |
+| `buildings.glb` | 353.8 kB | `build_buildings.py` | HouseLarge, HouseSmall, HouseSolar, PorchHouse, Shed, HouseOpen, RoomInterior |
+| `player.glb` | 361.1 kB | `build_character.py` | The explorer: ~5.0k tris, 20 bones, 6 clips, blink morph |
+| `vehicles.glb` | 169.9 kB | `build_vehicles.py` | Bicycle, Scooter, Hatchback, Van, PoliceCar, each with `_LOD1` and collision proxy |
+| `interior_kit.glb` | 145.5 kB | `build_interior_kit.py` | 30 modular parts, 2,124 tris total — floors, walls, doors, counters, shelves, desks, chairs, signs and nine hero props. **Fetched on demand**, not at startup |
 | `nature.glb` | 112.1 kB | `build_nature.py` | TreeBig/Med/Small, Palm, DeadTree, BushA/B, RockA/B/C, GrassTuft |
 | `props.glb` | 100.0 kB | `build_props.py` | Streetlight, UtilityPole, Barrier, Bench, Mailbox, FenceSection, RetainWall, Culvert, Bollard |
 | `collectibles.glb` | 38.3 kB | `build_collectibles.py` | PaperPlane, ToyBoat, WindChime, OldCamera, StarOrnament |

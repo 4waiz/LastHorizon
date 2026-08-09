@@ -145,6 +145,27 @@ PALETTE = {
     "camera_body":  "#4E4A46",
     "camera_metal": "#B9B4A6",
     "star_gold":    "#E7C266",
+
+    # interior kit. Deliberately its own block of names rather than reuse of
+    # the exterior ones: a shop counter and a boat hull being the same brown is
+    # a coincidence, and sharing a key would make a change to one silently
+    # repaint the other.
+    "floor_wood":   "#B08A5E",
+    "floor_tile":   "#D9D3C4",
+    "floor_screed": "#9E9A90",
+    "wall_inner":   "#E6DFCE",
+    "wall_accent":  "#C6B49A",
+    "counter_top":  "#8A6F4E",
+    "fabric_blue":  "#7C93B0",
+    "fabric_warm":  "#D9BFA0",
+    "steel_dark":   "#5A6068",
+    "clinic_white": "#EDF1F0",
+    "clinic_mint":  "#BFD9CF",
+    "police_navy":  "#3E4A63",
+    "shop_green":   "#4E7C63",
+    "cafe_brown":   "#6E4E3A",
+    "sign_board":   "#F0E9D8",
+    "rubber_black": "#33332F",
 }
 
 _MATERIAL_CACHE = {}
