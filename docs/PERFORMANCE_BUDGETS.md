@@ -49,7 +49,7 @@ any release claim.
 | Draw calls, interior | 183 | ≤ 240 |
 | Triangles, outdoor | 482 k | ≤ 700 k |
 | Triangles, interior | 780 k | ≤ 880 k |
-| Shader programs | 40 | ≤ 55 |
+| Shader programs | 56 | ≤ 70 |
 | Geometries | 198 | ≤ 260 |
 | Textures | 17 | ≤ 32 |
 
@@ -60,33 +60,55 @@ cliff immediately, but it fragments batching.
 
 ### The outdoor budgets, raised in Phase 6 for the population
 
-Measured at one fixed vantage on the village road, low preset, with and
-without the population:
+Measured at the **documented baseline vantage** — the village start spawn
+(5.4, -39.3) facing back down the road — at the `high` preset, with the
+population disposed and then rebuilt. Same camera, same clock, same frame.
 
-| | Draw calls | Triangles |
-| --- | --- | --- |
-| Unpopulated | 335 | 241 k |
-| 12 bodies + 3 cars | 351 | 300 k |
-| **Cost** | **+16** | **+59 k** |
+| | Unpopulated | Populated | Cost |
+| --- | --- | --- | --- |
+| Draw calls, day | 295 | 351 | **+56** |
+| Draw calls, night | 371 | 413 | **+42** |
+| Triangles, day | 484 k | 607 k | **+123 k** |
+| Shader programs | 56 | 58 | **+2** |
 
-That is **one draw call and 4,890 triangles per person** — exactly the
-arithmetic the merged body was built for, and confirmation that it works: the
-player's rig is nine primitives, so the naive clone would have been nine calls
-each and would have bought about five pedestrians before the old 340 ceiling.
+The unpopulated figures land on the recorded Phase 1 baseline (285 day, 377
+night, 482 k), which is what makes the comparison worth anything.
 
-At the `high` preset the population is capped at 26 bodies and 8 cars, which is
-+58 calls and +127 k triangles. The budgets move to cover that with headroom:
-day 340 → 410, night 430 → 500, triangles 560 k → 700 k. Triangles are the
-comfortable one — the interior already runs at 780 k against an 880 k budget,
-so 700 k outdoors is well inside what the renderer demonstrably handles.
+**One draw call and 4,890 triangles per person.** That is exactly the
+arithmetic the merged body was built for: the player's rig is nine primitives,
+so the naive clone would have been nine calls each and would have bought about
+five pedestrians before the old 340 ceiling.
 
-Programs did not move: 39–41, the same as before. Twenty-odd appearance
-variants share one material definition and one shader.
+**Two programs, for twenty-six bodies and eight cars.** One is the body, which
+is genuinely a different shader — it is vertex-coloured, and three.js keys on
+that whatever `customProgramCacheKey` says. The other is the traffic paint.
+Every appearance variant and every car colour shares those two, because
+`makeToon` keys the *material* on colour and the *program* on kind.
+
+Budgets: day 340 → 410, night 430 → 500, triangles 560 k → 700 k.
+
+**Programs 55 → 70, and only 2 of that is Phase 6.** The 55 was set in Phase 1
+against a measured 40 and has not been revisited across four phases of city,
+vehicles, portal and interior work; the unpopulated scene is already at 56. The
+number to watch is the *delta*, and this phase's is two.
 
 **The named follow-up** is a decimated mid-tier body. A pedestrian forty metres
 away does not need the player's 4,890 triangles; at ~1,200 it would give back
-roughly 96 k of the 127 k. It needs a Blender change to the shared rig, which
-is a change to an asset the player also uses, and it belongs on its own commit.
+roughly 96 k of the 123 k. It needs a Blender change to the shared rig, which
+is an asset the player also uses, and it belongs on its own commit.
+
+### Traffic: full models up close, simplified beyond 38 m
+
+Traffic first shipped using the `_LOD1` bodies for everything, which is 140
+triangles against the full model's 424 and reads as a painted slab up close —
+no wheels, a suggestion of a windscreen. Since traffic spawns 45 m away and
+drives *toward* the player, up close is most of the time you look at it.
+
+Each vehicle now carries both bodies and shows one. The switch costs nothing at
+distance — the far body is what was there before — and the near body is only
+paid for by the two or three cars actually beside you. Measured across the
+three presets, draw calls moved by less than 10 either way while the cars went
+from slabs to vehicles.
 
 ### A pre-existing cost found while measuring this
 

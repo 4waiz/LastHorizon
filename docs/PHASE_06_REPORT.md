@@ -143,17 +143,24 @@ normal and skinning attributes** and differs only in a normalised-byte colour
 array, so a variant costs about 9 kB rather than a second copy of a
 4,890-triangle mesh.
 
-Measured, at one fixed vantage, low preset:
+Measured at the documented baseline vantage — the village start spawn, `high`
+preset — with the population disposed and then rebuilt:
 
-| | Draw calls | Triangles |
-| --- | --- | --- |
-| Unpopulated | 335 | 241 k |
-| 12 bodies + 3 cars | 351 | 300 k |
-| **Cost** | **+16** | **+59 k** |
+| | Unpopulated | Populated | Cost |
+| --- | --- | --- | --- |
+| Draw calls, day | 295 | 351 | **+56** |
+| Draw calls, night | 371 | 413 | **+42** |
+| Triangles, day | 484 k | 607 k | **+123 k** |
+| Shader programs | 56 | 58 | **+2** |
 
-That is exactly one call and 4,890 triangles per person — the arithmetic the
-merge was built for. Programs did not move: 39–41 before and after, because
-twenty-odd appearances share one material definition and one shader.
+Exactly one call and 4,890 triangles per person — the arithmetic the merge was
+built for. And two programs for twenty-six bodies and eight cars: one for the
+body, which is genuinely a different shader because it is vertex-coloured, and
+one for the traffic paint. Every appearance variant and every car colour shares
+those two.
+
+The unpopulated figures land on the recorded Phase 1 baseline (285 day, 377
+night, 482 k), which is what makes the comparison mean anything.
 
 ### Pedestrians use the navmesh; vehicles use lanes
 
@@ -172,10 +179,12 @@ obstacle, never as a participant. That is the entire interface between the two.
 
 ---
 
-## 4. Five bugs the measurements found
+## 4. Seven bugs the measurements found
 
-None of these were visible in a unit test. All five came out of running the
-thing, looking at it and profiling it. Each has a regression test now.
+None was visible in a unit test. All seven came out of running the thing,
+looking at it and profiling it — two of them from a screenshot. Each has a
+regression test now, except the two that are matters of appearance, which are
+checked against the geometry instead.
 
 ### The navmesh included every roof
 
@@ -240,6 +249,29 @@ And while fixing that: a zone supplying its own centrelines now **replaces**
 the manifest's rather than adding to them. Taking both gave the village two
 overlapping road networks, one of which is not where the tarmac is.
 
+### The cars were slabs sunk into the road
+
+Found in a screenshot rather than a test, which is the honest way to say it.
+Three faults at once, all in `TrafficSystem`.
+
+**They were buried.** The GLB anchors a vehicle at its *axle*: a hatchback's
+bounding box runs from -0.55 to +1.39 in y. Placing the model at the lane's own
+height therefore put the bottom half of every car under the tarmac. The lift is
+now measured from the geometry rather than typed in, so a change to the Blender
+script cannot quietly reintroduce it.
+
+**They had no detail.** Traffic used the `_LOD1` bodies — 140 triangles against
+424, no wheels to speak of, a suggestion of a windscreen. Fine at the 45 m a
+car spawns at, wrong for the ten metres it then drives to. Each vehicle now
+carries both and shows the full one within 38 m.
+
+**They were all one colour.** Every car took the imported `vehicle_paint`
+straight from the toon cache, so the whole street was the same red. Prototypes
+are now keyed on (model, colour) over a six-colour palette, and the patrol car
+gets a pale livery instead of being a red car with a light bar. It costs one
+extra program in total, because `makeToon` keys the material on colour and the
+program on kind.
+
 ### The watchdog barged every car through every red light
 
 The deadlock watchdog shoves a vehicle that has not moved for eight seconds.
@@ -248,8 +280,16 @@ every car that stopped correctly was pushed across the junction.
 
 Two halves to the fix. The period came down to 14 s, and the watchdog learned
 that a red light is a legitimate reason to be stopped — a car held by one
-accumulates a separate counter with a much higher ceiling. A genuine standoff,
-where each car is waiting on another rather than on a light, still barges.
+accumulates a separate counter with a much higher ceiling.
+
+That was not enough, and the same screenshot showed why: nine barges on one
+village street. A red light excuses the car at the *front* of the queue and not
+the three behind it, and those three were being shoved through the junction
+eight seconds later. The excuse now propagates backwards down the lane before
+anybody moves — if the car ahead of you is excused and you are right behind it,
+so are you. It stops short of excusing everyone, so two cars each waiting on
+the *other* at a junction are still a deadlock and still barge. Nine went to
+one over the same walk.
 
 ---
 
