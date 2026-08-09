@@ -64,6 +64,11 @@ export class HUD {
   private mapCanvas = $<HTMLCanvasElement>('mapCanvas');
   private mapScaleText = $('mapScaleText');
 
+  // -- Phase 8: the always-on half only. The panels are in StoryPanels.ts.
+  private objective = $('objective');
+  private objectiveText = $('objectiveText');
+  private caption = $('caption');
+
   /** Where the map is looking. Kept between openings, like a real map. */
   private mapView: MapView = { centreX: 0, centreZ: 0, scale: 1 };
   /** Resolved on the first opening. Null until then; every draw is a no-op. */
@@ -731,6 +736,41 @@ export class HUD {
     this.fade.classList.toggle('is-on', on);
     return new Promise((resolve) => window.setTimeout(resolve, seconds * 1000 + 40));
   }
+
+  // ------------------------------------------------------------ the story
+  //
+  // Everything below takes a *string* and draws it. None of it knows what a
+  // quest stage is, which is the brief's "no quest logic hidden in UI
+  // components" made structural rather than aspirational: `StoryDirector`
+  // decides, and the HUD renders whatever it is handed.
+
+  setObjective(text: string | null): void {
+    if (text) {
+      this.objectiveText.textContent = text;
+      this.objective.hidden = false;
+    } else {
+      this.objective.hidden = true;
+    }
+  }
+
+  get objectiveLine(): string | null {
+    return this.objective.hidden ? null : this.objectiveText.textContent;
+  }
+
+  setCaption(text: string | null): void {
+    if (text) {
+      this.caption.textContent = text;
+      this.caption.hidden = false;
+    } else {
+      this.caption.hidden = true;
+    }
+  }
+
+  // The dialogue, journal and Life Reel panels live in `ui/StoryPanels.ts`,
+  // inside the story's lazy chunk. They were here first, and the budget gate
+  // is why they are not: the app chunk went 5.2 kB over its limit and the rule
+  // in this repository is to move something rather than raise the ceiling.
+  // `MapPanel` did the same thing in Phase 6 for the same reason.
 
   private ageBadge: HTMLElement | null = null;
   private lastAgeShown = -1;

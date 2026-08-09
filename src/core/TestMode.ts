@@ -116,6 +116,85 @@ export interface TestSurface {
   reportTask(place: string): boolean;
   advanceTask(seconds: number): void;
   cancelTask(): void;
+
+  // ---- Phase 8: the authored story -----------------------------------------
+  //
+  // The brief asks for "debug tooling to jump to any stage in test mode", and
+  // `jumpToStage` is it. Everything here installs only under `?e2e=1`, via the
+  // same dynamic import the rest of the bridge uses, so none of it is
+  // reachable in ordinary play -- which matters more for these than for most:
+  // `jumpToStage` and `setChoice` can skip authored content outright.
+  /** Load the story subsystem and open chapter 1. Resolves when ready. */
+  awaitStory(): Promise<StorySnapshot>;
+  storyState(): StorySnapshot;
+  startQuest(id: string): boolean;
+  questState(id: string): QuestSnapshot | null;
+  activeQuests(): readonly string[];
+  jumpToStage(questId: string, stageId: string): boolean;
+  reportObjective(questId: string, objectiveId: string, amount: number): boolean;
+  advanceStory(seconds: number): void;
+  setChoice(id: string, value: string): void;
+  setFlag(id: string): void;
+  adjustReputation(axis: string, delta: number): void;
+  /** Returns true when an authored conversation opened rather than small talk. */
+  talkToNpc(id: string): boolean;
+  dialogueState(): DialogueSnapshot | null;
+  /** Take a choice by its authored index. Returns whether the panel is still up. */
+  chooseDialogue(index: number): boolean;
+  sceneState(): string | null;
+  skipScene(): void;
+  reelModel(): ReelSnapshot | null;
+  openReel(open: boolean): void;
+  /** Bytes of the exported PNG. Zero when the browser refused a canvas. */
+  exportReel(): Promise<number>;
+  objectiveLine(): string | null;
+  openJournal(open: boolean): void;
+}
+
+export interface StorySnapshot {
+  loaded: boolean;
+  chapter: number;
+  completedChapters: readonly string[];
+  flags: readonly string[];
+  choices: Record<string, string>;
+  reputation: { community: number; law: number };
+  endingId: string | null;
+  /** How many moments the reel has recorded. */
+  reel: number;
+  active: readonly string[];
+  completed: readonly string[];
+}
+
+export interface QuestSnapshot {
+  id: string;
+  kind: string;
+  chapter: number;
+  stage: string;
+  objectives: ReadonlyArray<{
+    id: string;
+    kind: string;
+    done: number;
+    target: number;
+    complete: boolean;
+    optional: boolean;
+  }>;
+}
+
+export interface DialogueSnapshot {
+  treeId: string;
+  nodeId: string;
+  speaker: string;
+  text: string;
+  choices: ReadonlyArray<{ index: number; text: string; available: boolean }>;
+}
+
+export interface ReelSnapshot {
+  finalTitle: string;
+  timeline: ReadonlyArray<{ age: number; kind: string; text: string }>;
+  sections: ReadonlyArray<{
+    title: string;
+    rows: ReadonlyArray<{ label: string; value: string }>;
+  }>;
 }
 
 /** A door in the active zone, and what is behind it. */

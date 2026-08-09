@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import { createRendererBackend, type RendererBackend } from './RendererBackend';
 import { Settings, QualityLevel, TimeMode } from './Settings';
 import type { LifeSnapshot, NpcSnapshot, PopulationSnapshot, TestSurface } from './TestMode';
@@ -64,7 +64,7 @@ import type { BuiltPoint } from '../world/interiors/InteriorBuilder';
 import { Economy } from '../economy/Economy';
 import { RENT_PERIOD_DAYS, SERVICE_FEES } from '../economy/PriceCatalog';
 import { TaskSystem, type StartRefusal } from '../tasks/TaskSystem';
-import { taskDef } from '../tasks/taskCatalog';
+import { JOB_IDS, taskDef } from '../tasks/taskCatalog';
 import type { ServiceFailure, ServiceHost } from '../services/ServiceSystem';
 import type { DecorItemId } from '../services/ServiceCatalog';
 import type { KitPart } from '../world/interiors/InteriorKit';
@@ -77,6 +77,14 @@ import {
 
 /** The lazily-imported half. See `src/world/interiors/InteriorSubsystem.ts`. */
 type InteriorApi = typeof import('../world/interiors/InteriorSubsystem');
+// Eager, and deliberately: `SaveService` has to read and write story progress
+// whether or not a quest has ever loaded, the same argument that keeps
+// `RelationshipStore` above `Population`. Everything else about the story --
+// 35 quests, 15 dialogue trees, 9 cutscenes, the string table, the Life Reel
+// renderer -- is behind `StorySubsystem`.
+import { StoryState } from '../story/StoryState';
+type StoryApi = typeof import('../story/StorySubsystem');
+type StoryDirector = import('../story/StoryDirector').StoryDirector;
 import { setToonPlayer, toonFromImported, updateToonTime } from '../graphics/ToonMaterial';
 import { HUD } from '../ui/HUD';
 import { LoadingScreen } from '../ui/LoadingScreen';
@@ -135,7 +143,7 @@ export class Game {
    * `WindowPortal` own render targets sized to the *viewport*, and both are
    * built before any world exists and outlive every zone change. Putting them
    * in a zone scope would tear them down on travel and leave rendering broken
-   * on arrival. Zone content — the World, and the CollisionWorld it owns —
+   * on arrival. Zone content â€” the World, and the CollisionWorld it owns â€”
    * belongs to the zone scope; these belong here.
    */
   private readonly gameScope = new DisposalRegistry('game');
@@ -151,7 +159,7 @@ export class Game {
   /**
    * The village specifically, for the handful of things only it has:
    * collectibles, the shared interior cell, keepsake markers. Null once a
-   * district is active — the narrowing is the point, since a district has no
+   * district is active â€” the narrowing is the point, since a district has no
    * keepsakes to count.
    */
   private village: World | null = null;
@@ -184,7 +192,7 @@ export class Game {
    * the sake of the thing that does not exist yet. So the accumulator wraps
    * physics alone, and everything else is left as it was.
    *
-   * `physics` stays null until something actually needs it — Rapier is 2.2 MB
+   * `physics` stays null until something actually needs it â€” Rapier is 2.2 MB
    * and arrives by dynamic import, so a player who never gets on a bicycle
    * never downloads it.
    */
@@ -208,7 +216,7 @@ export class Game {
   /**
    * The character GLB, kept so NPC bodies can be cloned from it.
    *
-   * One rig for the whole population — the brief's "do not create one GLB per
+   * One rig for the whole population â€” the brief's "do not create one GLB per
    * NPC", and the reason twenty residents cost one download.
    */
   private playerRig: THREE.Object3D | null = null;
@@ -254,7 +262,7 @@ export class Game {
    *
    * `updateRiding` runs every frame, so it cannot await an import. It also
    * cannot run before a vehicle exists, and a vehicle cannot exist before
-   * `spawnVehicle` has finished importing — so capturing the namespaces there
+   * `spawnVehicle` has finished importing â€” so capturing the namespaces there
    * makes the frame path synchronous without pulling ~19 kB of driving code
    * into the startup bundle.
    */
@@ -270,8 +278,8 @@ export class Game {
    * The zone's population, once it has arrived.
    *
    * Null before the dynamic import resolves and null again between zones. The
-   * game is fully playable in that state — the village stands, the player
-   * walks, vehicles drive — which is exactly why the population is allowed to
+   * game is fully playable in that state â€” the village stands, the player
+   * walks, vehicles drive â€” which is exactly why the population is allowed to
    * be late. It carries Recast's WebAssembly with it, and the initial-load
    * budget has no room for that.
    */
@@ -352,6 +360,16 @@ export class Game {
   private readonly decor = new Map<string, Map<string, DecorItemId>>();
   /** Which owned vehicle the garage acts on. */
   private garageSelection: string | null = null;
+
+  // -- Phase 8: the authored story ----------------------------------------
+  private readonly story = new StoryState();
+  private storyApi: StoryApi | null = null;
+  private director: StoryDirector | null = null;
+  private storyLoading: Promise<void> | null = null;
+  private panels: import('../ui/StoryPanels').StoryPanels | null = null;
+  /** Set while a scene or a conversation owns the screen. */
+  private storyBlocking = false;
+  private lastVehiclePos: THREE.Vector3 | null = null;
   /** The last service menu opened, so a second press runs the first offer. */
   private lastServiceId: string | null = null;
 
@@ -381,7 +399,7 @@ export class Game {
     this.portal = new WindowPortal(window.innerWidth, window.innerHeight);
 
     // The village is now a zone. It is still the same hand-authored World,
-    // built exactly as before — the difference is that the ZoneManager owns
+    // built exactly as before â€” the difference is that the ZoneManager owns
     // it through a disposal scope, so leaving the zone is guaranteed to give
     // its geometry, materials and textures back rather than relying on
     // Game.dispose() remembering to.
@@ -516,7 +534,7 @@ export class Game {
     });
     this.hud.syncOutfit(this.player.outfit);
     this.hud.setCounter(this.village!.collectibles.count, this.village!.collectibles.total);
-    // Runs every frame, including while a district is active — a district has
+    // Runs every frame, including while a district is active â€” a district has
     // no keepsakes, so this must degrade rather than assert.
     this.minimap = new Minimap(this.runtime.mapData, () => this.village?.keepsakeMarkers ?? []);
     // The proving ground, if asked for. Built before the interactables are
@@ -556,7 +574,7 @@ export class Game {
     }
     // Resume the autosave if there is one. Loaded without an expected mode:
     // there is no mode-selection screen yet, so the save's own mode is
-    // adopted. That is resuming, not mixing — the guard matters once the
+    // adopted. That is resuming, not mixing â€” the guard matters once the
     // player has actively chosen a mode.
     // Reading a save can migrate it, and the phase rules say life must not
     // advance during a migration. Blocking across the whole read is the simple
@@ -583,8 +601,8 @@ export class Game {
       this.life.unblock('saveMigration');
     }
 
-    // A save written between reaching a birthday and acknowledging it — the
-    // crash case — restores with one still armed. Deliver it now rather than
+    // A save written between reaching a birthday and acknowledging it â€” the
+    // crash case â€” restores with one still armed. Deliver it now rather than
     // leaving the clock permanently blocked on it.
     if (this.life.pendingBirthday !== null) {
       await this.handleBirthday(this.life.pendingBirthday);
@@ -604,7 +622,7 @@ export class Game {
    *
    * The chosen mode only applies to a fresh run: a resumed save already has
    * one, and switching it would silently change the rules of a run in
-   * progress — story gates applied to a Free Roam save, or the reverse.
+   * progress â€” story gates applied to a Free Roam save, or the reverse.
    */
   begin(mode: GameMode = 'story', options: FreeRoamOptions = DEFAULT_FREE_ROAM): void {
     if (this.running) return;
@@ -621,6 +639,13 @@ export class Game {
     this.audio.setMuted(this.settings.current.muted);
     this.applyNeedsSettings();
     this.gameScope.addTeardown(this.settings.onChange(() => this.applyNeedsSettings()));
+
+    // Story Mode brings the authored story in; Free Roam never downloads it.
+    // Fire-and-forget: the village is already standing and playable, and
+    // chapter 1 arrives a moment later exactly as the population does.
+    if (this.mode === 'story') {
+      void this.ensureStory().then(() => this.director?.begin());
+    }
 
     window.addEventListener('resize', this.onResize);
     document.addEventListener('visibilitychange', this.onVisibility);
@@ -698,7 +723,7 @@ export class Game {
    * Apply the Free Roam setup to a fresh run.
    *
    * Age goes through `LifeClock.restore` rather than a setter so it lands in
-   * the same validated path a save uses — one way in, one set of clamps.
+   * the same validated path a save uses â€” one way in, one set of clamps.
    */
   private applyFreeRoamOptions(o: FreeRoamOptions): void {
     this.life.restore({
@@ -711,7 +736,7 @@ export class Game {
     this.economy.wallet.restore({ cash: o.startMoney, bank: 0 });
 
     // A fresh run starts from a known inventory, not whatever the last one
-    // left behind — this path is also reached when restarting from the menu.
+    // left behind â€” this path is also reached when restarting from the menu.
     this.inventory.clear();
     if (o.startVehicle !== 'none') this.inventory.add(`keys_${o.startVehicle}`, 1);
 
@@ -751,7 +776,7 @@ export class Game {
     const story = this.storyClock.snapshot();
     const inside = this.interiors?.returnContext ?? null;
     return {
-      version: 3,
+      version: 4,
       contentVersion: CONTENT_VERSION,
       savedAt: 0, // stamped by SaveService
       mode: this.mode,
@@ -769,7 +794,13 @@ export class Game {
         chapterSeconds: story.chapterSeconds,
         totalSeconds: story.totalSeconds,
         completedChapters: [...this.completedChapters].sort(),
-        quests: {},
+        // Kept in step with `progress` below for the reason `money` is kept in
+        // step with the wallet: a reader written against v3 still sees roughly
+        // where the player is. Nothing in this build reads it.
+        quests: Object.fromEntries(
+          this.story.allRuns.map((r) => [r.id, r.state === 'completed' ? -1 : 0]),
+        ),
+        progress: this.story.toJSON(),
       },
       // Kept in step with the wallet so a reader that predates the economy
       // still sees a sensible balance rather than a zero.
@@ -779,12 +810,12 @@ export class Game {
       vehicles: this.garage.toJSON() as SaveData['vehicles'],
       needs: this.needs.toJSON(),
       relationships: this.relationships.toJSON(),
-      // Live ages when a population is loaded, the lifted copy when it is not —
+      // Live ages when a population is loaded, the lifted copy when it is not â€”
       // between zones, or before the chunk has landed.
       npcs: this.population?.ageSnapshot() ?? this.npcAges,
       collectibles: this.village?.collectibles.foundIds ?? [],
       unlockedZones: [...this.unlockedZones],
-      // Phase 7. The door and the way back out, never the room's contents —
+      // Phase 7. The door and the way back out, never the room's contents â€”
       // the room is rebuilt from the catalogue, like the world from the
       // manifest.
       inside: inside
@@ -806,17 +837,23 @@ export class Game {
   }
 
   /**
-   * Write a slot, rolling the economy back if the write fails.
+   * Write a slot, rolling the economy *and the story* back if the write fails.
    *
    * The failure this guards is narrow and real: a purchase applied in memory,
    * then a save that throws on quota. Without the rollback the run carries
    * goods that the next load will not have paid for.
+   *
+   * The story is in the snapshot for the same reason the economy's award keys
+   * are: a quest reward paid in memory and then not written leaves a spent key
+   * with no money behind it, and that reward can never pay again.
    */
   private async saveWithRollback(slot: SaveSlotId): Promise<boolean> {
     const before = this.economy.snapshot();
+    const storyBefore = this.story.snapshot();
     const result = await this.saves.save(slot, this.captureSave(slot));
     if (!result.ok) {
       this.economy.restore(before);
+      this.story.restore(storyBefore);
       this.hud.showToast('Not saved', 'Nothing was lost, but nothing was written.');
     }
     return result.ok;
@@ -847,6 +884,12 @@ export class Game {
     for (const c of data.story.completedChapters) this.completedChapters.add(c);
     this.unlockedZones.clear();
     for (const z of data.unlockedZones) this.unlockedZones.add(z);
+
+    // The story before anything that could report progress into it. `restore`
+    // handles an absent block as "nothing has happened yet", which is exactly
+    // what a save written before this phase means.
+    this.story.restore(data.story.progress);
+    this.director?.afterRestore();
 
     // The economy before the inventory, because `Economy.restoreFrom` only
     // touches the wallet, the ledger and the award keys -- the stacks are the
@@ -973,9 +1016,26 @@ export class Game {
     }
   }
 
+  /**
+   * What a birthday unlocks, in the player's words.
+   *
+   * Read off `Gates` rather than listed here, so the postcard cannot claim
+   * something the gates still refuse. A birthday that unlocks nothing gets a
+   * card with no list rather than an invented one.
+   */
+  private birthdayUnlocks(age: number): string[] {
+    const out: string[] = [];
+    if (age === 16) out.push('Paid work');
+    if (age === 17) out.push('Driving');
+    if (age === 18) out.push('The city', 'Adult work');
+    return out;
+  }
+
   /** One birthday: announce, autosave while the clock is stopped, age up. */
   private async deliverBirthday(age: number): Promise<void> {
-    this.hud.showToast('Another year', `You are ${age} today.`);
+    const card = this.director?.birthday(age, this.birthdayUnlocks(age)) ?? null;
+    if (card) this.hud.showToast(card.title, card.body);
+    else this.hud.showToast('Another year', `You are ${age} today.`);
 
     // A year passes for the named residents too. Ambient pedestrians are
     // deliberately left alone: they are pooled strangers with no identity to
@@ -989,7 +1049,7 @@ export class Game {
     await wait(60);
 
     // Acknowledge *before* saving. Saving first records the pre-birthday
-    // state — age N, sitting on the boundary — so a reload re-arms and
+    // state â€” age N, sitting on the boundary â€” so a reload re-arms and
     // re-fires the same birthday, which is the duplicate event the phase
     // rules forbid. Acknowledging first also fails in the safe direction: a
     // crash between the two re-fires the birthday rather than skipping it.
@@ -1342,7 +1402,7 @@ export class Game {
         const agent = this.population?.namedById(id);
         if (!agent) return false;
         // A quest override rather than a bare destination, so the next
-        // schedule tick does not immediately send them home again — which is
+        // schedule tick does not immediately send them home again â€” which is
         // exactly what a quest needs too.
         agent.questOverride = { kind: 'quest', place: { x, y: this.runtime.heightAt(x, z), z } };
         agent.setDestination(x, z);
@@ -1474,6 +1534,124 @@ export class Game {
         this.tasks.cancel();
         this.tasks.clear();
       },
+
+      // ---- Phase 8 ----------------------------------------------------------
+      // The debug tooling the brief asks for, reachable only under `?e2e=1`.
+      // `jumpToStage` in particular must never be in ordinary play: it is the
+      // one operation here that can skip authored content.
+      awaitStory: async () => {
+        await this.ensureStory();
+        this.director?.begin();
+        return this.storyState();
+      },
+      storyState: () => this.storyState(),
+      startQuest: (id) => this.director?.quests.start(id).ok ?? false,
+      questState: (id) => {
+        const view = this.director?.quests.view(id) ?? null;
+        if (!view) return null;
+        return {
+          id: view.id,
+          kind: view.kind,
+          chapter: view.chapter,
+          stage: view.stageId,
+          objectives: view.objectives.map((o) => ({
+            id: o.id,
+            kind: o.kind,
+            done: o.done,
+            target: o.target,
+            complete: o.complete,
+            optional: o.optional,
+          })),
+        };
+      },
+      activeQuests: () => (this.director?.quests.activeQuests() ?? []).map((q) => q.id),
+      jumpToStage: (questId, stageId) =>
+        this.director?.quests.jumpToStage(questId, stageId) ?? false,
+      reportObjective: (questId, objectiveId, amount) =>
+        this.director?.quests.setProgress(questId, objectiveId, amount) ?? false,
+      advanceStory: (seconds) => this.director?.quests.advance(seconds),
+      setChoice: (id, value) => {
+        this.director?.quests.applyConsequence({ kind: 'choice', id, value });
+      },
+      setFlag: (id) => {
+        this.story.setFlag(id);
+      },
+      adjustReputation: (axis, delta) => {
+        this.story.adjustReputation(axis === 'law' ? 'law' : 'community', delta);
+      },
+      talkToNpc: (id) => {
+        this.talkTo(id);
+        return (this.panels?.dialogueOpen ?? false);
+      },
+      dialogueState: () => {
+        const turn = this.director?.dialogue.current() ?? null;
+        if (!turn || !(this.panels?.dialogueOpen ?? false)) return null;
+        return {
+          treeId: turn.treeId,
+          nodeId: turn.nodeId,
+          speaker: turn.speaker,
+          text: turn.text,
+          choices: turn.choices.map((c) => ({
+            index: c.index,
+            text: c.text,
+            available: c.available,
+          })),
+        };
+      },
+      chooseDialogue: (index) => {
+        const next = this.director?.choose(index) ?? null;
+        if (next) {
+          const speaker = this.population?.namedById(this.director!.dialogue.npcId);
+          this.showDialogueTurn(next, speaker?.definition?.displayName ?? '');
+        } else {
+          this.panels?.closeDialogue();
+        }
+        return (this.panels?.dialogueOpen ?? false);
+      },
+      sceneState: () => this.director?.scenes.currentScene ?? null,
+      skipScene: () => this.director?.scenes.skip(),
+      reelModel: () => {
+        const model = this.director?.reel(this.reelFacts()) ?? null;
+        if (!model) return null;
+        return {
+          finalTitle: model.finalTitle,
+          timeline: model.timeline.map((r) => ({ age: r.age, kind: r.kind, text: r.text })),
+          sections: model.sections.map((s) => ({
+            title: s.title,
+            rows: s.rows.map((r) => ({ label: r.label, value: r.value })),
+          })),
+        };
+      },
+      openReel: (open) => {
+        if (open) this.openReel();
+        else this.panels?.openReel(false);
+      },
+      exportReel: async () => {
+        if (!this.director || !this.storyApi) return 0;
+        const model = this.director.reel(this.reelFacts());
+        const blob = await this.storyApi.exportReel(model, () =>
+          document.createElement('canvas'),
+        );
+        return blob?.size ?? 0;
+      },
+      objectiveLine: () => this.hud.objectiveLine,
+      openJournal: (open) => this.panels?.openJournal(open, this.director?.journal() ?? []),
+    };
+  }
+
+  /** The story, flattened for the bridge. Never a handle on the systems. */
+  private storyState() {
+    return {
+      loaded: this.director !== null,
+      chapter: this.storyClock.chapter,
+      completedChapters: [...this.completedChapters].sort(),
+      flags: [...this.story.flags].sort(),
+      choices: Object.fromEntries(this.story.choices),
+      reputation: { ...this.story.reputation },
+      endingId: this.story.endingId,
+      reel: this.story.reel.length,
+      active: (this.director?.quests.activeQuests() ?? []).map((q) => q.id),
+      completed: this.story.allRuns.filter((r) => r.state === 'completed').map((r) => r.id),
     };
   }
 
@@ -1497,7 +1675,14 @@ export class Game {
 
   private update(dt: number): void {
     const uiBlocking =
-      this.hud.infoOpen || this.hud.wardrobeOpen || this.sleeping || this.transitioning;
+      this.hud.infoOpen ||
+      this.hud.wardrobeOpen ||
+      (this.panels?.dialogueOpen ?? false) ||
+      (this.panels?.journalOpen ?? false) ||
+      (this.panels?.reelOpen ?? false) ||
+      this.storyBlocking ||
+      this.sleeping ||
+      this.transitioning;
     if (uiBlocking) this.input.releaseAll();
 
     // Before anything reads input: the Gamepad API is polled, not evented, so
@@ -1568,7 +1753,7 @@ export class Game {
 
     this.hud.setWallet(this.economy.wallet.cash);
 
-    // 6. radar — hidden indoors, where it has nothing useful to show
+    // 6. radar â€” hidden indoors, where it has nothing useful to show
     this.minimap.setVisible(!this.indoors);
     if (!this.indoors) {
       this.minimap.update(dt, this.player.position, this.player.controller.facing);
@@ -1585,6 +1770,12 @@ export class Game {
       this.syncTaskProgress();
     }
     this.updateInteraction(dt);
+
+    // 7b. the story, after interactions so a counter used this frame has
+    //     already been reported, and before physics so a scene that takes the
+    //     camera does it on the frame the stage changed rather than the next.
+    this.reportDriving();
+    this.updateStory(dt);
 
     // 8. physics, on its own fixed step
     this.stepPhysics(dt);
@@ -1604,7 +1795,7 @@ export class Game {
     // The player's own vehicle is an obstacle to traffic, not a participant:
     // it is a Rapier body with a driver, and the lane graph has no opinion
     // about it beyond "do not drive into that".
-    // `id: 0` marks "not a traffic vehicle" — the field exists so a test can
+    // `id: 0` marks "not a traffic vehicle" â€” the field exists so a test can
     // follow one car across frames, and nothing here is one.
     const obstacles: Array<{ id: number; x: number; z: number; radius: number }> = [];
     for (const proxy of this.vehicleProxies.values()) {
@@ -1637,7 +1828,7 @@ export class Game {
    * honest about what the download costs and invisible in practice, because the
    * player is still reading the "Begin" button.
    *
-   * Called again on every zone change. The old population is disposed first —
+   * Called again on every zone change. The old population is disposed first â€”
    * it owns crowd agents inside WASM memory, which the JavaScript collector
    * cannot reach.
    */
@@ -1996,7 +2187,7 @@ export class Game {
    * The mesh that follows a vehicle body.
    *
    * Falls back to a plain box if the model is missing, so a failed asset load
-   * leaves something visible to drive rather than an invisible car — the
+   * leaves something visible to drive rather than an invisible car â€” the
    * physics would be working and nothing would look wrong except the screen.
    */
   private buildVehicleVisual(
@@ -2070,7 +2261,7 @@ export class Game {
   /**
    * Re-register what the player can interact with.
    *
-   * Called whenever the set changes — construction and zone travel. The system
+   * Called whenever the set changes â€” construction and zone travel. The system
    * holds no reference to the previous zone's content afterwards, which is what
    * stops a stale door from being offered in the city.
    */
@@ -2156,7 +2347,7 @@ export class Game {
   /**
    * One exchange with a named resident.
    *
-   * The dialogue *data* is fully exercised here — the tree is walked, choice
+   * The dialogue *data* is fully exercised here â€” the tree is walked, choice
    * conditions are evaluated against the live relationship and the player's
    * age, and the chosen branch's relationship effects are applied. What is
    * deliberately absent is the choice UI: a panel with portraits and history
@@ -2170,6 +2361,19 @@ export class Game {
     if (!agent || !def) return;
 
     agent.react('greet', this.player.position);
+
+    // The story gets first refusal. A resident who is part of the current
+    // stage opens the authored tree in the panel; everyone else falls through
+    // to Phase 6's small talk, which is still the right thing for a passer-by.
+    const turn = this.director?.dialogueFor(npcId) ?? null;
+    if (turn) {
+      this.showDialogueTurn(turn, def.displayName);
+      return;
+    }
+
+    // Not a story conversation, but the objective still counts: a stage that
+    // asks you to talk to somebody is satisfied by talking to them.
+    this.director?.report({ kind: 'talk', npcId });
 
     const ctx = {
       relationship: this.relationships.get(npcId),
@@ -2186,8 +2390,36 @@ export class Game {
     const line =
       pickBark(def.barkSet, this.env.dayFactor > 0.25 ? 'greet' : 'night', Math.floor(this.env.time * 24)) ??
       next?.text ??
-      '…';
+      'â€¦';
     this.hud.showToast(def.displayName, line);
+  }
+
+  /**
+   * Draw one turn, and wire what the buttons do.
+   *
+   * `Game` owns the wiring rather than the HUD because taking a choice has
+   * consequences â€” relationship effects, recorded decisions, quest branches â€”
+   * and those belong to the director. The HUD is handed strings and a
+   * callback; it has never heard of a stage.
+   */
+  private showDialogueTurn(
+    turn: import('../story/DialogueRunner').DialogueTurn,
+    speakerName: string,
+  ): void {
+    this.input.releaseAll();
+    this.panels?.setDialogueHistory(this.director?.dialogue.history ?? []);
+    this.panels?.showDialogue(turn, this.speakerLabel(turn.speaker, speakerName), (index) => {
+      const next = this.director?.choose(index) ?? null;
+      if (next) this.showDialogueTurn(next, speakerName);
+      else this.panels?.closeDialogue();
+    });
+  }
+
+  /** `narrator` and `player` are voices, not residents. */
+  private speakerLabel(speaker: string, fallback: string): string {
+    if (speaker === 'narrator') return '';
+    if (speaker === 'player') return 'You';
+    return this.population?.namedById(speaker)?.definition?.displayName ?? fallback;
   }
 
   /**
@@ -2554,8 +2786,8 @@ export class Game {
    * Offer whatever is in reach, and act on it if asked.
    *
    * Position is the player's chest rather than their feet, so a bed you are
-   * standing beside still counts. Everything past that — reach, facing,
-   * availability, holds, the prompt — belongs to `InteractionSystem`.
+   * standing beside still counts. Everything past that â€” reach, facing,
+   * availability, holds, the prompt â€” belongs to `InteractionSystem`.
    */
   private updateInteraction(dt: number): void {
     // Consumed unconditionally, so a press aimed at nothing cannot fire later.
@@ -2566,7 +2798,7 @@ export class Game {
     if (!this.riding && this.input.consumeFlip()) this.rightNearestVehicle();
     const ctx = this.interactionContext();
 
-    // Nothing may fire mid-transition, mid-nap or behind the wardrobe panel —
+    // Nothing may fire mid-transition, mid-nap or behind the wardrobe panel â€”
     // this guard has to come before standing up, or a stray WASD during the
     // fade teleports the player out of the chair.
     if (ctx.busy) {
@@ -2677,7 +2909,7 @@ export class Game {
 
     this.indoors = indoors;
     this.audio.setZone(indoors ? 'indoor' : 'outdoor');
-    // The kill plane and world bounds only make sense outdoors — the interior
+    // The kill plane and world bounds only make sense outdoors â€” the interior
     // cell sits 600 m up and outside the terrain footprint.
     this.player.controller.boundsEnabled = !indoors;
     this.player.motor.teleport(to.x, to.y, to.z);
@@ -2702,7 +2934,7 @@ export class Game {
    * The kit, fetched the first time somebody opens a door.
    *
    * 145 kB that only matters once you go inside, and this transition already
-   * fades to black — so the wait is hidden for the player who does and never
+   * fades to black â€” so the wait is hidden for the player who does and never
    * paid by the player who does not.
    */
   /** Buy a vehicle: register it owned, and put it outside the garage. */
@@ -2788,7 +3020,7 @@ export class Game {
       //
       // The whole argument for the interior subsystem and the kit being lazy
       // is that the download hides behind a transition the player is already
-      // waiting through. That is only true if the screen goes black first —
+      // waiting through. That is only true if the screen goes black first â€”
       // otherwise the first doorway of a session visibly stalls, and the
       // justification is a comment rather than a fact.
       const firstEntry = this.interiors?.hasKit !== true;
@@ -2874,7 +3106,7 @@ export class Game {
       case 'garage':
         return 'Smell of oil and warm metal.';
       case 'cafe':
-        return 'Coffee, and somebody else’s conversation.';
+        return 'Coffee, and somebody elseâ€™s conversation.';
       case 'clothing':
         return 'Racks, and a mirror at the back.';
       case 'airstrip':
@@ -2938,7 +3170,7 @@ export class Game {
 
   /**
    * Sleep. The character actually lies down and is held on screen for a beat
-   * before the fade — a straight cut to black reads as a bug, not a nap.
+   * before the fade â€” a straight cut to black reads as a bug, not a nap.
    */
   private async sleep(): Promise<void> {
     if (this.sleeping || this.transitioning) return;
@@ -3020,8 +3252,8 @@ export class Game {
   /**
    * The host `ServiceSystem` executes against.
    *
-   * Rebuilt per call rather than held, because half of it — the age, the
-   * clock, whether the shop is open — is only true for an instant.
+   * Rebuilt per call rather than held, because half of it â€” the age, the
+   * clock, whether the shop is open â€” is only true for an instant.
    */
   private serviceHost(): ServiceHost {
     const built = this.interiors?.active ?? null;
@@ -3066,10 +3298,233 @@ export class Game {
       shower: () => this.shower(),
       saveGame: () => void this.saveWithRollback('autosave'),
       placeDecor: (itemId) => this.placeDecor(itemId),
-      talk: (topic) => this.hud.showToast('Talk', TOPIC_LINES[topic] ?? '…'),
+      talk: (topic) => this.hud.showToast('Talk', TOPIC_LINES[topic] ?? 'â€¦'),
       startTask: (taskId) => this.startTask(taskId),
       treat: () => this.hud.showToast('Clinic', 'Patched up and sent on your way.'),
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // The authored story
+  // -------------------------------------------------------------------------
+
+  /**
+   * Bring the story in, once.
+   *
+   * Lazy for the reason everything else in this repository is lazy: a Free
+   * Roam player never needs 35 quests, 15 dialogue trees and a canvas
+   * renderer. Story Mode reaches this behind the mode selector's own loading
+   * screen, so the download sits in a gap the player is already waiting
+   * through -- the same argument the interior kit rides on.
+   */
+  private ensureStory(): Promise<void> {
+    if (this.director) return Promise.resolve();
+    if (this.storyLoading) return this.storyLoading;
+
+    this.storyLoading = import('../story/StorySubsystem').then((api) => {
+      this.storyApi = api;
+      this.director = new api.StoryDirector(this.story, this.storyDirectorHost());
+      this.panels = new api.StoryPanels();
+      this.gameScope.addTeardown(
+        this.panels.wire({
+          onLeaveDialogue: () => {
+            this.director?.dialogue.end();
+            this.panels?.closeDialogue();
+          },
+          onSaveReel: () => void this.saveReel(),
+        }),
+      );
+      this.director.afterRestore();
+    });
+    return this.storyLoading;
+  }
+
+  /**
+   * Everything the director cannot know on its own.
+   *
+   * Rebuilt once and held, unlike `serviceHost()`: the director keeps a
+   * reference for the life of the run and every field here is either a getter
+   * or a call, so nothing goes stale.
+   */
+  private storyDirectorHost(): import('../story/StoryDirector').StoryDirectorHost {
+    // The four live values are read through arrow functions rather than by
+    // aliasing `this` into the literal: a getter's `this` is the literal, not
+    // the class, so it has to close over something. Arrows capture the class
+    // scope for free.
+    const age = () => this.life.ageYears;
+    const money = () => this.economy.wallet.cash;
+    const mode = () => this.mode;
+    const chapter = () => this.storyClock.chapter;
+
+    return {
+      get age() {
+        return age();
+      },
+      get money() {
+        return money();
+      },
+      get mode() {
+        return mode();
+      },
+      get chapter() {
+        return chapter();
+      },
+      relationship: (id) => this.relationships.get(id),
+      adjustRelationship: (id, axes) => this.relationships.adjust(id, axes),
+      unlockZone: (zone) => {
+        this.unlockedZones.add(zone);
+      },
+      completeChapter: (id) => {
+        this.completedChapters.add(id);
+      },
+      /**
+       * Pay a quest reward.
+       *
+       * Money goes through `Economy.award` with the quest's own key, so the
+       * economy's idempotency and the story's agree rather than being two
+       * separate opinions. A reward that cannot fit in the bag returns false
+       * and the director releases the key, so it can be paid later.
+       */
+      grant: (reward, key) => {
+        for (const item of reward.items ?? []) {
+          if (this.inventory.add(item.id, item.count).added < item.count) return false;
+        }
+        if (reward.money) {
+          this.economy.award(key, reward.money, 'Story reward', Date.now());
+        }
+        this.syncTaskProgress();
+        return true;
+      },
+
+      toast: (title, body) => this.hud.showToast(title, body),
+      setObjective: (text) => this.hud.setObjective(text),
+      npcName: (id) => this.population?.namedById(id)?.definition?.displayName ?? id,
+      activeZone: () => this.zones.activeZoneId,
+      interiorPoint: (name) => {
+        // `world`, not the layout-space position: the interior cell sits 600 m
+        // above the terrain and a distance check against local coordinates
+        // would place every room at the origin.
+        const point = this.interiors?.active?.points.find((p) => p.id === name);
+        return point ? { x: point.world.x, y: point.world.y, z: point.world.z } : null;
+      },
+
+      // -- cutscene host ----------------------------------------------------
+      place: (name) => this.director?.resolvePlace(name) ?? null,
+      playerPosition: () => this.player.position,
+      npcPosition: (id) => this.population?.namedById(id)?.position ?? null,
+      setCamera: (at, lookAt) => this.camera.placeAt(at, lookAt),
+      releaseCamera: () => {
+        this.camera.resetBehind(this.player.lookTarget, this.player.controller.facing);
+      },
+      setCaption: (text) => this.hud.setCaption(text),
+      playGesture: (name) => this.player.playGesture(name),
+      fade: (on, seconds) => this.hud.setFade(on, seconds),
+      setControlsEnabled: (on) => {
+        this.storyBlocking = !on;
+        if (!on) this.input.releaseAll();
+      },
+    };
+  }
+
+  /**
+   * The story's frame.
+   *
+   * Runs after interactions so a counter used this frame has already been
+   * reported, and before physics so a cutscene that takes the camera does it
+   * in the same frame the stage changed rather than one later.
+   */
+  private updateStory(dt: number): void {
+    const director = this.director;
+    if (!director) return;
+
+    director.update(dt);
+
+    if (director.hasPendingScene && !this.transitioning) {
+      void director.playPendingScene();
+    }
+
+    // `collect` objectives read off the bag every frame, for the reason Phase 7
+    // gave: items arrive from a shop, a pickup, a reward and a save restore,
+    // and wiring four sources is four chances to miss one.
+    for (const view of director.quests.activeQuests()) {
+      for (const o of view.objectives) {
+        if (o.kind !== 'collect' || !o.itemId) continue;
+        const held =
+          o.itemId === 'keepsake'
+            ? (this.village?.collectibles.count ?? 0)
+            : this.inventory.count(o.itemId);
+        director.quests.setProgress(view.id, o.id, held);
+      }
+    }
+  }
+
+  /**
+   * What the reel is made of.
+   *
+   * Assembled from the systems that already own each fact rather than from a
+   * running tally: the wallet knows the money, the garage knows the vehicles,
+   * `Collectibles` knows the keepsakes. A second copy of any of them would be
+   * a second copy that can be wrong.
+   */
+  private reelFacts(): import('../story/LifeReel').ReelFacts {
+    const property: string[] = [];
+    if (this.story.has('ch4_has_apartment')) property.push('Apartment');
+    if (this.completedChapters.has('village_departure')) property.push('Family home');
+
+    return {
+      age: this.life.ageYears,
+      money: this.economy.wallet.cash + this.economy.wallet.bank,
+      shiftsWorked: JOB_IDS.reduce((n, id) => n + this.tasks.completionsOf(id), 0),
+      vehiclesOwned: this.garage.owned().length,
+      keepsakes: this.village?.collectibles.count ?? 0,
+      keepsakeTotal: this.village?.collectibles.total ?? 5,
+      property,
+      friends: this.director?.friends(this.relationships.toJSON()) ?? [],
+      reputation: this.story.reputation,
+    };
+  }
+
+  /** Open the reel, drawing straight onto the panel's canvas. */
+  private openReel(): void {
+    const director = this.director;
+    if (!director || !this.storyApi) return;
+    const model = director.reel(this.reelFacts());
+    this.panels?.openReel(true, (ctx) => this.storyApi!.renderReel(ctx, model));
+  }
+
+  /**
+   * Write the reel to a file, locally.
+   *
+   * `exportReel` renders the same model onto a detached canvas and hands back
+   * a blob; `downloadReel` turns that into a click on an object URL. There is
+   * no network call anywhere on this path and no upload service in the
+   * repository, which is what the brief asks for.
+   */
+  private async saveReel(): Promise<void> {
+    const director = this.director;
+    if (!director || !this.storyApi) return;
+    const model = director.reel(this.reelFacts());
+    const blob = await this.storyApi.exportReel(model, () => document.createElement('canvas'));
+    if (blob) this.storyApi.downloadReel(blob);
+    else this.hud.showToast('Not saved', 'This browser would not give us a canvas.');
+  }
+
+  /** Metres covered, for `drive` objectives. Reads the live body, not input. */
+  private reportDriving(): void {
+    const riding = this.riding;
+    const controller = riding ? this.vehicles.get(riding.id) : null;
+    if (!controller || !this.director) {
+      this.lastVehiclePos = null;
+      return;
+    }
+
+    const now = controller.position(new THREE.Vector3());
+    if (this.lastVehiclePos) {
+      const moved = now.distanceTo(this.lastVehiclePos);
+      // A teleport -- a reset, a recovery, a zone change -- is not driving.
+      if (moved < 30) this.director.reportDriving(moved, controller.def.id);
+    }
+    this.lastVehiclePos = now;
   }
 
   /**
@@ -3107,11 +3562,15 @@ export class Game {
     this.lastServiceId = null;
     if (result.ok) {
       const money =
-        result.spent > 0 ? ` −$${result.spent}` : result.gained > 0 ? ` +$${result.gained}` : '';
+        result.spent > 0 ? ` âˆ’$${result.spent}` : result.gained > 0 ? ` +$${result.gained}` : '';
       this.hud.showToast(menu.title, `${result.label}${money}`);
       // A purchase can satisfy a "collect" objective.
       this.syncTaskProgress();
       this.reportTaskPlace(pointId);
+      // And a story `buy` objective, which names the offer rather than the
+      // item -- "buy a meal" is about the transaction, not about holding food.
+      this.director?.report({ kind: 'buy', serviceOffer: first.id });
+      this.director?.report({ kind: 'interact', place: pointId });
     } else {
       this.hud.showToast(menu.title, SERVICE_FAILURES[result.reason]);
     }
@@ -3161,8 +3620,15 @@ export class Game {
     }
   }
 
-  /** Tell the active task that a named place was used. */
+  /**
+   * Tell the active task, and the story, that a named place was used.
+   *
+   * Both, always. A shelf stocked during a grocery shift is a task objective
+   * *and* possibly a quest one, and deciding which of the two "owns" the press
+   * would mean a quest that watches a job cannot see it happen.
+   */
   private reportTaskPlace(place: string): void {
+    this.director?.report({ kind: 'interact', place });
     if (!this.tasks.active) return;
     if (this.tasks.report({ place })) this.afterTaskChange();
   }
@@ -3171,7 +3637,7 @@ export class Game {
    * Re-read every `collect` objective off the bag.
    *
    * Absolute rather than incremental, because the truth of "carry three
-   * boxes" is how many you are holding — and selling one has to move the bar
+   * boxes" is how many you are holding â€” and selling one has to move the bar
    * back down.
    */
   private syncTaskProgress(): void {
@@ -3195,8 +3661,12 @@ export class Game {
       Date.now(),
     );
     if (paid.ok) {
-      this.hud.showToast('Paid', `${taskLabel(outcome.taskId)} — $${outcome.pay}`);
+      this.hud.showToast('Paid', `${taskLabel(outcome.taskId)} â€” $${outcome.pay}`);
     }
+    // A finished shift is what a `work_shift` objective is waiting for. Sent
+    // after the award so a quest that also pays cannot land first and make the
+    // ledger read backwards.
+    this.director?.report({ kind: 'work_shift', taskId: outcome.taskId });
     this.tasks.clear();
   }
 
@@ -3221,7 +3691,7 @@ export class Game {
   private updateAudio(dt: number): void {
     const p = this.player.position;
     // The road field is a 2D lookup with no notion of the interior cell, and
-    // the room sits directly above the main road in x/z — so indoors it would
+    // the room sits directly above the main road in x/z â€” so indoors it would
     // report tarmac. Floorboards are closer to grass than asphalt.
     const surface = this.indoors ? 0.3 : this.runtime.surfaceHardness(p.x, p.z);
     const moving = this.player.motor.grounded && this.player.speed > 0.3;
@@ -3239,7 +3709,7 @@ export class Game {
    * Draw the outdoor world into the window texture.
    *
    * Only while indoors, and only for the interior windows. The interior
-   * itself, the player and their contact shadow are suppressed for the pass —
+   * itself, the player and their contact shadow are suppressed for the pass â€”
    * they live in the room, not out on the street.
    */
   private renderPortal(): void {
@@ -3277,23 +3747,23 @@ export class Game {
   private reportDebug(): void {
     const s = this.runtime.stats;
     const lines = [
-      `${this.fps.toFixed(0)} fps · ${this.renderer.info}`,
-      `veg ${s.vegetation} · grass ${s.grass} · collider ${(s.colliderTris / 1000).toFixed(0)}k`,
-      `state ${this.player.state} · ${this.player.speed.toFixed(2)} m/s · ${
+      `${this.fps.toFixed(0)} fps Â· ${this.renderer.info}`,
+      `veg ${s.vegetation} Â· grass ${s.grass} Â· collider ${(s.colliderTris / 1000).toFixed(0)}k`,
+      `state ${this.player.state} Â· ${this.player.speed.toFixed(2)} m/s Â· ${
         this.player.motor.grounded ? 'ground' : 'air'
       }`,
-      `time ${this.env.clockLabel} · day ${this.env.dayFactor.toFixed(2)}`,
+      `time ${this.env.clockLabel} Â· day ${this.env.dayFactor.toFixed(2)}`,
     ];
 
     const p = this.population?.stats;
     if (p) {
       lines.push(
-        `npc ${p.named}+${p.ambient} · near ${p.near} mid ${p.mid} far ${p.far} · bodies ${p.bodies}`,
-        `nav ${p.navState} ${p.navBuildMs}ms · agents ${p.navAgents} · links ${p.offMeshLinks} · far ${p.farTickMs}ms`,
-        `traffic ${p.traffic} (${p.trafficParked} parked, ${p.trafficBarges} barged) · seen ${p.witnessed} · unstuck ${p.stuckRecoveries}`,
+        `npc ${p.named}+${p.ambient} Â· near ${p.near} mid ${p.mid} far ${p.far} Â· bodies ${p.bodies}`,
+        `nav ${p.navState} ${p.navBuildMs}ms Â· agents ${p.navAgents} Â· links ${p.offMeshLinks} Â· far ${p.farTickMs}ms`,
+        `traffic ${p.traffic} (${p.trafficParked} parked, ${p.trafficBarges} barged) Â· seen ${p.witnessed} Â· unstuck ${p.stuckRecoveries}`,
       );
     } else {
-      lines.push('npc — population not loaded');
+      lines.push('npc â€” population not loaded');
     }
 
     this.hud.setDebug(lines.join('\n'));
@@ -3320,7 +3790,7 @@ export class Game {
     });
 
     // Everything renderer-lifetime. Listed once, at creation, rather than
-    // duplicated here — a hand-maintained teardown list is exactly how a
+    // duplicated here â€” a hand-maintained teardown list is exactly how a
     // resource ends up released twice or not at all.
     const report = this.gameScope.dispose();
     if (report.errors.length) {

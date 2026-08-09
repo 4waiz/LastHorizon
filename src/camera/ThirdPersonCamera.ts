@@ -113,6 +113,33 @@ export class ThirdPersonCamera {
     this.initialised = false;
   }
 
+  /**
+   * Put the camera exactly here, looking exactly there.
+   *
+   * For cutscenes, and deliberately outside `update`: a scene sets the camera
+   * every frame and calls no springs, because a spring between two shots
+   * smears the cut, and the cut is the only bit of grammar a scene has.
+   *
+   * `initialised` is cleared so that when the scene ends and `update` resumes,
+   * the look-at target snaps to the player rather than easing there from
+   * wherever the last shot was pointing.
+   */
+  placeAt(at: { x: number; y: number; z: number }, lookAt: { x: number; y: number; z: number }): void {
+    this.camera.position.set(at.x, at.y, at.z);
+    this.camera.lookAt(lookAt.x, lookAt.y, lookAt.z);
+    this.smoothTarget.set(lookAt.x, lookAt.y, lookAt.z);
+    this.initialised = false;
+
+    // The controller reads these for camera-relative movement; leaving them
+    // pointing where a cutscene left them would make the first step after a
+    // scene go sideways.
+    this.camera.getWorldDirection(this.forward);
+    this.forward.y = 0;
+    if (this.forward.lengthSq() < 1e-6) this.forward.set(0, 0, -1);
+    this.forward.normalize();
+    this.right.set(-this.forward.z, 0, this.forward.x);
+  }
+
   private applyLook(input: InputManager): void {
     const look = input.consumeLook();
     if (look.x || look.y) {

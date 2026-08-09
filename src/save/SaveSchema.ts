@@ -4,6 +4,10 @@ import type { LifeRate } from '../core/clocks/LifeClock';
 import type { TimeMode } from '../core/Settings';
 import type { LedgerData } from '../economy/Ledger';
 import type { WalletData } from '../economy/Wallet';
+// Aliased: this file already has a `StoryStateData` — the chapter/clock block
+// that has been in the format since v2 — and the story's own state is a
+// different thing that lives inside it.
+import type { StoryStateData as StoryProgress } from '../story/StoryState';
 
 /**
  * The save format, versioned.
@@ -20,7 +24,7 @@ import type { WalletData } from '../economy/Wallet';
  */
 
 /** Bump when the shape changes, and add a migration for the step. */
-export const CURRENT_SAVE_VERSION = 3;
+export const CURRENT_SAVE_VERSION = 4;
 
 /** Bump when *content* changes in a way that invalidates positions or quests. */
 export const CONTENT_VERSION = 1;
@@ -55,9 +59,30 @@ export interface StoryStateData {
   chapterSeconds: number;
   totalSeconds: number;
   completedChapters: string[];
-  /** Quest id -> stage. */
+  /**
+   * Quest id -> stage *index*.
+   *
+   * Predates Phase 8 and is kept in step with `progress` below for the same
+   * reason `money` is kept in step with `economy.wallet`: a reader written
+   * against v3 still sees roughly where the player is rather than nothing.
+   * Nothing in this build reads it.
+   */
   quests: Record<string, number>;
+  /**
+   * Added in Phase 8. Optional, like every field added since v2, so a save
+   * written before the story existed loads as "nothing has happened yet" —
+   * which is exactly what it means.
+   *
+   * The shape is **borrowed from `StoryState`, not restated**. Phase 7 learned
+   * that lesson twice: `EconomySaveData` restating `kind` as a bare `string`
+   * failed to compile against its own reader, and the first draft of this
+   * field did exactly the same thing to the reel's event kind. One definition,
+   * imported, cannot drift from the thing it describes.
+   */
+  progress?: StoryProgressData;
 }
+
+export type StoryProgressData = StoryProgress;
 
 export interface InventoryItemData {
   id: string;
@@ -162,7 +187,19 @@ export interface TaskSaveData {
 /** Decorations placed, keyed interior id -> slot id -> item id. */
 export type DecorSaveData = Record<string, Record<string, string>>;
 
-/** The current save shape. */
+/**
+ * The current save shape.
+ *
+ * v4 adds nothing but `story.progress`. That is deliberate: Phase 8 is an
+ * enormous amount of *content* and almost no new state, because the quest
+ * position, the flags and the reel all live inside the `story` block that has
+ * been in the format since v2.
+ */
+export interface SaveDataV4 extends Omit<SaveDataV3, 'version'> {
+  version: 4;
+}
+
+/** The shape before the authored story. */
 export interface SaveDataV3 {
   version: 3;
   contentVersion: number;
@@ -249,8 +286,8 @@ export interface SaveDataV1 {
   collectibles: string[];
 }
 
-export type AnySaveData = SaveDataV1 | SaveDataV2 | SaveDataV3;
-export type SaveData = SaveDataV3;
+export type AnySaveData = SaveDataV1 | SaveDataV2 | SaveDataV3 | SaveDataV4;
+export type SaveData = SaveDataV4;
 
 export type SaveSlotId = 'slot1' | 'slot2' | 'slot3' | 'autosave';
 export const SAVE_SLOTS: readonly SaveSlotId[] = ['slot1', 'slot2', 'slot3', 'autosave'];
@@ -357,6 +394,7 @@ export function migrateSave(raw: unknown): MigrationResult {
 
   if (version === 1) data = v1ToV2(data as SaveDataV1);
   if (version <= 2) data = v2ToV3(data as SaveDataV2);
+  if (version <= 3) data = v3ToV4(data as SaveDataV3);
 
   const check = validateSave(data);
   if (!check.ok) return { ok: false, from, error: check.errors.join('; ') };
@@ -425,6 +463,19 @@ function v2ToV3(old: SaveDataV2): SaveDataV3 {
   };
 }
 
+/**
+ * v3 -> v4: the authored story.
+ *
+ * `progress` is left **absent** rather than filled with an empty run. Absent
+ * and empty mean the same thing to `StoryState.restore`, and absent is the
+ * honest record: a v3 save did not have a story, so it does not get one
+ * invented. The player picks the story up from chapter 1 with whatever money,
+ * vehicles and friendships they had already earned in Free Roam.
+ */
+function v3ToV4(old: SaveDataV3): SaveDataV4 {
+  return { ...old, version: 4 };
+}
+
 /** A fresh save for a new run. `savedAt` is injected so this stays pure. */
 export function newSave(opts: {
   mode: GameMode;
@@ -436,7 +487,7 @@ export function newSave(opts: {
   unlockedZones?: ZoneId[];
 }): SaveData {
   return {
-    version: 3,
+    version: 4,
     contentVersion: CONTENT_VERSION,
     savedAt: opts.savedAt,
     mode: opts.mode,

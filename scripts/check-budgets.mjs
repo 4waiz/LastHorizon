@@ -18,11 +18,18 @@ const KB = 1024;
 const BUNDLE_BUDGETS = [
   { prefix: 'three-', ext: '.js', maxKB: 700, label: 'three chunk' },
   // Raised 260 -> 300 in Phase 4, 300 -> 330 in Phase 6, 330 -> 360 in
-  // Phase 7; see "Bundle budget" in docs/PERFORMANCE_BUDGETS.md for what was
-  // added and why. Phase 7's 28 kB is the *eager* half of the economy and
-  // interiors work -- cash is on the HUD from the first frame and in every
-  // save, so it cannot wait for a doorway. The other 27 kB went lazy.
-  { prefix: 'index-', ext: '.js', maxKB: 360, label: 'app chunk' },
+  // Phase 7, 360 -> 375 in Phase 8; see "Bundle budget" in
+  // docs/PERFORMANCE_BUDGETS.md for what was added and why. Phase 7's 28 kB is
+  // the *eager* half of the economy and interiors work -- cash is on the HUD
+  // from the first frame and in every save, so it cannot wait for a doorway.
+  // The other 27 kB went lazy.
+  //
+  // Phase 8 adds 11.6 kB eager against 108 kB lazy: `StoryState` (the save
+  // layer reads and writes story progress whether or not a quest has loaded)
+  // and the wiring in `Game` that reports world events into it. Two things
+  // were moved out rather than absorbed -- the whole story catalogue, and the
+  // three Story-Mode panels, which were in `HUD` until this budget said no.
+  { prefix: 'index-', ext: '.js', maxKB: 375, label: 'app chunk' },
   { prefix: 'gsap-', ext: '.js', maxKB: 90, label: 'gsap chunk' },
   { prefix: 'bvh-', ext: '.js', maxKB: 75, label: 'bvh chunk' },
   { prefix: 'index-', ext: '.css', maxKB: 24, label: 'stylesheet' },
@@ -69,11 +76,23 @@ const LAZY_CHUNK_PREFIXES = [
   // whole service layer, reachable only by opening a door -- a transition that
   // already awaits the 145 kB kit, so the code rides along in the same gap.
   'InteriorSubsystem-',
+  // Phase 8. The 35 quests, 15 dialogue trees, 9 cutscenes, 13 endings, the
+  // string table and the Life Reel renderer. Reached only when Story Mode
+  // starts, behind the mode selector's own loading screen; a Free Roam player
+  // never fetches it. What the save layer needs -- flags, choices, reputation,
+  // quest positions -- is in `StoryState`, which is eager and stays in the app
+  // chunk for exactly that reason.
+  'StorySubsystem-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));
 
-const TOTAL_JS_MAX_KB = 1100;
+/**
+ * Startup chunks only — lazy ones are excluded, for the reason `initial load`
+ * exists at all. Raised 1,100 -> 1,120 in Phase 8, which is the app chunk's
+ * own 15 kB of headroom expressed at the total.
+ */
+const TOTAL_JS_MAX_KB = 1120;
 
 const ASSET_BUDGETS = [
   // Raised 1200 -> 1360 in Phase 7 for `interior_kit.glb` (138.6 kB). The
@@ -112,8 +131,15 @@ const INITIAL_LOAD_MAX_KB = 4200;
  * the plain package's separate `.wasm` would save ~390 kB but is a dependency
  * change that belongs on its own, with the gate between. The number that
  * governs how long a player waits — `initial load` — did not move.
+ *
+ * Raised 7,400 -> 7,600 in Phase 8 for the story chunk (108 kB): 35 quests, 15
+ * dialogue trees, 9 cutscenes, 13 endings, a ~460-entry string table and the
+ * Life Reel renderer. That is *content*, not machinery — most of it is the
+ * words — and it is the one thing this phase was for. `initial load` again did
+ * not move by anything like as much: 4,168.7 kB to 4,186 kB, still 14 kB inside
+ * its own limit, because a Free Roam player never fetches any of it.
  */
-const SHIPPED_TOTAL_MAX_KB = 7400;
+const SHIPPED_TOTAL_MAX_KB = 7600;
 
 /** Dev-only surfaces that must never reach production output. */
 const FORBIDDEN_IN_DIST = ['__shot', '__cap.js', 'lh-shot-sink'];
