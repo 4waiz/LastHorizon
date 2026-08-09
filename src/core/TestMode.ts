@@ -76,6 +76,65 @@ export interface TestSurface {
   completeChapter(id: string): void;
   saveNow(slot: string): Promise<boolean>;
   loadNow(slot: string): Promise<boolean>;
+
+  // ---- population ---------------------------------------------------------
+  /** Resolves once the population chunk and its navmesh have finished. */
+  awaitPopulation(): Promise<PopulationSnapshot>;
+  populationState(): PopulationSnapshot | null;
+  /** Every named resident in the active zone, with where and what they are. */
+  npcList(): readonly NpcSnapshot[];
+  npcState(id: string): NpcSnapshot | null;
+  /** Send a resident somewhere, bypassing their schedule. Test mode only. */
+  npcSendTo(id: string, x: number, z: number): boolean;
+  /** Force the schedule to be re-read at a given hour, without waiting. */
+  npcApplyHour(hour: number): void;
+  relationship(id: string): Record<string, number> | null;
+  /** Raise a perception event from a position, as if the player caused it. */
+  emitPerception(kind: string, x: number, y: number, z: number): void;
+  trafficList(): readonly TrafficSnapshot[];
+  populationActive(on: boolean): void;
+}
+
+/** Population counters, for assertions and for the profiler runs. */
+export interface PopulationSnapshot {
+  named: number;
+  ambient: number;
+  near: number;
+  mid: number;
+  far: number;
+  bodies: number;
+  navState: string;
+  navBuildMs: number;
+  navAgents: number;
+  offMeshLinks: number;
+  traffic: number;
+  trafficParked: number;
+  trafficBarges: number;
+  witnessed: number;
+  stuckRecoveries: number;
+  farTickMs: number;
+}
+
+export interface NpcSnapshot {
+  id: string;
+  name: string;
+  age: number;
+  band: string;
+  activity: string;
+  indoors: boolean;
+  reaction: string | null;
+  x: number;
+  y: number;
+  z: number;
+  speed: number;
+  targetX: number | null;
+  targetZ: number | null;
+}
+
+export interface TrafficSnapshot {
+  x: number;
+  z: number;
+  radius: number;
 }
 
 /** A read-only view of what the interaction system is offering. */
@@ -327,6 +386,36 @@ export interface LHTestBridge {
   getZoneDebug(): ZoneDebugSnapshot;
   /** Advance the simulation by a fixed number of 1/60 s steps. */
   settle(frames?: number): void;
+
+  // ---- population ---------------------------------------------------------
+  /**
+   * Wait for the population chunk and its navmesh.
+   *
+   * The population is deliberately late — it carries Recast's WebAssembly and
+   * loads after the world is standing — so a test that asserts on residents has
+   * to say so rather than assume `ready()` covered it.
+   */
+  awaitPopulation(timeoutMs?: number): Promise<PopulationSnapshot>;
+  getPopulation(): PopulationSnapshot | null;
+  getNpcs(): readonly NpcSnapshot[];
+  getNpc(id: string): NpcSnapshot | null;
+  /** Override a resident's destination, bypassing their schedule. */
+  sendNpc(id: string, x: number, z: number): boolean;
+  /** Re-read every schedule at `hour`, without waiting for the world clock. */
+  setNpcHour(hour: number): void;
+  getRelationship(id: string): Record<string, number> | null;
+  /** Ground height at a point, so a test can assert nobody is floating. */
+  getGround(x: number, z: number): number;
+  /**
+   * Hold the population still and hide it.
+   *
+   * For measurements about something else — a draw-call assertion on the
+   * player's rig cannot be made against a village of moving pedestrians.
+   */
+  setPopulationActive(on: boolean): void;
+  /** Raise a perception event at a point, attributed to the player. */
+  emitPerception(kind: string, x: number, y: number, z: number): void;
+  getTraffic(): readonly TrafficSnapshot[];
   /**
    * Put the page into a reproducible state for a screenshot: hide the dev
    * readout, stop the wind and the clock, then settle. Idempotent.
@@ -591,6 +680,60 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     settle(frames = 40): void {
       for (let i = 0; i < frames; i++) surface.step(FIXED_DT);
+    },
+
+    async awaitPopulation(timeoutMs = 30000): Promise<PopulationSnapshot> {
+      const settled = await surface.awaitPopulation();
+      // Navigation resolves after the population exists. Poll rather than
+      // expose another promise: 'failed' is a legitimate terminal state and a
+      // test should be able to assert on it.
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const now = surface.populationState();
+        if (now && (now.navState === 'ready' || now.navState === 'failed')) return now;
+        await new Promise((r) => window.setTimeout(r, 50));
+      }
+      return settled;
+    },
+
+    getPopulation(): PopulationSnapshot | null {
+      return surface.populationState();
+    },
+
+    getNpcs(): readonly NpcSnapshot[] {
+      return surface.npcList();
+    },
+
+    getNpc(id: string): NpcSnapshot | null {
+      return surface.npcState(id);
+    },
+
+    sendNpc(id: string, x: number, z: number): boolean {
+      return surface.npcSendTo(id, x, z);
+    },
+
+    setNpcHour(hour: number): void {
+      surface.npcApplyHour(hour);
+    },
+
+    getRelationship(id: string): Record<string, number> | null {
+      return surface.relationship(id);
+    },
+
+    getGround(x: number, z: number): number {
+      return surface.groundAt(x, z);
+    },
+
+    setPopulationActive(on: boolean): void {
+      surface.populationActive(on);
+    },
+
+    emitPerception(kind: string, x: number, y: number, z: number): void {
+      surface.emitPerception(kind, x, y, z);
+    },
+
+    getTraffic(): readonly TrafficSnapshot[] {
+      return surface.trafficList();
     },
 
     prepareShot(frames = 40): void {

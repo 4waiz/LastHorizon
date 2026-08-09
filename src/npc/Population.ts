@@ -116,6 +116,7 @@ export class Population {
   private midAnimAccum = 0;
   private lastFarTickMs = 0;
   private disposed = false;
+  private active = true;
 
   /** Barks raised this frame, drained by the HUD. */
   readonly pendingBarks: Array<{ npcId: string; name: string; line: string }> = [];
@@ -159,7 +160,9 @@ export class Population {
   async buildNavigation(): Promise<void> {
     const geometry = this.d.collision.collider?.geometry;
     if (!geometry) return;
-    const input = navInputFromGeometry(geometry, this.d.zone.bounds);
+    const input = navInputFromGeometry(geometry, this.d.zone.bounds, {
+      groundAt: (x, z) => this.d.heightAt(x, z),
+    });
     if (input.indices.length === 0) return;
     await this.nav.build(input, this.links, this.budget.maxNear + this.budget.maxAmbient + 4);
     if (this.disposed) {
@@ -225,13 +228,33 @@ export class Population {
 
   // ----------------------------------------------------------------- update
 
+  /**
+   * Stop the population moving and take it out of the frame.
+   *
+   * For measurements about something else. A test asserting that ageing the
+   * player adds no draw calls cannot do so against a village of moving
+   * pedestrians, and the honest answer is to hold them still rather than to
+   * loosen the assertion until it passes.
+   */
+  setActive(on: boolean): void {
+    if (this.active === on) return;
+    this.active = on;
+    for (const agent of this.named) agent.setVisible(on);
+    for (const slot of this.ambient) slot.agent.setVisible(on);
+    this.traffic?.setVisible(on);
+  }
+
+  get isActive(): boolean {
+    return this.active;
+  }
+
   update(
     dt: number,
     worldTime: number,
     player: { position: THREE.Vector3; facing: number },
     playerObstacles: readonly TrafficObstacle[] = [],
   ): void {
-    if (this.disposed) return;
+    if (this.disposed || !this.active) return;
     const hour = hourOfDay(worldTime);
 
     this.farTimer += dt;
@@ -587,6 +610,15 @@ export class Population {
 
   namedById(id: string): NpcAgent | null {
     return this.named.find((a) => a.id === id) ?? null;
+  }
+
+  /** Named residents in catalogue order. Read-only to callers. */
+  namedList(): readonly NpcAgent[] {
+    return this.named;
+  }
+
+  trafficPositions(): readonly TrafficObstacle[] {
+    return this.traffic?.positions() ?? [];
   }
 
   get stats(): PopulationStats {

@@ -104,8 +104,20 @@ test.describe('ageing', () => {
     const errors = watchConsole(page);
     await boot(page);
 
+    // The population arrives after `ready()` — it is behind its own import.
+    // Deactivating before it lands would be a no-op, and it would then walk
+    // into shot between the two readings.
+    await page.evaluate(() => window.__LH_TEST__!.awaitPopulation());
+
     const seen = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
+      // Hold the population still. From Phase 6 there are pedestrians and
+      // traffic in shot, each one a draw call that comes and goes as they
+      // walk; measuring the player's rig against that is measuring the
+      // village. Holding them is honest — the assertion is about whether an
+      // age stage adds a mesh, and a stationary crowd answers that as well as
+      // an empty one.
+      t.setPopulationActive(false);
       t.teleport(5.4, -39.3, Math.PI);
       // Pin the time on both readings. Birthdays take real seconds, and the
       // sun keeps moving through them -- left free, the day/night cycle alone

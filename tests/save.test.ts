@@ -211,6 +211,66 @@ describe('migration', () => {
   });
 });
 
+describe('population state', () => {
+  it('round-trips relationships and resident ages', async () => {
+    const { svc } = service();
+    const data = story({
+      relationships: [
+        { npcId: 'v_maryam', familiarity: 0.55, trust: 0.4, affection: 0.3, fear: 0, respect: 0.35 },
+      ],
+      npcs: [
+        { id: 'v_maryam', age: 46 },
+        { id: 'v_noor', age: 18 },
+      ],
+    });
+
+    await svc.save('slot1', data);
+    const read = await svc.load('slot1');
+
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.data.relationships[0].trust).toBe(0.4);
+    expect(read.data.npcs).toEqual([
+      { id: 'v_maryam', age: 46 },
+      { id: 'v_noor', age: 18 },
+    ]);
+  });
+
+  it('loads a v2 save written before anybody lived here', async () => {
+    // `npcs` is optional for the same reason `VehicleData`'s Phase 5 fields
+    // are: a save from before the system existed must still load, and every
+    // resident starting at their catalogue age is exactly what it should mean.
+    const { driver, svc } = service();
+    const before = story();
+    delete (before as { npcs?: unknown }).npcs;
+    driver.poke('save:slot1', JSON.stringify(before));
+
+    const read = await svc.load('slot1');
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.data.npcs).toBeUndefined();
+  });
+
+  it('gives a migrated v1 save no residents rather than a broken list', () => {
+    const old: SaveDataV1 = {
+      version: 1,
+      savedAt: 1,
+      mode: 'story',
+      slot: 'slot1',
+      zone: 'village_coast',
+      spawnId: 'village_start',
+      player: { position: { x: 0, y: 0, z: 0 }, facing: 0 },
+      life: { ageYears: 15, yearProgress: 0, lastHandledAge: 15, rate: 60, activeSeconds: 0 },
+      world: { time: 0.5, mode: 'cycle', day: 1 },
+      money: 0,
+      collectibles: [],
+    };
+    const r = migrateSave(old);
+    expect(r.ok).toBe(true);
+    expect(r.data?.npcs ?? []).toEqual([]);
+  });
+});
+
 describe('story and free roam cannot be mixed', () => {
   it('refuses to load a free roam save into a story session', async () => {
     const { svc } = service();

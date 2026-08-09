@@ -53,6 +53,8 @@ export interface AgentStats {
   readonly stuckRecoveries: number;
   readonly repaths: number;
   readonly teleports: number;
+  /** Destinations given up on because the navmesh does not reach them. */
+  readonly abandoned: number;
 }
 
 export class NpcAgent {
@@ -87,6 +89,7 @@ export class NpcAgent {
   private recoveries = 0;
   private repathCount = 0;
   private teleportCount = 0;
+  private abandoned = 0;
 
   private readonly previous = new THREE.Vector3();
   private readonly scratch = new THREE.Vector3();
@@ -107,6 +110,7 @@ export class NpcAgent {
       stuckRecoveries: this.recoveries,
       repaths: this.repathCount,
       teleports: this.teleportCount,
+      abandoned: this.abandoned,
     };
   }
 
@@ -373,7 +377,20 @@ export class NpcAgent {
     this.stuckRetries = 0;
     const goal = this.destination;
     if (!goal) return;
-    const snapped = this.deps.nav.sample(goal) ?? { x: goal.x, y: goal.y, z: goal.z };
+
+    // Widen the search before giving up: a destination on a doorstep can be
+    // half a metre off the eroded navmesh and still perfectly reachable.
+    const snapped = this.deps.nav.sample(goal, 3) ?? this.deps.nav.sample(goal, 12);
+    if (!snapped) {
+      // Nowhere on the navmesh near it. Placing the agent at the raw goal is
+      // what the first version did, and it puts people inside walls — the exact
+      // thing the acceptance criteria forbid. Abandon the destination instead
+      // and let the schedule or the wander pick the next one.
+      this.abandoned++;
+      this.clearDestination();
+      return;
+    }
+
     this.placeAt(snapped.x, snapped.z);
     this.teleportCount++;
     this.repath();
@@ -444,6 +461,11 @@ export class NpcAgent {
     if ((kind === 'greet' || kind === 'watch') && away) {
       this.facing = Math.atan2(away.x - this.position.x, away.z - this.position.z);
     }
+  }
+
+  /** Show or hide this agent's body without releasing it. */
+  setVisible(on: boolean): void {
+    this.body?.setVisible(on);
   }
 
   /** Seconds spent standing at the destination, for wander decisions. */

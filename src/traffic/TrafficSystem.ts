@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { toonFromImported } from '../graphics/ToonMaterial';
 import {
+  LIGHT_PERIOD_SECONDS,
   lightIsGreen,
   nextIntersection,
   sampleLane,
@@ -60,6 +61,8 @@ interface Vehicle {
   model: THREE.Object3D;
   /** Seconds spent below the stall speed while wanting to move. */
   stalled: number;
+  /** Seconds spent stopped at a red light, which is not stalling. */
+  waitingAtLight: number;
   /** Seconds left of ignoring give-way rules, after a watchdog barge. */
   barging: number;
   parked: boolean;
@@ -106,6 +109,11 @@ export class TrafficSystem {
 
   get count(): number {
     return this.vehicles.length;
+  }
+
+  /** Hide every vehicle without removing it. See `Population.setActive`. */
+  setVisible(on: boolean): void {
+    this.group.visible = on;
   }
 
   setMaxVehicles(n: number): void {
@@ -175,9 +183,25 @@ export class TrafficSystem {
     v.speed = integrateSpeed(v.speed, target, dt);
     v.distance += v.speed * dt;
 
-    // Watchdog. Only counts against a vehicle that has somewhere to be:
-    // a parked car is not stalled, it is parked.
-    if (v.speed < STALL_SPEED) {
+    // Watchdog. Two things it must not count. A parked car is not stalled, it
+    // is parked — handled by the early return above. And a car at a red light
+    // is not stalled either: it is doing exactly the right thing, and the
+    // first version of this barged every one of them through the junction
+    // because a red phase outlasts the eight-second threshold.
+    const heldByLight = Number.isFinite(stop) && stop < 6;
+    if (v.speed < STALL_SPEED && heldByLight) {
+      v.waitingAtLight += dt;
+      // A light that never turns green is a bug somewhere else, but a car
+      // sitting at one forever is visible, so there is still a ceiling.
+      if (v.waitingAtLight > LIGHT_PERIOD_SECONDS * 4) {
+        this.stats.forcedRemovals++;
+        const index = this.vehicles.indexOf(v);
+        if (index >= 0) this.vehicles.splice(index, 1);
+        this.retire(v);
+        return;
+      }
+    } else if (v.speed < STALL_SPEED) {
+      v.waitingAtLight = 0;
       v.stalled += dt;
       const action = watchdog(v.stalled);
       if (action === 'barge' && v.barging <= 0) {
@@ -192,6 +216,7 @@ export class TrafficSystem {
       }
     } else {
       v.stalled = 0;
+      v.waitingAtLight = 0;
     }
 
     if (v.distance >= v.lane.length) this.advanceLane(v);
@@ -323,6 +348,7 @@ export class TrafficSystem {
       speed: lane.speedLimit * 0.8,
       model,
       stalled: 0,
+      waitingAtLight: 0,
       barging: 0,
       parked: false,
       kind,
@@ -351,6 +377,9 @@ export class TrafficSystem {
       if (!mesh.isMesh) return;
       mesh.castShadow = true;
       mesh.receiveShadow = false;
+      // Out of the camera's whole-scene occluder raycast. Traffic materials are
+      // not fadeable, so testing them is pure cost. See `NpcVisuals`.
+      mesh.raycast = () => undefined;
       const convert = (m: THREE.Material) => toonFromImported(m, 'traffic');
       mesh.material = Array.isArray(mesh.material)
         ? mesh.material.map(convert)

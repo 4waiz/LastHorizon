@@ -44,10 +44,10 @@ any release claim.
 
 | Metric | Baseline | Budget |
 | --- | --- | --- |
-| Draw calls, outdoor day | 285 | ≤ 340 |
-| Draw calls, outdoor night | 377 | ≤ 430 |
+| Draw calls, outdoor day | 285 | ≤ 410 |
+| Draw calls, outdoor night | 377 | ≤ 500 |
 | Draw calls, interior | 183 | ≤ 240 |
-| Triangles, outdoor | 482 k | ≤ 560 k |
+| Triangles, outdoor | 482 k | ≤ 700 k |
 | Triangles, interior | 780 k | ≤ 880 k |
 | Shader programs | 40 | ≤ 55 |
 | Geometries | 198 | ≤ 260 |
@@ -57,6 +57,52 @@ Program count is the one to watch: material sharing plus
 `customProgramCacheKey` is what keeps ~99 imported materials on ~23–40
 programs. A change that multiplies programs will not show up as a frame-rate
 cliff immediately, but it fragments batching.
+
+### The outdoor budgets, raised in Phase 6 for the population
+
+Measured at one fixed vantage on the village road, low preset, with and
+without the population:
+
+| | Draw calls | Triangles |
+| --- | --- | --- |
+| Unpopulated | 335 | 241 k |
+| 12 bodies + 3 cars | 351 | 300 k |
+| **Cost** | **+16** | **+59 k** |
+
+That is **one draw call and 4,890 triangles per person** — exactly the
+arithmetic the merged body was built for, and confirmation that it works: the
+player's rig is nine primitives, so the naive clone would have been nine calls
+each and would have bought about five pedestrians before the old 340 ceiling.
+
+At the `high` preset the population is capped at 26 bodies and 8 cars, which is
++58 calls and +127 k triangles. The budgets move to cover that with headroom:
+day 340 → 410, night 430 → 500, triangles 560 k → 700 k. Triangles are the
+comfortable one — the interior already runs at 780 k against an 880 k budget,
+so 700 k outdoors is well inside what the renderer demonstrably handles.
+
+Programs did not move: 39–41, the same as before. Twenty-odd appearance
+variants share one material definition and one shader.
+
+**The named follow-up** is a decimated mid-tier body. A pedestrian forty metres
+away does not need the player's 4,890 triangles; at ~1,200 it would give back
+roughly 96 k of the 127 k. It needs a Blender change to the shared rig, which
+is a change to an asset the player also uses, and it belongs on its own commit.
+
+### A pre-existing cost found while measuring this
+
+The camera's occluder fade raycasts the **entire scene** every frame with
+`firstHitOnly = false`. A `SkinnedMesh` with no BVH answers that by CPU-skinning
+every one of its triangles, and the player's rig is nine primitives of 4,890.
+Measured at 10.6 ms per call in a dev build — the largest single item in the
+frame, and it predates this phase.
+
+Phase 6 took the player, the NPC bodies and the traffic models out of that
+raycast (`mesh.raycast = () => undefined`). None of them can be occluders: the
+fade only touches materials created `fadeable`, and none of theirs are. What
+remains is the world itself, still walked in full every frame. The proper fix
+is for `CameraCollision` to hold a registry of fadeable meshes and raycast only
+those, which is a change to Phase 1 code and is recorded here rather than made
+in the middle of a population phase.
 
 ## Bundle budget
 
@@ -151,6 +197,20 @@ whether or not anyone ever loads a village: named-NPC state and the five
 relationship axes have to be readable by `SaveSchema` from the first frame.
 
 330 kB is again deliberately close. The same rule applies to Phase 7.
+
+### Shipped total, 6,600 kB to 7,400 kB, in Phase 6
+
+`recast-navigation` inlines its WebAssembly as base64 and bundles to 727 kB.
+That is the same trade already accepted for Rapier, and taken for the same
+reason: the `-compat` build needs no Vite WASM configuration, and the plain
+package's separate `.wasm` — worth roughly 390 kB — is a dependency change that
+belongs on its own commit with the full gate between, not folded into the phase
+that first needed it. Both are now on the list of worthwhile follow-ups.
+
+**Initial load did not move**: 4,119.8 kB before Phase 6, 4,133 kB after, out of
+4,200. Recast, `Navigation`, `Population` and the map panel are all lazy, so the
+13 kB of growth is the eager half — the relationship store, the LOD budgets and
+the population handle in `Game`.
 
 ## Asset budget
 

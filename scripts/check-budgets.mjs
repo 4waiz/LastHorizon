@@ -80,8 +80,17 @@ const ASSET_BUDGETS = [
  */
 const INITIAL_LOAD_MAX_KB = 4200;
 
-/** Everything shipped, lazy chunks included. */
-const SHIPPED_TOTAL_MAX_KB = 6600;
+/**
+ * Everything shipped, lazy chunks included.
+ *
+ * Raised 6,600 -> 7,400 in Phase 6 for `recast-navigation`, which inlines its
+ * WebAssembly as base64 and lands at 727 kB. The same trade as Rapier and for
+ * the same reason: the `-compat` build needs no Vite WASM configuration, and
+ * the plain package's separate `.wasm` would save ~390 kB but is a dependency
+ * change that belongs on its own, with the gate between. The number that
+ * governs how long a player waits — `initial load` — did not move.
+ */
+const SHIPPED_TOTAL_MAX_KB = 7400;
 
 /** Dev-only surfaces that must never reach production output. */
 const FORBIDDEN_IN_DIST = ['__shot', '__cap.js', 'lh-shot-sink'];

@@ -131,17 +131,42 @@ export const NAV_CONFIG = {
 const VERTICAL_MARGIN = 40;
 
 /**
+ * How far above the ground a surface may be and still be somewhere to walk.
+ *
+ * A flat roof is a walkable slope with unlimited headroom, so Recast is
+ * perfectly happy to put navmesh on top of every house — and it did. The first
+ * run of this phase had residents pathing onto rooftops, arriving five metres
+ * above the terrain, and a stuck-recovery snap finding the roof directly above
+ * a blocked destination and teleporting somebody up there.
+ *
+ * 2.2 m keeps porches, steps, kerbs and low walls, and loses roofs. A boulder
+ * shorter than this stays walkable, which is fine — you can stand on a rock.
+ */
+export const MAX_WALKABLE_ABOVE_GROUND = 2.2;
+
+export interface NavGeometryOptions {
+  /**
+   * Ground height at a point. When supplied, surfaces more than
+   * `MAX_WALKABLE_ABOVE_GROUND` above it are dropped.
+   */
+  readonly groundAt?: (x: number, z: number) => number;
+  readonly maxAboveGround?: number;
+}
+
+/**
  * Turn the zone's merged collision proxy into generator input.
  *
- * Two filters earn their place. Triangles outside the zone bounds are dropped,
- * which is what keeps the interior cell — parked at y = 600 in its own corner
+ * Three filters earn their place. Triangles outside the zone bounds are
+ * dropped, which keeps the interior cell — parked at y = 600 in its own corner
  * of world space — from adding a floating navmesh island 600 m above the
- * village. And degenerate triangles are dropped, because a zero-area triangle
- * rasterises to nothing and only costs time.
+ * village. Triangles too far above the ground are dropped, which is what keeps
+ * people off roofs. And degenerate triangles are dropped, because a zero-area
+ * triangle rasterises to nothing and only costs time.
  */
 export function navInputFromGeometry(
   geometry: THREE.BufferGeometry,
   bounds: Bounds2D,
+  options: NavGeometryOptions = {},
 ): NavBuildInput {
   const pos = geometry.getAttribute('position');
   const index = geometry.getIndex();
@@ -169,6 +194,26 @@ export function navInputFromGeometry(
     return x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
   };
 
+  const groundAt = options.groundAt;
+  const maxAbove = options.maxAboveGround ?? MAX_WALKABLE_ABOVE_GROUND;
+
+  /**
+   * Is every corner of this triangle too high to be a floor?
+   *
+   * All three, not the centroid: a ramp or a stair that climbs past the
+   * threshold at one end is still somewhere to walk for most of its length,
+   * and dropping it would cut the navmesh in half at the bottom of the slope.
+   */
+  const aboveGround = (a: number, b: number, c: number): boolean => {
+    if (!groundAt) return false;
+    for (const v of [a, b, c]) {
+      const x = pos.getX(v);
+      const z = pos.getZ(v);
+      if (pos.getY(v) - groundAt(x, z) <= maxAbove) return false;
+    }
+    return true;
+  };
+
   for (let t = 0; t < triCount; t++) {
     const a = index ? index.getX(t * 3) : t * 3;
     const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
@@ -178,6 +223,7 @@ export function navInputFromGeometry(
     // leave a ragged edge exactly where an agent is most likely to be walking.
     if (!inside(a) && !inside(b) && !inside(c)) continue;
     if (isDegenerate(pos, a, b, c)) continue;
+    if (aboveGround(a, b, c)) continue;
 
     const ia = vertexAt(a);
     const ib = vertexAt(b);

@@ -67,6 +67,18 @@ export class Player {
           mesh.castShadow = true;
           mesh.receiveShadow = true;
           mesh.frustumCulled = false; // skinned bounds lag behind the pose
+          // Out of the camera's occluder raycast.
+          //
+          // That pass walks the whole scene every frame with
+          // `firstHitOnly = false`, and a SkinnedMesh with no BVH answers by
+          // CPU-skinning each of its triangles — nine primitives of 4,890
+          // triangles here. Measured at 10.6 ms per call in a dev build, which
+          // was the single largest cost in the frame.
+          //
+          // Nothing is lost. The fade only touches materials created
+          // `fadeable`, and none of the player's are: the character is the
+          // *target* of the ray and can never be its own occluder.
+          mesh.raycast = () => undefined;
           const convert = (src: THREE.Material): THREE.Material => {
             const slot = OUTFIT_SLOTS[src.name];
             if (!slot) return toonFromImported(src, 'player');

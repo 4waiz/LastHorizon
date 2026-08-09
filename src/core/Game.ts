@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { createRendererBackend, type RendererBackend } from './RendererBackend';
 import { Settings, QualityLevel, TimeMode } from './Settings';
-import type { LifeSnapshot, TestSurface } from './TestMode';
+import type { LifeSnapshot, NpcSnapshot, PopulationSnapshot, TestSurface } from './TestMode';
+import type { PerceptionKind } from '../npc/Perception';
 import { DisposalRegistry } from './DisposalRegistry';
 import { ZoneManager } from '../world/zones/ZoneManager';
 import { buildCityChunk, buildCitySkyline } from '../world/zones/CityBuilder';
@@ -18,6 +19,13 @@ import type { VehicleId } from '../vehicles/VehicleDefinition';
 import type { VehicleInput } from '../vehicles/VehicleDynamics';
 import type { SeatSpec } from '../vehicles/VehicleDefinition';
 import { VehicleRegistry } from '../vehicles/VehicleRegistry';
+// Type-only, so the population system and the ~900 kB of Recast WebAssembly
+// behind it stay out of the app chunk. The implementation arrives through the
+// dynamic import in `ensurePopulation`, once the world is already standing.
+import type { Population } from '../npc/Population';
+import { POPULATION_BUDGETS, type PopulationBudget } from '../npc/NpcLod';
+import { RelationshipStore } from '../npc/Relationships';
+import { availableChoices, pickBark, SMALL_TALK } from '../npc/Dialogue';
 import { LifeClock } from './clocks/LifeClock';
 import { WorldClock } from './clocks/WorldClock';
 import { StoryClock } from './clocks/StoryClock';
@@ -71,6 +79,26 @@ import { featureFlags } from './FeatureFlags';
 
 const MAX_FRAME_DT = 1 / 15;
 const DEBUG = import.meta.env.DEV;
+
+/** What the test bridge reports when the population never arrived. */
+const EMPTY_POPULATION: PopulationSnapshot = {
+  named: 0,
+  ambient: 0,
+  near: 0,
+  mid: 0,
+  far: 0,
+  bodies: 0,
+  navState: 'idle',
+  navBuildMs: 0,
+  navAgents: 0,
+  offMeshLinks: 0,
+  traffic: 0,
+  trafficParked: 0,
+  trafficBarges: 0,
+  witnessed: 0,
+  stuckRecoveries: 0,
+  farTickMs: 0,
+};
 
 export class Game {
   private readonly scene = new THREE.Scene();
@@ -159,6 +187,14 @@ export class Game {
   private readonly vehicleProxies = new Map<string, THREE.Object3D>();
   /** Base meshes, LODs and collision proxies from vehicles.glb, by node name. */
   private vehicleModels = new Map<string, THREE.Object3D>();
+  /**
+   * The character GLB, kept so NPC bodies can be cloned from it.
+   *
+   * One rig for the whole population — the brief's "do not create one GLB per
+   * NPC", and the reason twenty residents cost one download.
+   */
+  private playerRig: THREE.Object3D | null = null;
+  private playerClips: readonly THREE.AnimationClip[] = [];
   private nextVehicleSerial = 1;
   /** Vehicles the player has locked. */
   private readonly lockedVehicles = new Set<string>();
@@ -209,6 +245,28 @@ export class Game {
   } | null = null;
   private readonly camTarget = new THREE.Vector3();
   private readonly seatPos = new THREE.Vector3();
+
+  /**
+   * The zone's population, once it has arrived.
+   *
+   * Null before the dynamic import resolves and null again between zones. The
+   * game is fully playable in that state — the village stands, the player
+   * walks, vehicles drive — which is exactly why the population is allowed to
+   * be late. It carries Recast's WebAssembly with it, and the initial-load
+   * budget has no room for that.
+   */
+  private population: Population | null = null;
+  private populationLoading: Promise<void> | null = null;
+  /**
+   * Relationships live here rather than in `Population` because they outlive
+   * it: the player's history with a village resident has to survive travelling
+   * to the city and back, and the population is torn down on every zone change.
+   */
+  private readonly relationships = new RelationshipStore();
+  /** Named-resident ages, held across zone changes for the same reason. */
+  private npcAges: Array<{ id: string; age: number }> = [];
+  /** Seconds since the player last announced themselves to anybody nearby. */
+  private greetTimer = 0;
 
   private readonly saves = new SaveService(createSaveDriver());
   private mode: GameMode = 'story';
@@ -346,6 +404,19 @@ export class Game {
     await frame();
 
     this.vehicleModels = assets.vehicles;
+    // Record which palette slot each primitive came from *before* `Player`
+    // swaps the imported materials for toon ones. NPC bodies are cloned from
+    // this same rig and need the mapping to bake their colours; the material
+    // names do not survive the conversion, and `userData` does survive a
+    // SkeletonUtils clone.
+    assets.player.scene?.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const m = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      if (m?.name) mesh.userData.paletteSlot = m.name;
+    });
+    this.playerRig = assets.player.scene;
+    this.playerClips = assets.player.clips;
     this.player = new Player(assets.player.scene, assets.player.clips, this.input);
     this.scene.add(this.player.root);
     this.player.setSpawn(this.runtime.spawn, this.runtime.spawnFacing);
@@ -471,6 +542,11 @@ export class Game {
     if (this.life.pendingBirthday !== null) {
       await this.handleBirthday(this.life.pendingBirthday);
     }
+
+    // The village is standing and walkable at this point. Residents, traffic
+    // and the navmesh arrive behind it, on their own chunk, so the loading
+    // screen ends when the world does rather than when Recast has finished.
+    void this.ensurePopulation();
 
     loading.setProgress(1, 'the afternoon');
     loading.ready();
@@ -652,7 +728,10 @@ export class Game {
       wardrobe: this.equipment.toJSON(),
       vehicles: this.garage.toJSON() as SaveData['vehicles'],
       needs: this.needs.toJSON(),
-      relationships: [],
+      relationships: this.relationships.toJSON(),
+      // Live ages when a population is loaded, the lifted copy when it is not —
+      // between zones, or before the chunk has landed.
+      npcs: this.population?.ageSnapshot() ?? this.npcAges,
       collectibles: this.village?.collectibles.foundIds ?? [],
       unlockedZones: [...this.unlockedZones],
     };
@@ -685,6 +764,12 @@ export class Game {
     for (const z of data.unlockedZones) this.unlockedZones.add(z);
 
     this.freeRoamMoney = data.money;
+    // Relationships and ages before the population is asked for anything: a
+    // resident seeded from the catalogue would otherwise overwrite the history
+    // the player actually has with them.
+    this.relationships.fromJSON(data.relationships);
+    this.npcAges = data.npcs ?? [];
+    this.population?.restoreAges(this.npcAges);
     this.village?.collectibles.restoreFound(data.collectibles);
     if (this.village) {
       this.hud.setCounter(this.village.collectibles.count, this.village.collectibles.total);
@@ -753,8 +838,15 @@ export class Game {
   private async deliverBirthday(age: number): Promise<void> {
     this.hud.showToast('Another year', `You are ${age} today.`);
 
-    // Appearance stage, NPC milestones and age-gated story checks attach
-    // here as those systems land.
+    // A year passes for the named residents too. Ambient pedestrians are
+    // deliberately left alone: they are pooled strangers with no identity to
+    // age, and remodelling forty bodies for a birthday nobody would notice is
+    // precisely the cost the two-tier population exists to avoid.
+    this.population?.advanceYear();
+    this.npcAges = this.population?.ageSnapshot() ?? this.npcAges.map((n) => ({ ...n, age: n.age + 1 }));
+
+    // Appearance stage and age-gated story checks attach here as those
+    // systems land.
     await wait(60);
 
     // Acknowledge *before* saving. Saving first records the pre-birthday
@@ -779,6 +871,7 @@ export class Game {
     this.renderer.applyQuality(preset);
     this.env.applyQuality(preset);
     this.runtime.applyQuality(preset);
+    this.population?.setBudget(this.populationBudget());
     this.post.setEnabled(this.settings.current.quality === 'high');
     this.portal.setQuality(preset.antialias ? 0.5 : 0.34);
     this.applyViewport();
@@ -859,11 +952,20 @@ export class Game {
 
     this.transitioning = true;
     this.input.releaseAll();
+    // Before the zone is released, not after: the population owns crowd agents
+    // and a navmesh inside WASM memory, which the JavaScript collector cannot
+    // reach, and it holds Three objects parented to the group the zone scope is
+    // about to tear down.
+    this.disposePopulation();
     try {
       const result = await this.zones.travel.travel({ to, context: { fromZone: from } });
 
       if (!result.ok) {
         this.hud.showToast('Not that way', result.message);
+        // Nothing moved, so put the population back. Without this a refused
+        // journey empties the zone the player is standing in and never
+        // refills it.
+        void this.ensurePopulation();
         return false;
       }
 
@@ -898,6 +1000,10 @@ export class Game {
       // Stream the first rings before handing control back, so the player does
       // not spawn into an empty district.
       await this.zones.update(spawn.x, spawn.z);
+      // Populate the new zone. Not awaited: arriving should not wait on a
+      // navmesh bake, and residents walking in a beat later is invisible next
+      // to the fade that just finished.
+      void this.ensurePopulation();
       this.stepQuiet();
       return true;
     } finally {
@@ -1054,7 +1160,66 @@ export class Game {
         this.applySave(read.data);
         return true;
       },
+
+      awaitPopulation: async () => {
+        // Already here is the common case and must not trigger a rebuild:
+        // `disposePopulation` clears the in-flight promise, so falling through
+        // to `ensurePopulation` would tear down a live population to make an
+        // identical one.
+        if (!this.population) await (this.populationLoading ?? this.ensurePopulation());
+        return this.population?.stats ?? EMPTY_POPULATION;
+      },
+      populationState: () => this.population?.stats ?? null,
+      npcList: () => this.npcSnapshots(),
+      npcState: (id) => this.npcSnapshots().find((n) => n.id === id) ?? null,
+      npcSendTo: (id, x, z) => {
+        const agent = this.population?.namedById(id);
+        if (!agent) return false;
+        // A quest override rather than a bare destination, so the next
+        // schedule tick does not immediately send them home again — which is
+        // exactly what a quest needs too.
+        agent.questOverride = { kind: 'quest', place: { x, y: this.runtime.heightAt(x, z), z } };
+        agent.setDestination(x, z);
+        return true;
+      },
+      npcApplyHour: (hour) => {
+        // Pin the world clock as well as pushing the schedules. Without this
+        // the far tick re-reads the real time half a second later and undoes
+        // it, which is a footgun rather than an operation.
+        this.applyTimeMode('day');
+        this.env.jumpTo((((hour % 24) + 24) % 24) / 24);
+        this.worldClock.jumpTo(this.env.time);
+        for (const n of this.population?.namedList() ?? []) n.applySchedule(hour);
+      },
+      relationship: (id) => (this.relationships.has(id) ? this.relationships.get(id) : null),
+      emitPerception: (kind, x, y, z) => {
+        this.population?.emit(
+          kind as PerceptionKind,
+          new THREE.Vector3(x, y, z),
+          'player',
+        );
+      },
+      trafficList: () => this.population?.trafficPositions() ?? [],
+      populationActive: (on) => this.population?.setActive(on),
     };
+  }
+
+  private npcSnapshots(): NpcSnapshot[] {
+    return (this.population?.namedList() ?? []).map((a) => ({
+      id: a.id,
+      name: a.definition?.displayName ?? a.id,
+      age: a.age,
+      band: a.band,
+      activity: a.activity,
+      indoors: a.indoors,
+      reaction: a.reaction,
+      x: a.position.x,
+      y: a.position.y,
+      z: a.position.z,
+      speed: a.movingSpeed,
+      targetX: a.target?.x ?? null,
+      targetZ: a.target?.z ?? null,
+    }));
   }
 
   private update(dt: number): void {
@@ -1140,8 +1305,180 @@ export class Game {
     // 8. physics, on its own fixed step
     this.stepPhysics(dt);
 
-    // 9. audio
+    // 9. the population, after physics so traffic sees where the player's
+    //    vehicle actually ended up this step rather than where it started
+    this.updatePopulation(dt);
+
+    // 10. audio
     this.updateAudio(dt);
+  }
+
+  private updatePopulation(dt: number): void {
+    const population = this.population;
+    if (!population) return;
+
+    // The player's own vehicle is an obstacle to traffic, not a participant:
+    // it is a Rapier body with a driver, and the lane graph has no opinion
+    // about it beyond "do not drive into that".
+    const obstacles: Array<{ x: number; z: number; radius: number }> = [];
+    for (const proxy of this.vehicleProxies.values()) {
+      obstacles.push({ x: proxy.position.x, z: proxy.position.z, radius: 2.4 });
+    }
+    if (!this.riding && !this.indoors) {
+      obstacles.push({ x: this.player.position.x, z: this.player.position.z, radius: 0.8 });
+    }
+
+    population.update(
+      dt,
+      this.worldClock.time,
+      { position: this.player.position, facing: this.player.controller.facing },
+      obstacles,
+    );
+    this.announcePlayer(dt);
+  }
+
+  // ------------------------------------------------------------ population
+
+  private populationBudget(): PopulationBudget {
+    return POPULATION_BUDGETS[this.settings.current.quality];
+  }
+
+  /**
+   * Populate the active zone.
+   *
+   * Not awaited by `start`. The loading screen ends when the world is ready to
+   * walk around in; residents and traffic arrive a moment later, which is both
+   * honest about what the download costs and invisible in practice, because the
+   * player is still reading the "Begin" button.
+   *
+   * Called again on every zone change. The old population is disposed first —
+   * it owns crowd agents inside WASM memory, which the JavaScript collector
+   * cannot reach.
+   */
+  private ensurePopulation(): Promise<void> {
+    const zone = this.zones.activeZoneId;
+    if (!zone) return Promise.resolve();
+
+    const manifest = WORLD_MANIFEST.zones.find((z) => z.id === zone);
+    if (!manifest) return Promise.resolve();
+
+    // Defensive: every caller is supposed to have disposed first, and a second
+    // population would leak a navmesh and a crowd into WASM memory where
+    // nothing can collect them.
+    this.disposePopulation();
+
+    this.populationLoading = import('../npc/Population')
+      .then(({ Population: Ctor }) => {
+        // The zone may have changed again while the chunk was in flight.
+        if (this.zones.activeZoneId !== zone) return;
+
+        const group = this.village ? this.village.group : this.zoneGroup;
+        if (!group) return;
+
+        const population = new Ctor(
+          {
+            zone: manifest,
+            group,
+            collision: this.runtime.collision,
+            relationships: this.relationships,
+            rig: { scene: this.playerRig, clips: this.playerClips },
+            vehicleModels: this.vehicleModels,
+            heightAt: (x, z) => this.runtime.heightAt(x, z),
+            extraCentrelines: this.villageCentrelines(),
+          },
+          this.populationBudget(),
+          manifest.seed,
+        );
+        this.population = population;
+        population.restoreAges(this.npcAges);
+        // Residents are interactable from the moment they exist, not from when
+        // the navmesh lands.
+        this.registerNpcInteractables();
+        return population.buildNavigation();
+      })
+      .catch((err: unknown) => {
+        // A population that cannot load must not stop the game. The village
+        // simply stays empty, and the debug overlay says so.
+        console.warn('[LastHorizon] population unavailable', err);
+      });
+
+    return this.populationLoading;
+  }
+
+  private disposePopulation(): void {
+    if (!this.population) return;
+    // Ages are the one thing that cannot be recomputed, so they are lifted out
+    // before the population goes.
+    this.npcAges = this.population.ageSnapshot();
+    // The "talk to" offers hold a reference to an agent that is about to stop
+    // existing. Left registered, the prompt goes on appearing at the last
+    // place the resident stood.
+    for (const agent of this.population.namedList()) {
+      this.interactions.unregister(`npc:${agent.id}`);
+    }
+    this.population.dispose();
+    this.population = null;
+    this.populationLoading = null;
+  }
+
+  /**
+   * The village road, as traffic centrelines.
+   *
+   * A district describes its roads in the manifest as a handful of nodes; the
+   * village's road is a 260-point spline built by `RoadNetwork`, and there is
+   * no sensible way to write that down as manifest data. Thinning it to every
+   * eighth point gives a lane graph that follows the actual tarmac, curves and
+   * elevation included.
+   */
+  private villageCentrelines() {
+    const world = this.village;
+    if (!world) return undefined;
+    const toPoints = (pts: readonly THREE.Vector3[]) =>
+      pts.map((p) => ({ x: p.x, y: p.y, z: p.z }));
+    return [
+      { id: 'village_main', points: thin(toPoints(world.road.main.pts), 8), speedLimit: 12 },
+      { id: 'village_side', points: thin(toPoints(world.road.side.pts), 8), speedLimit: 10 },
+    ];
+  }
+
+  /**
+   * Let anyone nearby notice the player.
+   *
+   * A periodic low-loudness `greeting` rather than a per-frame proximity test:
+   * the perception layer already does distance, facing and occlusion properly,
+   * and emitting into it means a resident behind a wall does not turn round and
+   * wave at masonry.
+   */
+  private announcePlayer(dt: number): void {
+    const population = this.population;
+    if (!population || this.indoors) return;
+
+    this.greetTimer += dt;
+    if (this.greetTimer < 1.5) return;
+    this.greetTimer = 0;
+
+    if (this.riding) {
+      // Driving fast past people is a thing they notice, and it is the first
+      // event Phase 9's police system will care about.
+      const speed = Math.abs(this.ridingTelemetry()?.forwardSpeed ?? 0);
+      if (speed > 12) {
+        population.emit('dangerous_driving', this.player.position, 'player', {
+          severity: Math.min(1, speed / 24),
+        });
+      }
+      return;
+    }
+
+    population.emit('greeting', this.player.position, 'player');
+
+    for (const bark of population.pendingBarks.splice(0)) {
+      this.hud.showToast(bark.name, bark.line);
+    }
+  }
+
+  private ridingTelemetry() {
+    if (!this.riding) return null;
+    return this.vehicles.get(this.riding.id)?.telemetry ?? null;
   }
 
   /**
@@ -1456,6 +1793,75 @@ export class Game {
       this.interactions.register(it);
     }
     for (const id of this.vehicles.keys()) this.registerVehicleInteractable(id);
+    this.registerNpcInteractables();
+  }
+
+  /**
+   * Offer "talk to" beside each named resident.
+   *
+   * Same pattern as the vehicles: `position()` is read per frame, so a resident
+   * walking to work stays interactable without anything having to notice they
+   * moved. `isAvailable` closes the offer while they are indoors, which is what
+   * stops a prompt appearing on a doorstep with nobody behind it.
+   */
+  private registerNpcInteractables(): void {
+    for (const agent of this.population?.namedList() ?? []) {
+      const def = agent.definition;
+      if (!def) continue;
+      this.interactions.register({
+        id: `npc:${agent.id}`,
+        position: () => agent.position,
+        actions: [
+          {
+            id: `npc:${agent.id}:talk`,
+            label: `Talk to ${def.displayName.split(' ')[0]}`,
+            priority: 30,
+            maxDistance: 2.4,
+            facingTolerance: Math.PI * 0.6,
+            holdSeconds: 0,
+            isAvailable: () => !agent.indoors && this.riding === null,
+            execute: () => this.talkTo(agent.id),
+          },
+        ],
+      });
+    }
+  }
+
+  /**
+   * One exchange with a named resident.
+   *
+   * The dialogue *data* is fully exercised here — the tree is walked, choice
+   * conditions are evaluated against the live relationship and the player's
+   * age, and the chosen branch's relationship effects are applied. What is
+   * deliberately absent is the choice UI: a panel with portraits and history
+   * belongs to Phase 11, and inventing a throwaway one now would be a screen to
+   * delete rather than a screen to build on. Until then the first available
+   * choice is taken and the outcome is reported as a toast.
+   */
+  private talkTo(npcId: string): void {
+    const agent = this.population?.namedById(npcId);
+    const def = agent?.definition;
+    if (!agent || !def) return;
+
+    agent.react('greet', this.player.position);
+
+    const ctx = {
+      relationship: this.relationships.get(npcId),
+      playerAge: this.life.ageYears,
+    };
+    const root = SMALL_TALK.nodes[SMALL_TALK.root];
+    const choice = availableChoices(root, ctx)[0];
+    if (choice?.effects) this.relationships.adjust(npcId, choice.effects);
+    this.relationships.greet(npcId);
+
+    const next = choice?.to ? SMALL_TALK.nodes[choice.to] : null;
+    if (next?.effects) this.relationships.adjust(npcId, next.effects);
+
+    const line =
+      pickBark(def.barkSet, this.env.dayFactor > 0.25 ? 'greet' : 'night', Math.floor(this.env.time * 24)) ??
+      next?.text ??
+      '…';
+    this.hud.showToast(def.displayName, line);
   }
 
   /**
@@ -2067,16 +2473,27 @@ export class Game {
 
   private reportDebug(): void {
     const s = this.runtime.stats;
-    this.hud.setDebug(
-      [
-        `${this.fps.toFixed(0)} fps · ${this.renderer.info}`,
-        `veg ${s.vegetation} · grass ${s.grass} · collider ${(s.colliderTris / 1000).toFixed(0)}k`,
-        `state ${this.player.state} · ${this.player.speed.toFixed(2)} m/s · ${
-          this.player.motor.grounded ? 'ground' : 'air'
-        }`,
-        `time ${this.env.clockLabel} · day ${this.env.dayFactor.toFixed(2)}`,
-      ].join('\n'),
-    );
+    const lines = [
+      `${this.fps.toFixed(0)} fps · ${this.renderer.info}`,
+      `veg ${s.vegetation} · grass ${s.grass} · collider ${(s.colliderTris / 1000).toFixed(0)}k`,
+      `state ${this.player.state} · ${this.player.speed.toFixed(2)} m/s · ${
+        this.player.motor.grounded ? 'ground' : 'air'
+      }`,
+      `time ${this.env.clockLabel} · day ${this.env.dayFactor.toFixed(2)}`,
+    ];
+
+    const p = this.population?.stats;
+    if (p) {
+      lines.push(
+        `npc ${p.named}+${p.ambient} · near ${p.near} mid ${p.mid} far ${p.far} · bodies ${p.bodies}`,
+        `nav ${p.navState} ${p.navBuildMs}ms · agents ${p.navAgents} · links ${p.offMeshLinks} · far ${p.farTickMs}ms`,
+        `traffic ${p.traffic} (${p.trafficParked} parked, ${p.trafficBarges} barged) · seen ${p.witnessed} · unstuck ${p.stuckRecoveries}`,
+      );
+    } else {
+      lines.push('npc — population not loaded');
+    }
+
+    this.hud.setDebug(lines.join('\n'));
   }
 
   dispose(): void {
@@ -2087,6 +2504,10 @@ export class Game {
     this.input.dispose();
     this.audio.dispose();
     this.player?.dispose();
+    // Ahead of the zone teardown, for the same reason as in `travelTo`:
+    // crowd agents and the navmesh live in WASM memory and are not reachable
+    // by the garbage collector.
+    this.disposePopulation();
 
     // The active zone owns the world (and, through it, the CollisionWorld).
     // Awaiting is not an option in a synchronous dispose, so report a failure
@@ -2114,6 +2535,21 @@ export class Game {
  */
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/**
+ * Every nth point, always keeping the last.
+ *
+ * The village road is 260 spaced points. Every one of them earns its place in
+ * the tarmac mesh and none of them do in a lane graph, where a car
+ * interpolating between points 40 cm apart gains nothing and pays for a segment
+ * search each frame.
+ */
+function thin<T>(points: readonly T[], step: number): T[] {
+  const out = points.filter((_, i) => i % step === 0);
+  const last = points[points.length - 1];
+  if (last !== undefined && out[out.length - 1] !== last) out.push(last);
+  return out;
 }
 
 function frame(): Promise<void> {

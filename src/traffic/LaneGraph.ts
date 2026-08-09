@@ -291,24 +291,49 @@ export function nextIntersection(
   let best: { intersection: Intersection; ahead: number } | null = null;
 
   for (const x of intersections) {
-    // Where along this lane does the intersection sit? Nearest point wins.
-    let nearest = Infinity;
-    let at = 0;
-    for (let i = 0; i < lane.points.length; i++) {
-      const d = Math.hypot(lane.points[i].x - x.x, lane.points[i].z - x.z);
-      if (d < nearest) {
-        nearest = d;
-        at = lane.lengths[i];
-      }
-    }
-    if (nearest > x.radius) continue;
+    const at = projectOntoLane(lane, x);
+    if (at.distanceOff > x.radius) continue;
 
-    const ahead = at - distance;
+    const ahead = at.along - distance;
     if (ahead < -2 || ahead > lookahead) continue;
     if (!best || ahead < best.ahead) best = { intersection: x, ahead };
   }
 
   return best;
+}
+
+/**
+ * Nearest point on a lane to `p`, as a distance along it.
+ *
+ * Projects onto each **segment**, not onto the vertices. Checking vertices
+ * alone was the first version and it is wrong for exactly the case that
+ * matters: a district's main road is described by two points 200 m apart, so a
+ * junction halfway along is 100 m from the nearest vertex and every approaching
+ * car sails through it.
+ */
+export function projectOntoLane(lane: Lane, p: Point2): { along: number; distanceOff: number } {
+  let bestOff = Infinity;
+  let bestAlong = 0;
+
+  for (let i = 1; i < lane.points.length; i++) {
+    const a = lane.points[i - 1];
+    const b = lane.points[i];
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const lenSq = dx * dx + dz * dz;
+    if (lenSq < 1e-9) continue;
+
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.z - a.z) * dz) / lenSq));
+    const cx = a.x + dx * t;
+    const cz = a.z + dz * t;
+    const off = Math.hypot(p.x - cx, p.z - cz);
+    if (off < bestOff) {
+      bestOff = off;
+      bestAlong = lane.lengths[i - 1] + Math.sqrt(lenSq) * t;
+    }
+  }
+
+  return { along: bestAlong, distanceOff: bestOff };
 }
 
 /**
@@ -318,7 +343,16 @@ export function nextIntersection(
  * a test sees and the light a player sees, and a reloaded save finds the
  * junction exactly as it left it.
  */
-export const LIGHT_PERIOD_SECONDS = 24;
+/**
+ * Seconds each axis holds green.
+ *
+ * Shorter than the watchdog's 8 s barge threshold would be ideal and is not
+ * possible — a 6 s green is a junction nobody gets through. Instead the
+ * watchdog was taught to recognise a red light as a legitimate reason to be
+ * stopped; see `TrafficSystem.step`. This was found by measurement: the first
+ * version used 24 s and every car that stopped at a red was barged through it.
+ */
+export const LIGHT_PERIOD_SECONDS = 14;
 
 export function lightIsGreen(
   intersection: Intersection,

@@ -91,6 +91,45 @@ outdoor world, taking triangles from ~482 k to ~780 k.
 | Save system | `Settings` and `Collectibles` already own persistence; both need migrating behind a versioned service |
 | Disposal | `DisposeUtils` plus each subsystem's `dispose()` — ownership must become explicit per zone |
 
+## The population, added in Phase 6
+
+```
+Game
+ ├── RelationshipStore            eager, small, outlives every zone
+ └── Population            (lazy) ─── import('../npc/Population')
+      ├── NavService              the only thing that knows nav might be absent
+      │    └── Navigation  (lazy) ─── import('./Navigation') -> recast-navigation
+      ├── NpcAgent  x N           named and ambient, one class
+      ├── NpcVisuals              one merged body geometry, per-appearance colours
+      ├── PerceptionBus           one frame of events, resolved against observers
+      └── TrafficSystem
+           └── LaneGraph          centrelines -> two directed lanes each
+```
+
+Three boundaries are load-bearing.
+
+**`Population` is lazy, and the game is complete without it.** It carries
+Recast's ~900 kB of WebAssembly, and the initial-load budget had 77 kB of
+headroom. The village is built, walkable and drivable before the import
+resolves; residents arrive behind it. Nothing in `Game`'s frame path may assume
+`this.population` exists.
+
+**`NavService` is the degradation boundary.** It is eager and tiny; the recast
+half behind it is not. Everything above asks `ready` and takes the coarse path
+when the answer is no, so a browser that cannot compile the WebAssembly gets a
+village where people still keep to their schedules — just without avoidance or
+exact doorways.
+
+**`RelationshipStore` lives above `Population`, not inside it.** The population
+is destroyed and rebuilt on every zone change; the player's history with a
+village resident has to survive a trip to the city. Named-resident ages are
+lifted out for the same reason, in `disposePopulation`.
+
+Pedestrians use the navmesh and vehicles use the lane graph, and the two never
+meet except as obstacles. A car does not want a shortest path across a plaza,
+and expressing "stay in a lane" as a navmesh constraint is far more work than
+expressing a lane as a polyline.
+
 ## Known architectural debt
 
 - **No disposal ownership model.** Subsystems have `dispose()`, but nothing

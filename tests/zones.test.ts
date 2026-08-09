@@ -104,6 +104,52 @@ describe('world manifest validation', () => {
     expect(codes(validateZone(z))).toContain('dangling-lane');
   });
 
+  it('catches a crossing with both ends in the same place', () => {
+    // Detour accepts a zero-length off-mesh link and no agent can traverse it,
+    // so the failure is silent: everybody walks to the kerb and stops.
+    const z = streamedZone({
+      crossings: [{ id: 'c', ax: 10, az: 10, bx: 10.1, bz: 10 }],
+    });
+    expect(codes(validateZone(z))).toContain('degenerate-crossing');
+  });
+
+  it('catches a crossing that leaves the zone', () => {
+    const z = streamedZone({
+      crossings: [{ id: 'c', ax: 10, az: 10, bx: 9000, bz: 10 }],
+    });
+    expect(codes(validateZone(z))).toContain('crossing-out-of-bounds');
+  });
+
+  it('catches a duplicate crossing id', () => {
+    const z = streamedZone({
+      crossings: [
+        { id: 'c', ax: 0, az: 0, bx: 10, bz: 0 },
+        { id: 'c', ax: 0, az: 20, bx: 10, bz: 20 },
+      ],
+    });
+    expect(codes(validateZone(z))).toContain('duplicate-crossing');
+  });
+
+  it('catches an ambient area with no size or no weight', () => {
+    expect(
+      codes(validateZone(streamedZone({ ambientAreas: [{ id: 'a', x: 0, z: 0, radius: 0, weight: 1 }] }))),
+    ).toContain('bad-ambient-radius');
+    expect(
+      codes(validateZone(streamedZone({ ambientAreas: [{ id: 'a', x: 0, z: 0, radius: 5, weight: 0 }] }))),
+    ).toContain('bad-ambient-weight');
+  });
+
+  it('refuses a playable district with nowhere for pedestrians to appear', () => {
+    expect(codes(validateZone(streamedZone({ ambientAreas: [] })))).toContain('no-ambient-areas');
+  });
+
+  it('catches an ambient area outside the zone', () => {
+    const z = streamedZone({
+      ambientAreas: [{ id: 'a', x: 9000, z: 0, radius: 5, weight: 1 }],
+    });
+    expect(codes(validateZone(z))).toContain('ambient-area-out-of-bounds');
+  });
+
   it('catches a one-way neighbour edge', () => {
     const world: WorldManifest = {
       version: 1,

@@ -105,6 +105,20 @@ export interface RelationshipData {
   respect: number;
 }
 
+/**
+ * A named resident's own state.
+ *
+ * Only what cannot be recomputed. Position is not here: a resident's place in
+ * the world is a function of the clock and their schedule, so restoring one is
+ * a matter of asking the schedule where they should be, not of remembering
+ * where they were. Age is here because it is history — it advances with the
+ * player's birthdays and nothing else can reconstruct it.
+ */
+export interface NpcStateData {
+  id: string;
+  age: number;
+}
+
 /** The current save shape. */
 export interface SaveDataV2 {
   version: 2;
@@ -129,6 +143,13 @@ export interface SaveDataV2 {
   vehicles: VehicleData[];
   needs: NeedsData;
   relationships: RelationshipData[];
+  /**
+   * Added in Phase 6. Optional rather than required, the same way `VehicleData`
+   * grew in Phase 5: a v2 save written before anyone lived here still loads,
+   * and every resident starts at their catalogue age, which is exactly what a
+   * save from before they existed should mean.
+   */
+  npcs?: NpcStateData[];
   /** Ids of collected keepsakes. */
   collectibles: string[];
   /** Free Roam zone unlocks, or story-earned ones. */

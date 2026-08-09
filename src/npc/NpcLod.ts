@@ -90,10 +90,23 @@ export const POPULATION_BUDGETS: Record<'low' | 'medium' | 'high', PopulationBud
     farPerTick: 8,
     lod: DEFAULT_LOD,
   },
+  /**
+   * `high` is capped by draw calls, not by simulation cost.
+   *
+   * A body is one draw call and 4,890 triangles — the player's own mesh,
+   * merged. Twenty-six of them plus eight cars is +58 calls and +127 k
+   * triangles over an unpopulated village, measured. The earlier 24 ambient
+   * put the outdoor scene past 480 calls, which is more than the night peak
+   * the budget was written around.
+   *
+   * The real fix is a decimated mid-tier body: at ~1,200 triangles it would
+   * give back roughly 96 k of that, and it needs a Blender change to the
+   * shared rig. Recorded as a follow-up rather than rushed in here.
+   */
   high: {
-    maxNear: 28,
-    maxAmbient: 24,
-    maxTraffic: 10,
+    maxNear: 22,
+    maxAmbient: 18,
+    maxTraffic: 8,
     farPerTick: 12,
     lod: { near: 42, mid: 110, hysteresis: 10 },
   },

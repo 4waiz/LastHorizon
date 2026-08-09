@@ -13,10 +13,23 @@
 
 ## Current state
 
-**724 tests across 29 files**, all passing. Measured 2026-08-07, after Phase 5.
+**975 tests across 40 files**, all passing. Measured 2026-08-09, after Phase 6.
+The Phase 5 figure recorded here was 724 across 29; the ten files below marked
+*Phase 6* account for the difference, along with the map panel's 19.
 
 | File | Tests | Covers |
 | --- | --- | --- |
+| `laneGraph.test.ts` | 33 | *Phase 6.* Driver-right offsets, two lanes per centreline, junction detection and priority, lights derived from elapsed time, the manifest's lane skeleton walked into centrelines |
+| `npcAgent.test.ts` | 32 | *Phase 6.* Coarse movement along navmesh corners, arrival, stuck escalation, LOD attach/detach of crowd agents, schedule-driven indoors, quest override, reactions |
+| `navTypes.test.ts` | 27 | *Phase 6.* The voxels-not-metres config against the character motor, geometry filtered to zone bounds, off-mesh links, crossing preference |
+| `trafficRules.test.ts` | 27 | *Phase 6.* Car-following and stop-line braking, spawn refused in the player's view, the deadlock watchdog, seeded determinism |
+| `perception.test.ts` | 25 | *Phase 6.* Sight cone, occlusion, hearing through walls, reaction selection, the one-frame bus |
+| `dialogue.test.ts` | 19 | *Phase 6.* Deterministic barks, gated choices, and the validator that catches a conversation with no exit |
+| `npcSchedule.test.ts` | 18 | *Phase 6.* The midnight wrap, the whole day walked in a millisecond, schedules that never sleep rejected |
+| `npcRelationships.test.ts` | 15 | *Phase 6.* Five axes, clamping, diminishing greetings, save round-trip, rows for residents who no longer exist |
+| `npcLod.test.ts` | 14 | *Phase 6.* Band hysteresis against boundary thrash, named residents ranked above passers-by, preset budgets |
+| `npcCatalog.test.ts` | 13 | *Phase 6.* The shipped twenty: anchors inside their zones, schedules that resolve, and the child rule enforced rather than merely observed |
+| `mapPanel.test.ts` | 19 | Projection, panning, cursor-anchored zoom, scale bar, legend coverage |
 | `vehicleDefinition.test.ts` | 57 | The five vehicle classes as data; the check that `enginePower` and `zeroToTopSeconds` agree, which every vehicle once failed |
 | `vehicleDynamics.test.ts` | 51 | Steering rate and falloff, the arcade automatic, capped balance torque, symmetry in both directions |
 | `vehicleAccess.test.ts` | 38 | Exit placement as a search over candidates: moving, cliff, drop and blocked each refused distinctly |
@@ -27,8 +40,8 @@
 | `physicsWorld.test.ts` | 23 | Interpolation, the safety ceilings, and the rescue path, against a stub |
 | `clocks.test.ts` | 41 | Life, world and story clocks; gating sets, birthday carry-over, why none derives from another |
 | `inventory.test.ts` | 39 | Stacks, slot limits and exempt kinds, equipment/wardrobe migration, the four soft needs and their accessibility switches |
-| `zones.test.ts` | 37 | Manifests, streaming hysteresis, spawn resolution, disposal ownership |
-| `save.test.ts` | 36 | Versioning, v1 to v2 migration, read-back-and-compare writes, validation that refuses to strand a player |
+| `zones.test.ts` | 43 | Manifests, streaming hysteresis, spawn resolution, disposal ownership |
+| `save.test.ts` | 39 | Versioning, v1 to v2 migration, read-back-and-compare writes, validation that refuses to strand a player |
 | `interaction.test.ts` | 32 | Distance, facing and availability filtering; the press latch; hold completion; the selector |
 | `world.test.ts` | 26 | Terrain/road continuity, corridor flatness, and the character motor against a real BVH — grounding, jumping, wall blocking, high-speed tunnelling at 60 m/s |
 | `animationLayers.test.ts` | 25 | Layer weights and interrupted fades, additive conversion on a clone, procedural foot placement, the socket table against the rig |
@@ -45,7 +58,7 @@
 | `collectibles.test.ts` | 9 | Persistence, stale-id rejection, reset, missing storage |
 | `toonMaterial.test.ts` | 8 | Wind is opt-in — palette colour names must not trigger foliage shaders |
 | `cityBuilder.test.ts` | 7 | Chunk geometry, instancing |
-| `featureFlags.test.ts` | 7 | Flags default off; only documented on-forms enable them |
+| `featureFlags.test.ts` | 8 | Flags default off; only documented on-forms enable them |
 
 ### Browser scenarios
 

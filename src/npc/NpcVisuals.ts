@@ -27,6 +27,24 @@ import type { NpcAppearance } from './NpcDefinition';
  * has to be, because they are not standing in the same pose.
  */
 
+/**
+ * Take a mesh out of every raycast in the game.
+ *
+ * The camera's occluder fade raycasts the **whole scene** every frame with
+ * `firstHitOnly = false`, and a `SkinnedMesh` with no BVH answers by
+ * CPU-skinning each of its 4,890 triangles. Thirty-two bodies made that 156,000
+ * skinned triangle tests a frame and took the simulation from ~2 ms to ~40 ms —
+ * measured, not guessed: it is why the first Playwright run of this phase took
+ * a hundred seconds to simulate forty.
+ *
+ * Nothing needs to raycast an NPC. The fade only touches materials created
+ * `fadeable`, which these are not; perception occlusion tests the merged
+ * collision proxy, not the scene; and interaction works on distance.
+ */
+function makeUnraycastable(mesh: THREE.Object3D): void {
+  mesh.raycast = () => undefined;
+}
+
 /** Which palette slot a source material feeds. */
 type ColourSlot = 'skin' | 'hair' | 'eye' | 'trim' | 'hat' | 'hatBand' | 'shirt' | 'trousers' | 'shoe';
 
@@ -98,6 +116,8 @@ export class NpcVisuals {
   private readonly variants = new Map<string, Variant>();
   private readonly pool: PooledBody[] = [];
   private readonly live = new Set<PooledBody>();
+  /** Root -> pooled record, so `release` is a lookup rather than a scan. */
+  private readonly byRoot = new Map<THREE.Object3D, PooledBody>();
   private degraded = false;
 
   constructor(
@@ -131,8 +151,15 @@ export class NpcVisuals {
     this.source.traverse((o) => {
       const mesh = o as THREE.SkinnedMesh;
       if (!mesh.isSkinnedMesh) return;
+      // `Player` has already replaced the imported materials with toon ones by
+      // the time this runs, and the toon cache does not carry the source name.
+      // `Game` stashes it in userData before that happens; the material name is
+      // the fallback for a rig nothing has converted.
       const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-      const slot = SLOT_FOR_MATERIAL[material?.name ?? ''];
+      const named = typeof mesh.userData.paletteSlot === 'string'
+        ? mesh.userData.paletteSlot
+        : (material?.name ?? '');
+      const slot = SLOT_FOR_MATERIAL[named];
       if (!slot) return;
 
       const g = mesh.geometry.clone();
@@ -266,6 +293,7 @@ export class NpcVisuals {
   acquire(appearance: NpcAppearance): NpcBody {
     const pooled = this.pool.pop() ?? this.build();
     this.live.add(pooled);
+    this.byRoot.set(pooled.root, pooled);
     pooled.root.visible = true;
     const body = this.wrap(pooled);
     body.wear(appearance);
@@ -280,8 +308,8 @@ export class NpcVisuals {
    * `dispose` actually frees anything.
    */
   release(body: NpcBody): void {
-    const pooled = [...this.live].find((p) => p.root === body.root);
-    if (!pooled) return;
+    const pooled = this.byRoot.get(body.root);
+    if (!pooled || !this.live.has(pooled)) return;
     this.live.delete(pooled);
     pooled.mixer.stopAllAction();
     pooled.current = null;
@@ -293,6 +321,14 @@ export class NpcVisuals {
   private build(): PooledBody {
     const root = cloneSkinned(this.source);
     root.name = 'NpcBody';
+
+    // The rig this was cloned from is the player's own, and `AgeAppearance`
+    // writes bone *scale* to express age. Nothing in the GLB keys scale, so
+    // the authored rest value is 1 across the board and resetting is exact —
+    // without it every resident inherits whatever age the player happens to be.
+    root.traverse((o) => {
+      if ((o as THREE.Bone).isBone) o.scale.set(1, 1, 1);
+    });
 
     let skeleton: THREE.Skeleton | null = null;
     let bindMatrix: THREE.Matrix4 | null = null;
@@ -325,6 +361,7 @@ export class NpcVisuals {
       mesh.name = 'NpcBodyMesh';
       mesh.castShadow = true;
       mesh.receiveShadow = false; // one bounce is enough on a 5k-triangle body
+      makeUnraycastable(mesh);
       (parent as THREE.Object3D).add(mesh);
       mesh.bind(skeleton, bindMatrix);
       pooled.mesh = mesh;
@@ -336,6 +373,7 @@ export class NpcVisuals {
       for (const m of sourceMeshes) {
         m.castShadow = true;
         m.frustumCulled = false;
+        makeUnraycastable(m);
       }
     }
 
@@ -355,7 +393,12 @@ export class NpcVisuals {
   }
 
   private wearOn(pooled: PooledBody, appearance: NpcAppearance): void {
-    pooled.root.scale.setScalar(appearance.scale);
+    // Build is a slight non-uniform scale on the root rather than per-bone
+    // work. At +-4% the normals are wrong by an amount three flat toon bands
+    // cannot show, and it buys a visibly different silhouette for one vector
+    // assignment instead of a second copy of `AgeAppearance`.
+    const width = appearance.build === 'stocky' ? 1.04 : appearance.build === 'slight' ? 0.96 : 1;
+    pooled.root.scale.set(appearance.scale * width, appearance.scale, appearance.scale * width);
     const variant = this.variantFor(appearance);
     if (!variant || !pooled.mesh) return;
     pooled.mesh.geometry = variant.geometry;
@@ -395,6 +438,7 @@ export class NpcVisuals {
     }
     this.live.clear();
     this.pool.length = 0;
+    this.byRoot.clear();
 
     for (const variant of this.variants.values()) {
       const colour = variant.geometry.getAttribute('color');
