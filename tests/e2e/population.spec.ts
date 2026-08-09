@@ -29,6 +29,21 @@ async function boot(page: Page) {
   return page.evaluate(() => window.__LH_TEST__!.awaitPopulation());
 }
 
+/**
+ * A settle budget, learned the hard way.
+ *
+ * Headless Chromium simulates a frame in roughly 40 ms here — the camera's
+ * whole-scene occluder raycast, mostly, which this phase reduced and did not
+ * remove. The first version of this spec ran 2,400-frame loops, which is 96
+ * seconds of one `page.evaluate` against a 90-second test timeout; and a test
+ * that dies inside a long evaluate leaves the page wedged, so the *next* test
+ * fails on `page.goto` too. Six of the fourteen failures in that run were that
+ * cascade rather than anything about NPCs.
+ *
+ * Keep any single evaluate under about 1,500 frames, and give the file room.
+ */
+test.describe.configure({ timeout: 180_000 });
+
 test.describe('population', () => {
   test('the village is inhabited, and the navmesh is real', async ({ page }) => {
     const errors = watchConsole(page);
@@ -114,17 +129,22 @@ test.describe('population', () => {
       t.settle(30);
 
       t.setNpcHour(9);
-      // Long enough to cover the walk from home to the stall: roughly 45 m at
-      // a 1.3 m/s commute, so about 35 seconds of simulation.
-      for (let i = 0; i < 18; i++) t.settle(120);
+      // 900 frames is 15 seconds of simulation, about 19 m of commute. The
+      // walk is ~37 m, so this asserts progress rather than arrival — see the
+      // settle budget above for why it is not simply run to completion.
+      for (let i = 0; i < 10; i++) t.settle(90);
       const after = t.getNpc('v_maryam')!;
       return { before, after };
     });
 
-    const moved = Math.hypot(walk.after.x - walk.before.x, walk.after.z - walk.before.z);
-    expect(moved).toBeGreaterThan(4);
     // The stall is at (10, 14).
-    expect(Math.hypot(walk.after.x - 10, walk.after.z - 14)).toBeLessThan(14);
+    const distanceBefore = Math.hypot(walk.before.x - 10, walk.before.z - 14);
+    const distanceAfter = Math.hypot(walk.after.x - 10, walk.after.z - 14);
+    const moved = Math.hypot(walk.after.x - walk.before.x, walk.after.z - walk.before.z);
+
+    expect(moved).toBeGreaterThan(4);
+    // And in the right direction.
+    expect(distanceAfter).toBeLessThan(distanceBefore - 4);
   });
 
   test('nobody floats, and nobody is buried', async ({ page }) => {
@@ -157,7 +177,7 @@ test.describe('population', () => {
       // The middle of a building footprint. HouseLarge sits at (-15.8, 62) with
       // a 3.4 x 4.2 collider, so this is solid geometry.
       t.sendNpc(npc.id, -15.8, 62);
-      for (let i = 0; i < 12; i++) t.settle(120);
+      for (let i = 0; i < 8; i++) t.settle(90);
 
       const now = t.getNpc(npc.id)!;
       return { id: npc.id, x: now.x, z: now.z, speed: now.speed };
@@ -178,7 +198,7 @@ test.describe('population', () => {
       t.setNpcHour(9);
       t.teleport(0, 20, 0);
       const start = t.getNpcs().map((n) => ({ id: n.id, x: n.x, z: n.z }));
-      for (let i = 0; i < 20; i++) t.settle(120);
+      for (let i = 0; i < 10; i++) t.settle(90);
       const end = t.getNpcs().map((n) => ({ id: n.id, x: n.x, z: n.z }));
       return { start, end, pop: t.getPopulation()! };
     });
@@ -212,7 +232,7 @@ test.describe('population', () => {
       t.settle(60);
 
       let closest = Infinity;
-      for (let i = 0; i < 22; i++) {
+      for (let i = 0; i < 12; i++) {
         t.settle(60);
         const now = t.getNpc(npc.id)!;
         const player = t.getPlayerState();
@@ -242,11 +262,11 @@ test.describe('population', () => {
       const t = window.__LH_TEST__!;
       // On the road, so the bubble has somewhere to spawn.
       t.teleport(0, 0, 0);
-      for (let i = 0; i < 40; i++) t.settle(60);
+      for (let i = 0; i < 12; i++) t.settle(60);
       const mid = t.getPopulation()!;
       const positions = t.getTraffic().map((v) => ({ x: v.x, z: v.z }));
 
-      for (let i = 0; i < 40; i++) t.settle(60);
+      for (let i = 0; i < 12; i++) t.settle(60);
       const later = t.getTraffic().map((v) => ({ x: v.x, z: v.z }));
       return { mid, positions, later, forced: t.getPopulation()!.trafficBarges };
     });
@@ -266,7 +286,7 @@ test.describe('population', () => {
       const seen: Array<{ x: number; z: number }> = [];
       const known = new Set<string>();
 
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 30; i++) {
         t.settle(30);
         for (const v of t.getTraffic()) {
           // Round hard, so a car that has moved is not counted as new.
@@ -363,7 +383,7 @@ test.describe('population', () => {
       // Build some history.
       t.setNpcHour(13);
       t.teleport(target.x + 1.5, target.z + 1.5, 0);
-      for (let i = 0; i < 20; i++) t.settle(60);
+      for (let i = 0; i < 8; i++) t.settle(60);
 
       const before = t.getRelationship(target.id)!;
       const ageBefore = t.getNpc(target.id)!.age;
@@ -372,7 +392,7 @@ test.describe('population', () => {
 
       await t.saveNow('slot1');
       // Move the relationship somewhere else entirely, then load it back.
-      for (let i = 0; i < 40; i++) t.settle(60);
+      for (let i = 0; i < 8; i++) t.settle(60);
       await t.loadNow('slot1');
 
       return {
@@ -399,14 +419,21 @@ test.describe('population', () => {
       const t = window.__LH_TEST__!;
       const home = t.getPopulation()!;
 
-      await t.travelTo('city_old_market');
+      // City access is gated on age *and* the departure chapter. Without both
+      // the journey is refused, and the test would then be asserting on the
+      // village's population while believing it was the district's.
+      t.completeChapter('village_departure');
+      for (let i = 0; i < 4; i++) await t.forceBirthday();
+
+      const went = await t.travelTo('city_old_market');
       const away = await t.awaitPopulation();
 
       await t.travelTo('village_coast');
       const back = await t.awaitPopulation();
-      return { home, away, back };
+      return { went, home, away, back };
     });
 
+    expect(trip.went).toBe(true);
     // The districts have their own residents.
     expect(trip.away.named).toBe(5);
     expect(trip.away.navState).toBe('ready');
@@ -416,28 +443,37 @@ test.describe('population', () => {
     expect(errors).toEqual([]);
   });
 
-  test('driving through the village does not disturb anybody into an error', async ({ page }) => {
+  test('a car driven through the village does not disturb anybody into an error', async ({
+    page,
+  }) => {
     const errors = watchConsole(page);
     await boot(page);
 
     const drive = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
-      t.teleport(2, -30, 0);
-      const id = await t.spawnVehicle('hatchback', 4, -30, 0);
-      if (!id) return { id: null, hit: 0 };
-      await t.enterVehicle(id);
+      // Driven by throttle rather than by getting in, the way `driving.spec`
+      // does it. While the player is seated, `updateRiding` writes the vehicle
+      // input from the real controls every frame and overwrites anything the
+      // bridge sets — so an "entered" car in a test simply sits there. Riding
+      // itself is covered in `driving.spec`; what this needs is a fast vehicle
+      // moving among pedestrians.
+      t.teleport(2, -34, 0);
+      const id = await t.spawnVehicle('hatchback', 0, -30, 0);
+      if (!id) return null;
+      t.settle(60);
       t.setVehicleInput(id, { throttle: 1 });
-      for (let i = 0; i < 60; i++) t.settle(20);
+      for (let i = 0; i < 20; i++) t.settle(60);
       const telemetry = t.getVehicle(id);
       const pop = t.getPopulation()!;
-      await t.exitVehicle();
-      return { id, telemetry, pop };
+      t.despawnVehicle(id);
+      return { id, speed: telemetry?.forwardSpeed ?? 0, pop };
     });
 
-    expect(drive.id).not.toBeNull();
-    // It actually drove, so the traffic and the pedestrians had something to
-    // avoid rather than the test asserting on a parked car.
-    expect(Math.abs(drive.telemetry?.forwardSpeed ?? 0)).toBeGreaterThan(1);
+    expect(drive).not.toBeNull();
+    // It actually drove, so the pedestrians had something to be near rather
+    // than the test asserting on a parked car.
+    expect(Math.abs(drive!.speed)).toBeGreaterThan(1);
+    expect(drive!.pop.named).toBe(8);
     expect(errors).toEqual([]);
   });
 
@@ -452,7 +488,7 @@ test.describe('population', () => {
     await page.evaluate(() => {
       const t = window.__LH_TEST__!;
       t.teleport(0, 0, 0);
-      for (let i = 0; i < 30; i++) t.settle(60);
+      for (let i = 0; i < 8; i++) t.settle(60);
     });
 
     expect(warnings.filter((w) => w.includes('Multiple instances of Three.js'))).toEqual([]);

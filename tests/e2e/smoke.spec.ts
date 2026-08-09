@@ -73,8 +73,15 @@ test.describe('Last Horizon smoke', () => {
     const errors = watchConsole(page);
     await boot(page);
 
+    // The population must be here *and* held still before the first reading.
+    // It is a separate chunk, so it lands after `ready()`; and a variant
+    // geometry is built the first time somebody wears an appearance, so a
+    // pedestrian arriving between the two laps looks exactly like a leak.
+    await page.evaluate(() => window.__LH_TEST__!.awaitPopulation());
+
     const result = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
+      t.setPopulationActive(false);
       t.setTimeMode('day');
       t.teleport(5.4, -39.3, Math.PI);
       t.prepareShot();

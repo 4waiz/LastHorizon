@@ -206,22 +206,49 @@ describe('stuck recovery', () => {
     expect(s.nav.pathCalls).toBe(before);
   });
 
-  it('notices a blocked agent and eventually places it at its goal', () => {
+  it('moves a wedged agent to the furthest reachable point on its route', () => {
+    // Wedged is modelled with a crowd agent that refuses to move, which is the
+    // real case: Detour has the agent and will not take it anywhere.
     const s = stub();
-    // A path whose only corner is where the agent already stands: it wants to
-    // move, and cannot.
-    s.nav.corners = [{ x: 0, y: 0, z: 0 }];
-    s.nav.sampleResult = { x: 0, y: 0, z: 50 };
+    s.nav.crowdAvailable = true;
+    s.nav.corners = [
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 0, z: 48 },
+    ];
 
     const a = ambient(s.deps);
     a.placeAt(0, 0);
     a.setDestination(0, 50);
+    a.setBand('near');
 
     for (let i = 0; i < 60 * 30; i++) a.update(1 / 30);
 
     expect(a.stats.stuckRecoveries).toBeGreaterThan(0);
     expect(a.stats.teleports).toBeGreaterThan(0);
-    expect(a.arrived).toBe(true);
+    // Placed on the route, not at the raw goal and not on some island near it.
+    expect(a.position.z).toBeCloseTo(48, 1);
+  });
+
+  it('never places an agent somewhere no route reaches', () => {
+    // The bug this exists for: a building collider is a hollow box to Recast
+    // and the terrain runs on underneath, so every house has an unreachable
+    // navmesh island inside it. `sample` answers with that island quite
+    // happily; a path corner cannot, because it is reachable by construction.
+    const s = stub();
+    s.nav.crowdAvailable = true;
+    s.nav.corners = [{ x: 0, y: 0, z: 0 }];
+    s.nav.sampleResult = { x: 0, y: 0, z: 50 }; // the island, tempting and wrong
+
+    const a = ambient(s.deps);
+    a.placeAt(0, 0);
+    a.setDestination(0, 50);
+    a.setBand('near');
+
+    for (let i = 0; i < 60 * 30; i++) a.update(1 / 30);
+
+    expect(a.position.z).toBeCloseTo(0, 1);
+    expect(a.stats.teleports).toBe(0);
+    expect(a.stats.abandoned).toBeGreaterThan(0);
   });
 
   it('does not count a standing agent with nowhere to go as stuck', () => {

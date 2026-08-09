@@ -125,6 +125,8 @@ export class Population {
     private readonly d: PopulationDeps,
     budget: PopulationBudget,
     private readonly seed: number,
+    /** World-clock day fraction, so residents start where the hour says. */
+    startTime = 0.5,
   ) {
     this.budget = budget;
     this.rng = mulberry32(seed);
@@ -141,7 +143,7 @@ export class Population {
       heightAt: (x, z) => d.heightAt(x, z),
     };
 
-    this.spawnNamed();
+    this.spawnNamed(hourOfDay(startTime));
     this.buildTraffic();
   }
 
@@ -180,11 +182,24 @@ export class Population {
     if (snapped) agent.placeAt(snapped.x, snapped.z);
   }
 
-  private spawnNamed(): void {
+  /**
+   * Put the residents where the clock says they already are.
+   *
+   * Not at home. Placing everybody on their own doorstep and letting the
+   * schedule walk them away looks like a village turning out to watch you
+   * arrive, and it had a concrete consequence: all eight village buildings are
+   * enterable, so eight residents stood on eight door prompts and the
+   * interaction tests started being offered "Talk to Liya" instead of
+   * "Go inside".
+   */
+  private spawnNamed(hour: number): void {
     for (const def of npcsInZone(NPC_CATALOGUE, this.d.zone.id)) {
       const schedule = scheduleById(def.scheduleId);
       const agent = new NpcAgent(def.id, 'named', def, def.appearance, schedule, this.deps);
       agent.placeAt(def.anchors.home.x, def.anchors.home.z);
+      agent.applySchedule(hour);
+      const at = agent.target;
+      if (at) agent.placeAt(at.x, at.z);
       this.seedRelationship(def);
       this.named.push(agent);
     }

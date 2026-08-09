@@ -378,12 +378,25 @@ export class NpcAgent {
     const goal = this.destination;
     if (!goal) return;
 
-    // Widen the search before giving up: a destination on a doorstep can be
-    // half a metre off the eroded navmesh and still perfectly reachable.
-    const snapped = this.deps.nav.sample(goal, 3) ?? this.deps.nav.sample(goal, 12);
-    if (!snapped) {
-      // Nowhere on the navmesh near it. Placing the agent at the raw goal is
-      // what the first version did, and it puts people inside walls — the exact
+    // The furthest point along a *route from here*, not the nearest navmesh
+    // point to the goal.
+    //
+    // Sampling looked right and was wrong. A building's collider is a hollow
+    // box to Recast and the terrain runs on underneath it, so every house has
+    // a navmesh island inside it — unreachable, because the box has no
+    // doorway, but a perfectly good answer to "nearest polygon". Snapping to
+    // it teleported residents into people's front rooms. A path corner cannot
+    // do that: it is reachable by construction.
+    const route = this.deps.nav.path(this.position, goal);
+    const last = route.length > 0 ? route[route.length - 1] : null;
+    const usable =
+      last && Math.hypot(last.x - this.position.x, last.z - this.position.z) > 1
+        ? last
+        : null;
+
+    if (!usable) {
+      // No route and nowhere to go. Placing the agent at the raw goal is what
+      // the first version did, and it puts people inside walls — the exact
       // thing the acceptance criteria forbid. Abandon the destination instead
       // and let the schedule or the wander pick the next one.
       this.abandoned++;
@@ -391,7 +404,7 @@ export class NpcAgent {
       return;
     }
 
-    this.placeAt(snapped.x, snapped.z);
+    this.placeAt(usable.x, usable.z);
     this.teleportCount++;
     this.repath();
   }

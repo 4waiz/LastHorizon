@@ -1388,6 +1388,7 @@ export class Game {
           },
           this.populationBudget(),
           manifest.seed,
+          this.worldClock.time,
         );
         this.population = population;
         population.restoreAges(this.npcAges);
@@ -1815,7 +1816,11 @@ export class Game {
           {
             id: `npc:${agent.id}:talk`,
             label: `Talk to ${def.displayName.split(' ')[0]}`,
-            priority: 30,
+            // Below a door's 30, deliberately. Every village building is
+            // enterable, so a resident standing near their own front door
+            // competes with it, and somebody walking up to a door came for the
+            // door. Both stay on offer through the selector.
+            priority: 25,
             maxDistance: 2.4,
             facingTolerance: Math.PI * 0.6,
             holdSeconds: 0,
