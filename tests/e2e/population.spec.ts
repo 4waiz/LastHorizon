@@ -1,5 +1,4 @@
 import { test, expect, type Page, type ConsoleMessage } from '@playwright/test';
-import type { PopulationSnapshot } from '../../src/core/TestMode';
 
 /**
  * The population, in a real browser, against the production build.
@@ -44,65 +43,23 @@ async function boot(page: Page) {
 /**
  * A settle budget, learned the hard way.
  *
- * Headless Chromium simulates a frame in roughly 40 ms here — the camera's
- * whole-scene occluder raycast, mostly, which this phase reduced and did not
- * remove. The first version of this spec ran 2,400-frame loops, which is 96
- * seconds of one `page.evaluate` against a 90-second test timeout; and a test
- * that dies inside a long evaluate leaves the page wedged, so the *next* test
- * fails on `page.goto` too. Six of the fourteen failures in that run were that
- * cascade rather than anything about NPCs.
+ * The first version of this spec ran 2,400-frame loops. Headless Chromium was
+ * then simulating a frame in about 40 ms — the camera's whole-scene occluder
+ * raycast, since fixed — which made that 96 seconds inside one `page.evaluate`
+ * against a 90-second timeout. A test that dies inside a long evaluate leaves
+ * the page wedged, so the *next* one fails on `page.goto` too; six of the
+ * fourteen failures in that run were the cascade rather than anything to do
+ * with NPCs.
  *
- * Keep any single evaluate under about 1,500 frames, and give the file room.
+ * A frame is 3.7 ms now and the loops are shorter, but the lesson stands: keep
+ * any single evaluate well under 1,500 frames, and give the file room.
  */
 test.describe.configure({ timeout: 180_000 });
 
 test.describe('population', () => {
-  /**
-   * One page for the whole file.
-   *
-   * A page each was the obvious way to write this and it does not survive
-   * contact: sixteen boots means sixteen WebGL contexts and sixteen fetches of
-   * ~900 kB of WebAssembly, and from about the fifth onward `page.goto` starts
-   * timing out at sixty seconds — the *load*, not the game, which passed every
-   * assertion it reached. Sharing one page removes the failure mode and takes
-   * the file from ten minutes to under three.
-   *
-   * The cost is that scenarios are no longer isolated, so each one sets the
-   * hour and the player's position it needs rather than assuming a fresh
-   * world; the two that genuinely mutate the run — travelling, and saving over
-   * a birthday — are last in the file.
-   */
-  let page: Page;
-  let allErrors: string[];
-  let allWarnings: string[];
-  let population: PopulationSnapshot;
-
-  test.beforeAll(async ({ browser }) => {
-    page = await browser.newPage();
-    // Attached before the first navigation, so the duplicate-three.js warning
-    // — which fires while the modules evaluate — is actually catchable.
-    const console = watchConsole(page);
-    allErrors = console.errors;
-    allWarnings = console.warnings;
-    population = await boot(page);
-  });
-
-  test.afterAll(async () => {
-    await page?.close();
-  });
-
-  /**
-   * Console errors, from a mark taken at the start of a test.
-   *
-   * The watcher is per-page and the page is shared, so asserting on the whole
-   * array would inherit anything an earlier scenario provoked.
-   */
-  const errorMark = () => allErrors.length;
-  const errorsSince = (mark: number) => allErrors.slice(mark);
-
-  test('the village is inhabited, and the navmesh is real', async () => {
-    const mark = errorMark();
-    const pop = population;
+  test('the village is inhabited, and the navmesh is real', async ({ page }) => {
+    const { errors } = watchConsole(page);
+    const pop = await boot(page);
 
     expect(pop.named).toBe(8);
     // The claim this test exists to settle.
@@ -112,10 +69,11 @@ test.describe('population', () => {
     // One interior door plus two crossings.
     expect(pop.offMeshLinks).toBe(3);
     expect(pop.ambient).toBeGreaterThan(0);
-    expect(errorsSince(mark)).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
-  test('crowd agents exist near the player and are given back at distance', async () => {
+  test('crowd agents exist near the player and are given back at distance', async ({ page }) => {
+    await boot(page);
 
     const seen = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -139,8 +97,9 @@ test.describe('population', () => {
     expect(seen.away.far).toBeGreaterThan(0);
   });
 
-  test('a named resident keeps to a routine through the day', async () => {
-    const mark = errorMark();
+  test('a named resident keeps to a routine through the day', async ({ page }) => {
+    const { errors } = watchConsole(page);
+    await boot(page);
 
     const day = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -166,10 +125,11 @@ test.describe('population', () => {
     expect(byHour[13].activity).toBe('meal');
     expect(byHour[20].activity).toBe('social');
     expect(byHour[23].activity).toBe('sleep');
-    expect(errorsSince(mark)).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
-  test('a resident walks to where their schedule sends them', async () => {
+  test('a resident walks to where their schedule sends them', async ({ page }) => {
+    await boot(page);
 
     const walk = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -214,7 +174,8 @@ test.describe('population', () => {
     expect(gapAfter).toBeLessThan(walk.gapBefore - 4);
   });
 
-  test('nobody floats, and nobody is buried', async () => {
+  test('nobody floats, and nobody is buried', async ({ page }) => {
+    await boot(page);
 
     const offGround = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -230,7 +191,8 @@ test.describe('population', () => {
     expect(offGround).toEqual([]);
   });
 
-  test('a resident sent into a wall never ends up inside it', async () => {
+  test('a resident sent into a wall never ends up inside it', async ({ page }) => {
+    await boot(page);
 
     const result = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -255,7 +217,8 @@ test.describe('population', () => {
     expect(insideX && insideZ).toBe(false);
   });
 
-  test('residents keep moving over a long stretch rather than seizing up', async () => {
+  test('residents keep moving over a long stretch rather than seizing up', async ({ page }) => {
+    await boot(page);
 
     const seen = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -292,8 +255,9 @@ test.describe('population', () => {
     expect(closed.length).toBe(seen.start.length);
   });
 
-  test('standing in somebody\'s way does not stop them getting there', async () => {
-    const mark = errorMark();
+  test('standing in somebody\'s way does not stop them getting there', async ({ page }) => {
+    const { errors } = watchConsole(page);
+    await boot(page);
 
     const blocked = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -333,11 +297,12 @@ test.describe('population', () => {
     // They got past. Either steered around or, at worst, the watchdog freed
     // them — what must not happen is standing against the player forever.
     expect(blocked.toGoal).toBeLessThan(6);
-    expect(errorsSince(mark)).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
-  test('traffic runs and does not deadlock', async () => {
-    const mark = errorMark();
+  test('traffic runs and does not deadlock', async ({ page }) => {
+    const { errors } = watchConsole(page);
+    await boot(page);
 
     const traffic = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -355,10 +320,11 @@ test.describe('population', () => {
     expect(traffic.mid.traffic).toBeGreaterThan(0);
     // The watchdog exists; under ordinary conditions it should stay asleep.
     expect(traffic.forced).toBeLessThan(3);
-    expect(errorsSince(mark)).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
-  test('traffic never appears in front of the player', async () => {
+  test('traffic never appears in front of the player', async ({ page }) => {
+    await boot(page);
 
     const appeared = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -393,7 +359,8 @@ test.describe('population', () => {
     }
   });
 
-  test('a non-criminal disturbance is witnessed, and greeting is remembered', async () => {
+  test('a non-criminal disturbance is witnessed, and greeting is remembered', async ({ page }) => {
+    await boot(page);
 
     const seen = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -428,7 +395,8 @@ test.describe('population', () => {
     expect(seen.after.familiarity).toBeGreaterThan(seen.before.familiarity);
   });
 
-  test('distance gates what a witness notices', async () => {
+  test('distance gates what a witness notices', async ({ page }) => {
+    await boot(page);
 
     const result = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -470,7 +438,8 @@ test.describe('population', () => {
     expect(result.near).toBeGreaterThan(result.far * 1.5);
   });
 
-  test('relationships and ages survive a save and reload', async () => {
+  test('relationships and ages survive a save and reload', async ({ page }) => {
+    await boot(page);
 
     const round = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -506,8 +475,9 @@ test.describe('population', () => {
     expect(round.ageAfterLoad).toBe(round.ageAfterBirthday);
   });
 
-  test('leaving the zone and coming back gives everything up and rebuilds it', async () => {
-    const mark = errorMark();
+  test('leaving the zone and coming back gives everything up and rebuilds it', async ({ page }) => {
+    const { errors } = watchConsole(page);
+    await boot(page);
 
     const trip = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -534,11 +504,12 @@ test.describe('population', () => {
     // Coming home rebuilds the village population rather than accumulating.
     expect(trip.back.named).toBe(8);
     expect(trip.back.navAgents).toBeLessThanOrEqual(trip.home.navAgents + 4);
-    expect(errorsSince(mark)).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
-  test('a car driven through the village does not disturb anybody into an error', async () => {
-    const mark = errorMark();
+  test('a car driven through the village does not disturb anybody into an error', async ({ page }) => {
+    const { errors } = watchConsole(page);
+    await boot(page);
 
     const drive = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -571,22 +542,25 @@ test.describe('population', () => {
     // a hatchback past 15 m/s.
     expect(Math.abs(drive!.speed)).toBeGreaterThan(8);
     expect(drive!.pop.named).toBe(8);
-    expect(errorsSince(mark)).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
-  test('the shipped build has one three.js, and no console errors at all', async () => {
+  test('the shipped build has one three.js, and no console errors at all', async ({ page }) => {
+    // Attached before the navigation in `boot`, so the duplicate-three.js
+    // warning — which fires while the modules evaluate — is catchable at all.
+    const { errors, warnings } = watchConsole(page);
+    await boot(page);
+
     await page.evaluate(() => {
       const t = window.__LH_TEST__!;
       t.teleport(0, 0, 0);
       for (let i = 0; i < 8; i++) t.settle(60);
     });
 
-    // Everything since the page was first navigated, including load time.
     // `dedupe: ['three']` in the Vite config exists for this; a second copy
     // breaks instanceof and any prototype patching, which is how
     // `three-mesh-bvh` accelerates raycasts.
-    expect(allWarnings.filter((w) => w.includes('Multiple instances of Three.js'))).toEqual([]);
-    // And the whole file's worth of errors, not just this scenario's.
-    expect(allErrors).toEqual([]);
+    expect(warnings.filter((w) => w.includes('Multiple instances of Three.js'))).toEqual([]);
+    expect(errors).toEqual([]);
   });
 });
