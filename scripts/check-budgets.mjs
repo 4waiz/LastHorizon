@@ -17,9 +17,9 @@ const KB = 1024;
 /** Matched against dist/assets by filename prefix. */
 const BUNDLE_BUDGETS = [
   { prefix: 'three-', ext: '.js', maxKB: 700, label: 'three chunk' },
-  // Raised from 260 in Phase 4; see "Bundle budget" in
-  // docs/PERFORMANCE_BUDGETS.md for what was added and why.
-  { prefix: 'index-', ext: '.js', maxKB: 300, label: 'app chunk' },
+  // Raised 260 -> 300 in Phase 4, 300 -> 330 in Phase 6; see "Bundle budget"
+  // in docs/PERFORMANCE_BUDGETS.md for what was added and why.
+  { prefix: 'index-', ext: '.js', maxKB: 330, label: 'app chunk' },
   { prefix: 'gsap-', ext: '.js', maxKB: 90, label: 'gsap chunk' },
   { prefix: 'bvh-', ext: '.js', maxKB: 75, label: 'bvh chunk' },
   { prefix: 'index-', ext: '.css', maxKB: 24, label: 'stylesheet' },
@@ -45,8 +45,24 @@ const BUNDLE_BUDGETS = [
  * reached only from `Game.spawnVehicle`, which already has to await Rapier, so
  * a player who never drives downloads neither. Keeping them eager would have
  * put the app chunk at exactly its 300 kB limit with nothing left over.
+ *
+ * Phase 6 added the map panel (a keypress away, drawn by code that need not
+ * exist until then) and the population system. The population is the larger
+ * argument: Recast's WebAssembly is ~900 kB, and the initial-load budget had
+ * 77 kB of headroom. Nav had to be lazy, the NPC simulation is built on nav, so
+ * the whole thing loads after the world does — which is also when a village
+ * with nobody in it is already standing and playable.
  */
-const LAZY_CHUNK_PREFIXES = ['rapier-', 'TestMode-', 'VehicleController-', 'VehicleDefinition-'];
+const LAZY_CHUNK_PREFIXES = [
+  'rapier-',
+  'TestMode-',
+  'VehicleController-',
+  'VehicleDefinition-',
+  'MapPanel-',
+  'Population-',
+  'Navigation-',
+  'recast-',
+];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));
 

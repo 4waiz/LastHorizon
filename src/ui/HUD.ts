@@ -1,18 +1,9 @@
 import { NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
 import type { Dashboard } from '../vehicles/VehicleControls';
 import type { MinimapData } from './Minimap';
-import {
-  MAP_LEGEND,
-  clampScale,
-  drawMap,
-  fitToData,
-  mapToWorld,
-  scaleBarMetres,
-  worldToMap,
-  zoomAbout,
-  type MapMarker,
-  type MapView,
-} from './MapPanel';
+// Type-only: the map is a panel behind a keypress, so its drawing code arrives
+// through the dynamic import in `loadMapApi` rather than in the app chunk.
+import type { MapMarker, MapView } from './MapPanel';
 import { InputManager } from '../core/InputManager';
 import { clamp } from '../utils/MathUtils';
 import type { Outfit } from '../player/Player';
@@ -73,6 +64,9 @@ export class HUD {
 
   /** Where the map is looking. Kept between openings, like a real map. */
   private mapView: MapView = { centreX: 0, centreZ: 0, scale: 1 };
+  /** Resolved on the first opening. Null until then; every draw is a no-op. */
+  private mapApi: typeof import('./MapPanel') | null = null;
+  private mapApiLoading: Promise<typeof import('./MapPanel')> | null = null;
   private mapData: MinimapData = { roads: [], buildings: [] };
   private mapFitted = false;
   private mapDrag: { pointerId: number; x: number; y: number } | null = null;
@@ -560,11 +554,43 @@ export class HUD {
   openMap(open: boolean): void {
     this.mapPanel.hidden = !open;
     if (!open) return;
+    if (!this.mapApi) {
+      void this.loadMapApi().then(() => {
+        // Still open? The player may have closed it while the chunk landed.
+        if (this.mapOpen) this.frameAndDraw();
+      });
+      return;
+    }
+    this.frameAndDraw();
+  }
 
-    // First opening frames the whole zone; after that the view is left where
-    // the player put it, which is what makes panning worth having.
+  /**
+   * Fetch the map's drawing code, once.
+   *
+   * The legend is built here rather than in `wireMap` because it is generated
+   * from the same table the renderer draws with — which is the point of it, and
+   * which means it cannot exist before the module does.
+   */
+  private loadMapApi(): Promise<typeof import('./MapPanel')> {
+    this.mapApiLoading ??= import('./MapPanel').then((api) => {
+      this.mapApi = api;
+      $('mapLegend').innerHTML = api.MAP_LEGEND.map(
+        (e) => `<li><i style="background:${e.colour}"></i>${e.label}</li>`,
+      ).join('');
+      return api;
+    });
+    return this.mapApiLoading;
+  }
+
+  /**
+   * First opening frames the whole zone; after that the view is left where the
+   * player put it, which is what makes panning worth having.
+   */
+  private frameAndDraw(): void {
+    const api = this.mapApi;
+    if (!api) return;
     if (!this.mapFitted) {
-      this.mapView = fitToData(this.mapData, this.mapCanvas.width, this.mapCanvas.height);
+      this.mapView = api.fitToData(this.mapData, this.mapCanvas.width, this.mapCanvas.height);
       this.mapFitted = true;
     }
     this.drawMapNow();
@@ -579,11 +605,12 @@ export class HUD {
   }
 
   private drawMapNow(): void {
+    const api = this.mapApi;
     const ctx = this.mapCanvas.getContext('2d');
     const src = this.mapSource?.();
-    if (!ctx || !src) return;
+    if (!api || !ctx || !src) return;
 
-    drawMap(
+    api.drawMap(
       ctx,
       this.mapData,
       this.mapView,
@@ -592,7 +619,7 @@ export class HUD {
       this.mapCanvas.width,
       this.mapCanvas.height,
     );
-    this.mapScaleText.textContent = `${scaleBarMetres(this.mapView)} m`;
+    this.mapScaleText.textContent = `${api.scaleBarMetres(this.mapView)} m`;
   }
 
   /** Redraw while open, so a driven vehicle moves on the map. */
@@ -601,15 +628,15 @@ export class HUD {
   }
 
   private wireMap(): void {
-    const legend = $('mapLegend');
-    legend.innerHTML = MAP_LEGEND.map(
-      (e) => `<li><i style="background:${e.colour}"></i>${e.label}</li>`,
-    ).join('');
-
     $('mapClose').addEventListener('click', () => this.openMap(false));
     $('mapCentre').addEventListener('click', () => this.centreMapOnPlayer());
     $('mapFit').addEventListener('click', () => {
-      this.mapView = fitToData(this.mapData, this.mapCanvas.width, this.mapCanvas.height);
+      if (!this.mapApi) return;
+      this.mapView = this.mapApi.fitToData(
+        this.mapData,
+        this.mapCanvas.width,
+        this.mapCanvas.height,
+      );
       this.drawMapNow();
     });
     this.mapPanel.addEventListener('pointerdown', (e) => {
@@ -657,7 +684,8 @@ export class HUD {
         x: (e.clientX - rect.left) * ratio,
         y: (e.clientY - rect.top) * ratio,
       };
-      this.mapView = zoomAbout(
+      if (!this.mapApi) return;
+      this.mapView = this.mapApi.zoomAbout(
         this.mapView,
         anchor,
         e.deltaY < 0 ? 1.18 : 1 / 1.18,
@@ -666,10 +694,6 @@ export class HUD {
       );
       this.drawMapNow();
     }, { passive: false });
-
-    void clampScale;
-    void mapToWorld;
-    void worldToMap;
   }
 
   setPrompt(text: string | null): void {

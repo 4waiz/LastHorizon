@@ -132,6 +132,26 @@ more has to come back and justify it here rather than absorb it quietly. If it
 needs to go much higher, the answer is probably to split the city runtime out
 behind the zone-travel boundary, where a load pause is already expected.
 
+### Raised again, 300 kB to 330 kB, in Phase 6
+
+Two things pushed on it, and only one of them was allowed to win.
+
+The **map panel** put the app chunk at 304.9 kB — over budget on the commit
+after the Phase 5 report, which is how the phase-6 gate started red. That was
+not absorbed: `HUD` now reaches its drawing code through a dynamic `import()`
+on first opening, and `MapPanel-*.js` is a lazy chunk. Recovered 2.4 kB.
+
+The **population system** is the one that needed room. Most of it is lazy for a
+reason that is not negotiable: `recast-navigation` ships ~900 kB of
+WebAssembly, and the initial-load budget had 77 kB of headroom. Nav had to move
+off the startup path, the NPC simulation is built on nav, so the whole
+population — definitions, schedules, simulation, visuals, traffic — loads after
+the world is standing. What *cannot* be lazy is the part the save layer touches
+whether or not anyone ever loads a village: named-NPC state and the five
+relationship axes have to be readable by `SaveSchema` from the first frame.
+
+330 kB is again deliberately close. The same rule applies to Phase 7.
+
 ## Asset budget
 
 | Group | Current | Budget |
