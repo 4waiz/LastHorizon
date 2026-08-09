@@ -87,12 +87,35 @@ export interface WeatherProfile {
   readonly defaultTimeMode: TimeMode;
 }
 
-export interface NpcSpawnDef {
+/**
+ * A marked pedestrian crossing.
+ *
+ * Not a connectivity fix — the kerb is 0.14 m and the navmesh walks straight
+ * over it. This is where pedestrians *choose* to cross, which is the difference
+ * between a street that reads as a street and one where everyone jaywalks.
+ */
+export interface CrossingDef {
   readonly id: string;
-  readonly kind: 'named' | 'ambient';
+  readonly ax: number;
+  readonly az: number;
+  readonly bx: number;
+  readonly bz: number;
+}
+
+/**
+ * Where ambient pedestrians may appear and wander.
+ *
+ * Named residents are not here: they live in `src/npc/npcCatalog.ts` with their
+ * homes, jobs and schedules, and declare which zone they belong to. Two places
+ * describing the same person is how one of them goes stale.
+ */
+export interface AmbientAreaDef {
+  readonly id: string;
   readonly x: number;
   readonly z: number;
-  readonly scheduleId?: string;
+  readonly radius: number;
+  /** Relative share of the zone's pedestrian budget. Positive. */
+  readonly weight: number;
 }
 
 export interface ZoneManifest {
@@ -120,7 +143,8 @@ export interface ZoneManifest {
   readonly chunks: readonly ChunkManifest[];
   readonly interiors: readonly InteriorLink[];
   readonly lanes: readonly LaneNode[];
-  readonly npcs: readonly NpcSpawnDef[];
+  readonly crossings: readonly CrossingDef[];
+  readonly ambientAreas: readonly AmbientAreaDef[];
   readonly audio: AudioProfile;
   readonly weather: WeatherProfile;
   readonly bundles: readonly string[];
@@ -270,6 +294,36 @@ export function validateZone(z: ZoneManifest): ValidationIssue[] {
   for (const i of z.interiors) {
     if (interiorIds.has(i.id)) push('duplicate-interior', `interior link ${i.id} declared twice`);
     interiorIds.add(i.id);
+  }
+
+  // Crossings. A zero-length crossing is a data slip that produces an off-mesh
+  // link with both ends in the same place, which Detour accepts and no agent
+  // can ever traverse.
+  const crossingIds = new Set<string>();
+  for (const c of z.crossings) {
+    if (crossingIds.has(c.id)) push('duplicate-crossing', `crossing ${c.id} declared twice`);
+    crossingIds.add(c.id);
+    if (Math.hypot(c.bx - c.ax, c.bz - c.az) < 0.5) {
+      push('degenerate-crossing', `crossing ${c.id} is shorter than half a metre`);
+    }
+    if (!withinBounds(z, c.ax, c.az) || !withinBounds(z, c.bx, c.bz)) {
+      push('crossing-out-of-bounds', `crossing ${c.id} has an end outside the zone`);
+    }
+  }
+
+  // Ambient areas
+  const areaIds = new Set<string>();
+  for (const a of z.ambientAreas) {
+    if (areaIds.has(a.id)) push('duplicate-ambient-area', `ambient area ${a.id} declared twice`);
+    areaIds.add(a.id);
+    if (a.radius <= 0) push('bad-ambient-radius', `ambient area ${a.id} has non-positive radius`);
+    if (a.weight <= 0) push('bad-ambient-weight', `ambient area ${a.id} has non-positive weight`);
+    if (!withinBounds(z, a.x, a.z)) {
+      push('ambient-area-out-of-bounds', `ambient area ${a.id} lies outside the zone`);
+    }
+  }
+  if (z.playable && z.kind === 'streamed' && z.ambientAreas.length === 0) {
+    push('no-ambient-areas', 'playable district has nowhere for pedestrians to appear');
   }
 
   return issues;
