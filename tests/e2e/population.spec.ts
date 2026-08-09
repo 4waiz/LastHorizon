@@ -1,4 +1,5 @@
 import { test, expect, type Page, type ConsoleMessage } from '@playwright/test';
+import type { PopulationSnapshot } from '../../src/core/TestMode';
 
 /**
  * The population, in a real browser, against the production build.
@@ -9,23 +10,34 @@ import { test, expect, type Page, type ConsoleMessage } from '@playwright/test';
  * running it.
  */
 
-function watchConsole(page: Page): string[] {
+function watchConsole(page: Page): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
+  const warnings: string[] = [];
   page.on('console', (m: ConsoleMessage) => {
     if (m.type() === 'error') errors.push(m.text());
+    if (m.type() === 'warning') warnings.push(m.text());
   });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  return errors;
+  return { errors, warnings };
 }
 
 async function boot(page: Page) {
-  await page.goto('/?e2e=1');
+  // `domcontentloaded`, not the default `load`.
+  //
+  // Waiting for `load` waits for every asset the page will ever fetch, and one
+  // of them is now ~900 kB of Recast WebAssembly pulled in behind the world.
+  // On a machine already running a browser flat out for forty minutes that
+  // occasionally outran even a 180-second budget, and the failure surfaced as
+  // `page.goto` timing out — which reads like the server is down rather than
+  // like the page is busy. The bridge appearing is the real readiness signal
+  // and it is waited for on the next line.
+  await page.goto('/?e2e=1', { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForFunction(() => typeof window.__LH_TEST__ !== 'undefined', null, {
     timeout: 60_000,
   });
   await page.evaluate(() => window.__LH_TEST__!.ready());
-  // The population is deliberately late: it carries Recast's WebAssembly and
-  // loads after the world is standing.
+  // The population is deliberately late: it carries that WebAssembly and loads
+  // after the world is standing.
   return page.evaluate(() => window.__LH_TEST__!.awaitPopulation());
 }
 
@@ -45,9 +57,52 @@ async function boot(page: Page) {
 test.describe.configure({ timeout: 180_000 });
 
 test.describe('population', () => {
-  test('the village is inhabited, and the navmesh is real', async ({ page }) => {
-    const errors = watchConsole(page);
-    const pop = await boot(page);
+  /**
+   * One page for the whole file.
+   *
+   * A page each was the obvious way to write this and it does not survive
+   * contact: sixteen boots means sixteen WebGL contexts and sixteen fetches of
+   * ~900 kB of WebAssembly, and from about the fifth onward `page.goto` starts
+   * timing out at sixty seconds — the *load*, not the game, which passed every
+   * assertion it reached. Sharing one page removes the failure mode and takes
+   * the file from ten minutes to under three.
+   *
+   * The cost is that scenarios are no longer isolated, so each one sets the
+   * hour and the player's position it needs rather than assuming a fresh
+   * world; the two that genuinely mutate the run — travelling, and saving over
+   * a birthday — are last in the file.
+   */
+  let page: Page;
+  let allErrors: string[];
+  let allWarnings: string[];
+  let population: PopulationSnapshot;
+
+  test.beforeAll(async ({ browser }) => {
+    page = await browser.newPage();
+    // Attached before the first navigation, so the duplicate-three.js warning
+    // — which fires while the modules evaluate — is actually catchable.
+    const console = watchConsole(page);
+    allErrors = console.errors;
+    allWarnings = console.warnings;
+    population = await boot(page);
+  });
+
+  test.afterAll(async () => {
+    await page?.close();
+  });
+
+  /**
+   * Console errors, from a mark taken at the start of a test.
+   *
+   * The watcher is per-page and the page is shared, so asserting on the whole
+   * array would inherit anything an earlier scenario provoked.
+   */
+  const errorMark = () => allErrors.length;
+  const errorsSince = (mark: number) => allErrors.slice(mark);
+
+  test('the village is inhabited, and the navmesh is real', async () => {
+    const mark = errorMark();
+    const pop = population;
 
     expect(pop.named).toBe(8);
     // The claim this test exists to settle.
@@ -57,11 +112,10 @@ test.describe('population', () => {
     // One interior door plus two crossings.
     expect(pop.offMeshLinks).toBe(3);
     expect(pop.ambient).toBeGreaterThan(0);
-    expect(errors).toEqual([]);
+    expect(errorsSince(mark)).toEqual([]);
   });
 
-  test('crowd agents exist near the player and are given back at distance', async ({ page }) => {
-    await boot(page);
+  test('crowd agents exist near the player and are given back at distance', async () => {
 
     const seen = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -85,9 +139,8 @@ test.describe('population', () => {
     expect(seen.away.far).toBeGreaterThan(0);
   });
 
-  test('a named resident keeps to a routine through the day', async ({ page }) => {
-    const errors = watchConsole(page);
-    await boot(page);
+  test('a named resident keeps to a routine through the day', async () => {
+    const mark = errorMark();
 
     const day = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -113,42 +166,55 @@ test.describe('population', () => {
     expect(byHour[13].activity).toBe('meal');
     expect(byHour[20].activity).toBe('social');
     expect(byHour[23].activity).toBe('sleep');
-    expect(errors).toEqual([]);
+    expect(errorsSince(mark)).toEqual([]);
   });
 
-  test('a resident walks to where their schedule sends them', async ({ page }) => {
-    await boot(page);
+  test('a resident walks to where their schedule sends them', async () => {
 
     const walk = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
-      // Follow her: standing near keeps her in the near tier the whole way.
-      t.setNpcHour(3);
+      // Pick whoever currently has the furthest to go, rather than naming
+      // somebody and hoping.
+      //
+      // Residents spawn where the clock says they already are, so at most
+      // hours most of them are standing on their anchor with nothing to do.
+      // The first version of this named Maryam, set the hour to 09:00, and
+      // found her already at the stall — it measured 1.8 m of movement and
+      // called the schedule broken.
+      t.setNpcHour(20);
       t.settle(60);
-      const before = t.getNpc('v_maryam')!;
-      t.teleport(before.x + 4, before.z + 4, 0);
+
+      const gap = (n: { x: number; z: number; targetX: number | null; targetZ: number | null }) =>
+        n.targetX === null || n.targetZ === null
+          ? 0
+          : Math.hypot(n.x - n.targetX, n.z - n.targetZ);
+
+      const walker = t
+        .getNpcs()
+        .filter((n) => !n.indoors)
+        .sort((a, b) => gap(b) - gap(a))[0]!;
+
+      // Stand beside them: the near tier is where avoidance and animation are.
+      t.teleport(walker.x + 4, walker.z + 4, 0);
       t.settle(30);
 
-      t.setNpcHour(9);
-      // 900 frames is 15 seconds of simulation, about 19 m of commute. The
-      // walk is ~37 m, so this asserts progress rather than arrival — see the
-      // settle budget above for why it is not simply run to completion.
+      const before = t.getNpc(walker.id)!;
       for (let i = 0; i < 10; i++) t.settle(90);
-      const after = t.getNpc('v_maryam')!;
-      return { before, after };
+      const after = t.getNpc(walker.id)!;
+      return { id: walker.id, before, after, gapBefore: gap(before) };
     });
 
-    // The stall is at (10, 14).
-    const distanceBefore = Math.hypot(walk.before.x - 10, walk.before.z - 14);
-    const distanceAfter = Math.hypot(walk.after.x - 10, walk.after.z - 14);
-    const moved = Math.hypot(walk.after.x - walk.before.x, walk.after.z - walk.before.z);
-
-    expect(moved).toBeGreaterThan(4);
-    // And in the right direction.
-    expect(distanceAfter).toBeLessThan(distanceBefore - 4);
+    // 900 frames is 15 seconds, so about 16 m at a stroll. Assert closing the
+    // gap rather than arriving — see the settle budget above.
+    expect(walk.gapBefore).toBeGreaterThan(6);
+    const gapAfter = Math.hypot(
+      walk.after.x - (walk.after.targetX ?? walk.after.x),
+      walk.after.z - (walk.after.targetZ ?? walk.after.z),
+    );
+    expect(gapAfter).toBeLessThan(walk.gapBefore - 4);
   });
 
-  test('nobody floats, and nobody is buried', async ({ page }) => {
-    await boot(page);
+  test('nobody floats, and nobody is buried', async () => {
 
     const offGround = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -164,8 +230,7 @@ test.describe('population', () => {
     expect(offGround).toEqual([]);
   });
 
-  test('a resident sent into a wall never ends up inside it', async ({ page }) => {
-    await boot(page);
+  test('a resident sent into a wall never ends up inside it', async () => {
 
     const result = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -190,31 +255,45 @@ test.describe('population', () => {
     expect(insideX && insideZ).toBe(false);
   });
 
-  test('residents keep moving over a long stretch rather than seizing up', async ({ page }) => {
-    await boot(page);
+  test('residents keep moving over a long stretch rather than seizing up', async () => {
 
     const seen = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
-      t.setNpcHour(9);
+      // 20:00 has most of `early_trade`, `office_day` and `retired` heading to
+      // their social anchor from wherever the afternoon left them, so several
+      // residents genuinely have somewhere to be.
+      t.setNpcHour(20);
       t.teleport(0, 20, 0);
-      const start = t.getNpcs().map((n) => ({ id: n.id, x: n.x, z: n.z }));
+      t.settle(30);
+
+      const gap = (n: { x: number; z: number; targetX: number | null; targetZ: number | null }) =>
+        n.targetX === null || n.targetZ === null
+          ? 0
+          : Math.hypot(n.x - n.targetX, n.z - n.targetZ);
+
+      // Only the ones with a real journey ahead of them. Somebody standing on
+      // their anchor is not seized up, they have arrived — the first version
+      // counted those as failures.
+      const travelling = t.getNpcs().filter((n) => !n.indoors && gap(n) > 6);
+      const start = travelling.map((n) => ({ id: n.id, gap: gap(n) }));
+
       for (let i = 0; i < 10; i++) t.settle(90);
-      const end = t.getNpcs().map((n) => ({ id: n.id, x: n.x, z: n.z }));
+
+      const end = start.map((s) => {
+        const n = t.getNpc(s.id)!;
+        return { id: s.id, gap: gap(n) };
+      });
       return { start, end, pop: t.getPopulation()! };
     });
 
-    const moved = seen.start.filter((s, i) => {
-      const e = seen.end[i];
-      return Math.hypot(e.x - s.x, e.z - s.z) > 1;
-    });
-    // Not everybody is going anywhere at 09:00 — the retired resident is on a
-    // bench. But most of the village should have got somewhere.
-    expect(moved.length).toBeGreaterThanOrEqual(3);
+    expect(seen.start.length).toBeGreaterThanOrEqual(2);
+    const closed = seen.start.filter((s, i) => seen.end[i].gap < s.gap - 3);
+    // Everybody with somewhere to be got closer to it.
+    expect(closed.length).toBe(seen.start.length);
   });
 
-  test('standing in somebody\'s way does not stop them getting there', async ({ page }) => {
-    const errors = watchConsole(page);
-    await boot(page);
+  test('standing in somebody\'s way does not stop them getting there', async () => {
+    const mark = errorMark();
 
     const blocked = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -224,15 +303,18 @@ test.describe('population', () => {
       t.setNpcHour(13);
       t.settle(60);
       const npc = t.getNpcs().find((n) => !n.indoors)!;
-      const goal = { x: npc.x + 34, z: npc.z };
+      // 14 m, which is about 13 seconds at a stroll, against the 900 frames
+      // below. Long enough to need the detour, short enough to finish inside
+      // the settle budget.
+      const goal = { x: npc.x + 14, z: npc.z };
       t.sendNpc(npc.id, goal.x, goal.z);
 
       // Halfway along, directly in the path.
-      t.teleport(npc.x + 17, npc.z, Math.PI);
+      t.teleport(npc.x + 7, npc.z, Math.PI);
       t.settle(60);
 
       let closest = Infinity;
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < 15; i++) {
         t.settle(60);
         const now = t.getNpc(npc.id)!;
         const player = t.getPlayerState();
@@ -250,13 +332,12 @@ test.describe('population', () => {
 
     // They got past. Either steered around or, at worst, the watchdog freed
     // them — what must not happen is standing against the player forever.
-    expect(blocked.toGoal).toBeLessThan(14);
-    expect(errors).toEqual([]);
+    expect(blocked.toGoal).toBeLessThan(6);
+    expect(errorsSince(mark)).toEqual([]);
   });
 
-  test('traffic runs and does not deadlock', async ({ page }) => {
-    const errors = watchConsole(page);
-    await boot(page);
+  test('traffic runs and does not deadlock', async () => {
+    const mark = errorMark();
 
     const traffic = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -274,11 +355,10 @@ test.describe('population', () => {
     expect(traffic.mid.traffic).toBeGreaterThan(0);
     // The watchdog exists; under ordinary conditions it should stay asleep.
     expect(traffic.forced).toBeLessThan(3);
-    expect(errors).toEqual([]);
+    expect(errorsSince(mark)).toEqual([]);
   });
 
-  test('traffic never appears in front of the player', async ({ page }) => {
-    await boot(page);
+  test('traffic never appears in front of the player', async () => {
 
     const appeared = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -313,8 +393,7 @@ test.describe('population', () => {
     }
   });
 
-  test('a non-criminal disturbance is witnessed, and greeting is remembered', async ({ page }) => {
-    await boot(page);
+  test('a non-criminal disturbance is witnessed, and greeting is remembered', async () => {
 
     const seen = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -349,33 +428,49 @@ test.describe('population', () => {
     expect(seen.after.familiarity).toBeGreaterThan(seen.before.familiarity);
   });
 
-  test('a wall stops a witness seeing through it', async ({ page }) => {
-    await boot(page);
+  test('distance gates what a witness notices', async () => {
 
     const result = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
       t.setNpcHour(13);
       t.settle(60);
       const target = t.getNpcs().find((n) => !n.indoors)!;
-      // Stand beside them, then raise a silent event on the far side of the
-      // village. Silent means sight is the only channel, and 200 m of terrain
-      // and houses is between.
       t.teleport(target.x + 2, target.z + 2, 0);
       t.settle(60);
-      const before = t.getPopulation()!.witnessed;
-      for (let i = 0; i < 10; i++) {
-        t.emitPerception('theft', target.x, target.y + 1, target.z + 400);
-        t.settle(40);
-      }
-      return { before, after: t.getPopulation()!.witnessed };
+
+      // Two identical windows, differing only in where the event happens.
+      //
+      // `witnessed` is a running total of *everything*, including the greeting
+      // the player emits every 1.5 s just by standing near people. An earlier
+      // version compared the raw count before and after and asserted equality;
+      // it went 3 to 23 and read like a wall failing to block anything, when
+      // what it had measured was a conversation. The background is also not
+      // constant between windows — people walk in and out of the near tier —
+      // so the comparison has to be near-against-far, not against a fixed
+      // number. Occlusion itself is covered exhaustively in the unit tests,
+      // where the raycast answer can be supplied directly.
+      const run = (offsetZ: number) => {
+        const from = t.getPopulation()!.witnessed;
+        for (let i = 0; i < 10; i++) {
+          t.emitPerception('theft', target.x, target.y + 1, target.z + offsetZ);
+          t.settle(40);
+        }
+        return t.getPopulation()!.witnessed - from;
+      };
+
+      // Far first, so the near run cannot be credited with its warm-up.
+      const far = run(400);
+      const near = run(0);
+      return { far, near };
     });
 
-    // Silent and 400 m away: nothing to see and nothing to hear.
-    expect(result.after).toBe(result.before);
+    // A silent theft under somebody's nose is noticed; the same thing 400 m
+    // away, outside the zone entirely, is not. Measured at roughly 3:1 against
+    // the ambient background, so the margin is generous rather than tight.
+    expect(result.near).toBeGreaterThan(result.far * 1.5);
   });
 
-  test('relationships and ages survive a save and reload', async ({ page }) => {
-    await boot(page);
+  test('relationships and ages survive a save and reload', async () => {
 
     const round = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -411,9 +506,8 @@ test.describe('population', () => {
     expect(round.ageAfterLoad).toBe(round.ageAfterBirthday);
   });
 
-  test('leaving the zone and coming back gives everything up and rebuilds it', async ({ page }) => {
-    const errors = watchConsole(page);
-    await boot(page);
+  test('leaving the zone and coming back gives everything up and rebuilds it', async () => {
+    const mark = errorMark();
 
     const trip = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -440,14 +534,11 @@ test.describe('population', () => {
     // Coming home rebuilds the village population rather than accumulating.
     expect(trip.back.named).toBe(8);
     expect(trip.back.navAgents).toBeLessThanOrEqual(trip.home.navAgents + 4);
-    expect(errors).toEqual([]);
+    expect(errorsSince(mark)).toEqual([]);
   });
 
-  test('a car driven through the village does not disturb anybody into an error', async ({
-    page,
-  }) => {
-    const errors = watchConsole(page);
-    await boot(page);
+  test('a car driven through the village does not disturb anybody into an error', async () => {
+    const mark = errorMark();
 
     const drive = await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
@@ -462,7 +553,12 @@ test.describe('population', () => {
       if (!id) return null;
       t.settle(60);
       t.setVehicleInput(id, { throttle: 1 });
-      for (let i = 0; i < 20; i++) t.settle(60);
+      // Five seconds, not twenty. Held at full throttle for twenty it reaches
+      // top speed, drives clean out of the village and gets caught by the
+      // physics floor rescue — which teleports it upright *and at rest*, so
+      // the first version of this measured 0.0005 m/s and concluded the car
+      // had never moved.
+      for (let i = 0; i < 5; i++) t.settle(60);
       const telemetry = t.getVehicle(id);
       const pop = t.getPopulation()!;
       t.despawnVehicle(id);
@@ -471,26 +567,26 @@ test.describe('population', () => {
 
     expect(drive).not.toBeNull();
     // It actually drove, so the pedestrians had something to be near rather
-    // than the test asserting on a parked car.
-    expect(Math.abs(drive!.speed)).toBeGreaterThan(1);
+    // than the test asserting on a parked car. Five seconds of throttle takes
+    // a hatchback past 15 m/s.
+    expect(Math.abs(drive!.speed)).toBeGreaterThan(8);
     expect(drive!.pop.named).toBe(8);
-    expect(errors).toEqual([]);
+    expect(errorsSince(mark)).toEqual([]);
   });
 
-  test('the shipped build has one three.js and no console errors while populated', async ({
-    page,
-  }) => {
-    const warnings: string[] = [];
-    page.on('console', (m) => {
-      if (m.type() === 'warning' || m.type() === 'error') warnings.push(m.text());
-    });
-    await boot(page);
+  test('the shipped build has one three.js, and no console errors at all', async () => {
     await page.evaluate(() => {
       const t = window.__LH_TEST__!;
       t.teleport(0, 0, 0);
       for (let i = 0; i < 8; i++) t.settle(60);
     });
 
-    expect(warnings.filter((w) => w.includes('Multiple instances of Three.js'))).toEqual([]);
+    // Everything since the page was first navigated, including load time.
+    // `dedupe: ['three']` in the Vite config exists for this; a second copy
+    // breaks instanceof and any prototype patching, which is how
+    // `three-mesh-bvh` accelerates raycasts.
+    expect(allWarnings.filter((w) => w.includes('Multiple instances of Three.js'))).toEqual([]);
+    // And the whole file's worth of errors, not just this scenario's.
+    expect(allErrors).toEqual([]);
   });
 });

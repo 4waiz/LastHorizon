@@ -35,6 +35,24 @@ export class CameraCollision {
   private hitList: THREE.Intersection[] = [];
 
   /**
+   * The only meshes worth raycasting: those whose material can actually fade.
+   *
+   * The first version raycast the entire scene with `firstHitOnly = false`,
+   * then threw away every hit whose material was not `fadeable`. That is a
+   * full all-hits traversal of the terrain's BVH, plus CPU-skinning of every
+   * skinned mesh in shot, to find at most a couple of tree trunks — measured
+   * at 10.6 ms a frame in a dev build, the single largest item in the frame,
+   * and it made the population's browser tests time out before it made
+   * anything else fail.
+   *
+   * Rebuilt periodically rather than per frame: the fadeable set is
+   * vegetation, which is built when a zone loads and does not change between
+   * one frame and the next.
+   */
+  private candidates: THREE.Object3D[] = [];
+  private sinceRefresh = Number.POSITIVE_INFINITY;
+
+  /**
    * Shorten `desiredDistance` so the camera clears the world.
    * Returns the distance actually available.
    */
@@ -86,8 +104,14 @@ export class CameraCollision {
     this.ray.far = Math.max(0, dist - 0.45);
     this.ray.firstHitOnly = false;
 
+    this.refreshCandidates(scene, dt);
+    this.pruneDetached();
     this.hitList.length = 0;
-    this.ray.intersectObject(scene, true, this.hitList);
+    // `false`: the candidate list is already flat, so recursing would walk
+    // each mesh's (empty) children for nothing.
+    if (this.candidates.length > 0) {
+      this.ray.intersectObjects(this.candidates, false, this.hitList);
+    }
 
     // Everything currently faded decays back to visible unless re-hit below.
     for (const mat of this.faded.keys()) this.faded.set(mat, 1);
@@ -113,6 +137,61 @@ export class CameraCollision {
     }
   }
 
+  /** Seconds between rebuilds of the fadeable-mesh list. */
+  private static readonly REFRESH_SECONDS = 0.5;
+
+  /**
+   * Collect the meshes whose material can fade.
+   *
+   * Half a second of staleness costs nothing: the fadeable set is vegetation,
+   * placed when a zone builds. A tree that appears mid-second stays solid for
+   * up to thirty frames and then behaves, which nobody can see; the
+   * alternative is paying for a full-scene raycast sixty times a second to
+   * discover the same list.
+   */
+  private refreshCandidates(scene: THREE.Object3D, dt: number): void {
+    this.sinceRefresh += dt;
+    if (this.sinceRefresh < CameraCollision.REFRESH_SECONDS) return;
+    this.sinceRefresh = 0;
+
+    this.candidates.length = 0;
+    scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const m of mats) {
+        if ((m as ToonMaterial)?.userData?.fade) {
+          this.candidates.push(mesh);
+          return;
+        }
+      }
+    });
+  }
+
+  /**
+   * Drop anything detached from the scene since the last rebuild.
+   *
+   * A zone teardown removes and disposes its meshes; raycasting one held in a
+   * list up to half a second stale would be reading freed geometry. The list
+   * is short — vegetation is instanced — so checking it every frame is
+   * cheaper than the bug.
+   */
+  private pruneDetached(): void {
+    for (let i = this.candidates.length - 1; i >= 0; i--) {
+      if (!this.candidates[i].parent) this.candidates.splice(i, 1);
+    }
+  }
+
+  /** Force the next frame to rebuild the list. Used on zone change. */
+  invalidateCandidates(): void {
+    this.sinceRefresh = Number.POSITIVE_INFINITY;
+  }
+
+  /** How many meshes the fade pass actually tests. For the debug overlay. */
+  get fadeCandidateCount(): number {
+    return this.candidates.length;
+  }
+
   /** Restore every faded material — used when the world is torn down. */
   clearFades(): void {
     for (const mat of this.faded.keys()) {
@@ -120,5 +199,8 @@ export class CameraCollision {
       if (u) u.value = 1;
     }
     this.faded.clear();
+    // The meshes those materials belonged to are about to be disposed.
+    this.candidates.length = 0;
+    this.invalidateCandidates();
   }
 }

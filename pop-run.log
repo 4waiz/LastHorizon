@@ -1,0 +1,84 @@
+
+Running 16 tests using 1 worker
+
+  ok  1 [chromium] › tests\e2e\population.spec.ts:103:3 › population › the village is inhabited, and the navmesh is real (7ms)
+  ok  2 [chromium] › tests\e2e\population.spec.ts:118:3 › population › crowd agents exist near the player and are given back at distance (2.7s)
+  ok  3 [chromium] › tests\e2e\population.spec.ts:142:3 › population › a named resident keeps to a routine through the day (43.8s)
+  ok  4 [chromium] › tests\e2e\population.spec.ts:172:3 › population › a resident walks to where their schedule sends them (40.7s)
+  ok  5 [chromium] › tests\e2e\population.spec.ts:217:3 › population › nobody floats, and nobody is buried (2.4m)
+  ok  6 [chromium] › tests\e2e\population.spec.ts:233:3 › population › a resident sent into a wall never ends up inside it (47.2s)
+  ok  7 [chromium] › tests\e2e\population.spec.ts:258:3 › population › residents keep moving over a long stretch rather than seizing up (2.0m)
+  ok  8 [chromium] › tests\e2e\population.spec.ts:295:3 › population › standing in somebody's way does not stop them getting there (2.7m)
+  x   9 [chromium] › tests\e2e\population.spec.ts:339:3 › population › traffic runs and does not deadlock (3.1m)
+  ok 10 [chromium] › tests\e2e\population.spec.ts:361:3 › population › traffic never appears in front of the player (14.4s)
+  x  11 [chromium] › tests\e2e\population.spec.ts:396:3 › population › a non-criminal disturbance is witnessed, and greeting is remembered (3.1m)
+  ok 12 [chromium] › tests\e2e\population.spec.ts:431:3 › population › distance gates what a witness notices (18.5s)
+  x  13 [chromium] › tests\e2e\population.spec.ts:473:3 › population › relationships and ages survive a save and reload (3.1m)
+  ok 14 [chromium] › tests\e2e\population.spec.ts:509:3 › population › leaving the zone and coming back gives everything up and rebuilds it (24.8s)
+  ok 15 [chromium] › tests\e2e\population.spec.ts:540:3 › population › a car driven through the village does not disturb anybody into an error (8.9s)
+  ok 16 [chromium] › tests\e2e\population.spec.ts:577:3 › population › the shipped build has one three.js, and no console errors at all (1.8m)
+
+
+  1) [chromium] › tests\e2e\population.spec.ts:339:3 › population › traffic runs and does not deadlock 
+
+    Test timeout of 180000ms exceeded.
+
+    Error: page.evaluate: Target page, context or browser has been closed
+
+      340 |     const mark = errorMark();
+      341 |
+    > 342 |     const traffic = await page.evaluate(async () => {
+          |                                ^
+      343 |       const t = window.__LH_TEST__!;
+      344 |       // On the road, so the bubble has somewhere to spawn.
+      345 |       t.teleport(0, 0, 0);
+        at C:\Users\awaiz\OneDrive\Desktop\LastHorizon\tests\e2e\population.spec.ts:342:32
+
+    Error Context: test-results\population-population-traffic-runs-and-does-not-deadlock-chromium\error-context.md
+
+    Error Context: test-results\population-population-traffic-runs-and-does-not-deadlock-chromium\error-context.md
+
+  2) [chromium] › tests\e2e\population.spec.ts:396:3 › population › a non-criminal disturbance is witnessed, and greeting is remembered 
+
+    Test timeout of 180000ms exceeded.
+
+    Error: page.evaluate: Target page, context or browser has been closed
+
+      396 |   test('a non-criminal disturbance is witnessed, and greeting is remembered', async () => {
+      397 |
+    > 398 |     const seen = await page.evaluate(async () => {
+          |                             ^
+      399 |       const t = window.__LH_TEST__!;
+      400 |       // Stand right beside a resident who is outdoors.
+      401 |       t.setNpcHour(13);
+        at C:\Users\awaiz\OneDrive\Desktop\LastHorizon\tests\e2e\population.spec.ts:398:29
+
+    Error Context: test-results\population-population-a-no-e0d9a--and-greeting-is-remembered-chromium\error-context.md
+
+    Error Context: test-results\population-population-a-no-e0d9a--and-greeting-is-remembered-chromium\error-context.md
+
+  3) [chromium] › tests\e2e\population.spec.ts:473:3 › population › relationships and ages survive a save and reload 
+
+    Test timeout of 180000ms exceeded.
+
+    Error: page.evaluate: Target page, context or browser has been closed
+
+      473 |   test('relationships and ages survive a save and reload', async () => {
+      474 |
+    > 475 |     const round = await page.evaluate(async () => {
+          |                              ^
+      476 |       const t = window.__LH_TEST__!;
+      477 |       const target = t.getNpcs()[0];
+      478 |       // Build some history.
+        at C:\Users\awaiz\OneDrive\Desktop\LastHorizon\tests\e2e\population.spec.ts:475:30
+
+    Error Context: test-results\population-population-rela-1d803-s-survive-a-save-and-reload-chromium\error-context.md
+
+    Error Context: test-results\population-population-rela-1d803-s-survive-a-save-and-reload-chromium\error-context.md
+
+  3 failed
+    [chromium] › tests\e2e\population.spec.ts:339:3 › population › traffic runs and does not deadlock 
+    [chromium] › tests\e2e\population.spec.ts:396:3 › population › a non-criminal disturbance is witnessed, and greeting is remembered 
+    [chromium] › tests\e2e\population.spec.ts:473:3 › population › relationships and ages survive a save and reload 
+  13 passed (22.5m)
+EXIT=1
