@@ -192,6 +192,48 @@ test.describe('population', () => {
     expect(moved.length).toBeGreaterThanOrEqual(3);
   });
 
+  test('standing in somebody\'s way does not stop them getting there', async ({ page }) => {
+    const errors = watchConsole(page);
+    await boot(page);
+
+    const blocked = await page.evaluate(async () => {
+      const t = window.__LH_TEST__!;
+      // Send a resident on a long walk, then stand on the line they are
+      // walking. The crowd should steer round; the player is a solid obstacle
+      // to it, not a suggestion.
+      t.setNpcHour(13);
+      t.settle(60);
+      const npc = t.getNpcs().find((n) => !n.indoors)!;
+      const goal = { x: npc.x + 34, z: npc.z };
+      t.sendNpc(npc.id, goal.x, goal.z);
+
+      // Halfway along, directly in the path.
+      t.teleport(npc.x + 17, npc.z, Math.PI);
+      t.settle(60);
+
+      let closest = Infinity;
+      for (let i = 0; i < 22; i++) {
+        t.settle(60);
+        const now = t.getNpc(npc.id)!;
+        const player = t.getPlayerState();
+        closest = Math.min(closest, Math.hypot(now.x - player.x, now.z - player.z));
+      }
+
+      const end = t.getNpc(npc.id)!;
+      return {
+        id: npc.id,
+        toGoal: Math.hypot(end.x - goal.x, end.z - goal.z),
+        closest,
+        recoveries: t.getPopulation()!.stuckRecoveries,
+      };
+    });
+
+    // They got past. Either steered around or, at worst, the watchdog freed
+    // them — what must not happen is standing against the player forever.
+    expect(blocked.toGoal).toBeLessThan(14);
+    expect(errors).toEqual([]);
+  });
+
   test('traffic runs and does not deadlock', async ({ page }) => {
     const errors = watchConsole(page);
     await boot(page);
