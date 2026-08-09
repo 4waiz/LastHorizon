@@ -457,6 +457,27 @@ body {
   margin: 0 1px;
 }
 
+/* Cash in hand. Same tabular figures as the keepsake counter so the two
+   columns line up, and the same warm ink so it reads as part of the set. */
+.wallet {
+  margin-top: 1px;
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  color: #56503f;
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.75), 0 1px 8px rgba(255, 255, 255, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.wallet__sign {
+  opacity: 0.5;
+  margin-right: 1px;
+}
+
+.wallet.is-pop {
+  animation: pop 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .counter.is-pop {
   animation: pop 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }

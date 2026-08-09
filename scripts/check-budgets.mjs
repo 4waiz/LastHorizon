@@ -17,9 +17,12 @@ const KB = 1024;
 /** Matched against dist/assets by filename prefix. */
 const BUNDLE_BUDGETS = [
   { prefix: 'three-', ext: '.js', maxKB: 700, label: 'three chunk' },
-  // Raised 260 -> 300 in Phase 4, 300 -> 330 in Phase 6; see "Bundle budget"
-  // in docs/PERFORMANCE_BUDGETS.md for what was added and why.
-  { prefix: 'index-', ext: '.js', maxKB: 330, label: 'app chunk' },
+  // Raised 260 -> 300 in Phase 4, 300 -> 330 in Phase 6, 330 -> 360 in
+  // Phase 7; see "Bundle budget" in docs/PERFORMANCE_BUDGETS.md for what was
+  // added and why. Phase 7's 28 kB is the *eager* half of the economy and
+  // interiors work -- cash is on the HUD from the first frame and in every
+  // save, so it cannot wait for a doorway. The other 27 kB went lazy.
+  { prefix: 'index-', ext: '.js', maxKB: 360, label: 'app chunk' },
   { prefix: 'gsap-', ext: '.js', maxKB: 90, label: 'gsap chunk' },
   { prefix: 'bvh-', ext: '.js', maxKB: 75, label: 'bvh chunk' },
   { prefix: 'index-', ext: '.css', maxKB: 24, label: 'stylesheet' },
@@ -62,6 +65,10 @@ const LAZY_CHUNK_PREFIXES = [
   'Population-',
   'Navigation-',
   'recast-',
+  // Phase 7. The interior registry, the nine layouts, the builder and the
+  // whole service layer, reachable only by opening a door -- a transition that
+  // already awaits the 145 kB kit, so the code rides along in the same gap.
+  'InteriorSubsystem-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));

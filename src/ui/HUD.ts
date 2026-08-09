@@ -45,6 +45,8 @@ export class HUD {
   private counterValue = $('counterValue');
   private counterMax = $('counterMax');
   private counter = document.querySelector<HTMLElement>('.counter')!;
+  private wallet = $('wallet');
+  private walletValue = $('walletValue');
   private hint = $('hint');
   private debug = $('debug');
   private prompt = $('prompt');
@@ -480,6 +482,22 @@ export class HUD {
   setCounter(count: number, total: number): void {
     this.counterValue.textContent = String(count);
     this.counterMax.textContent = String(total);
+  }
+
+  /**
+   * Cash in hand.
+   *
+   * Only the pocket, not the bank: the number beside a shop counter has to be
+   * the one that decides whether you can buy the thing, and `Wallet.debit`
+   * deliberately never reaches into savings.
+   */
+  setWallet(cash: number): void {
+    const next = String(cash);
+    if (this.walletValue.textContent === next) return;
+    this.walletValue.textContent = next;
+    this.wallet.classList.remove('is-pop');
+    void this.wallet.offsetWidth; // restart the animation
+    this.wallet.classList.add('is-pop');
   }
 
   popCounter(): void {

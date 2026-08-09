@@ -113,6 +113,14 @@ export interface InteriorPoint {
   readonly service?: string;
   /** Task id this point starts, for the job loops. */
   readonly task?: string;
+  /**
+   * Which way to face when using it. Seats only.
+   *
+   * glTF convention, matching `PlayerController.facing`. Standing up steps
+   * 0.9 m back along the opposite of this, which is why a seat that faces
+   * nowhere in particular should leave it out rather than guess.
+   */
+  readonly facing?: number;
   /** Higher wins when two points overlap. Defaults to 20. */
   readonly priority?: number;
 }

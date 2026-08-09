@@ -102,6 +102,79 @@ export interface TestSurface {
   emitPerception(kind: string, x: number, y: number, z: number): void;
   trafficList(): readonly TrafficSnapshot[];
   populationActive(on: boolean): void;
+
+  // ---- Phase 7: interiors, economy, jobs -----------------------------------
+  doorList(): readonly DoorSnapshot[];
+  enterDoor(doorId: string): Promise<boolean>;
+  interiorState(): InteriorSnapshot | null;
+  walletState(): WalletSnapshot;
+  giveMoney(amount: number): void;
+  serviceMenu(serviceId: string): ServiceMenuSnapshot | null;
+  runService(serviceId: string, offerId: string): string;
+  taskState(): TaskSnapshot | null;
+  beginTask(taskId: string): boolean;
+  reportTask(place: string): boolean;
+  advanceTask(seconds: number): void;
+  cancelTask(): void;
+}
+
+/** A door in the active zone, and what is behind it. */
+export interface DoorSnapshot {
+  id: string;
+  interiorId: string;
+  x: number;
+  y: number;
+  z: number;
+  label: string;
+  open: boolean;
+}
+
+export interface InteriorSnapshot {
+  id: string;
+  name: string;
+  service: string;
+  /** Room-local origin, so a test can assert the cells stay distinct. */
+  originX: number;
+  originY: number;
+  parts: number;
+  triangles: number;
+  colliderBoxes: number;
+  points: readonly string[];
+  livePortal: boolean;
+  /** Where the player will be put on stepping back outside. */
+  returnTo: { doorId: string; x: number; y: number; z: number; facing: number } | null;
+}
+
+export interface WalletSnapshot {
+  cash: number;
+  bank: number;
+  ledger: number;
+  /** Net of every entry in the log, for the balance-sheet checks. */
+  net: number;
+}
+
+export interface ServiceMenuSnapshot {
+  id: string;
+  title: string;
+  open: boolean;
+  entries: readonly {
+    id: string;
+    label: string;
+    price: number;
+    available: boolean;
+    reason?: string;
+  }[];
+}
+
+export interface TaskSnapshot {
+  id: string;
+  name: string;
+  status: string;
+  runNumber: number;
+  difficulty: number;
+  pay: number;
+  timeRemaining: number | null;
+  objectives: readonly { id: string; label: string; done: number; target: number; complete: boolean }[];
 }
 
 /** Population counters, for assertions and for the profiler runs. */
@@ -440,6 +513,33 @@ export interface LHTestBridge {
    * readout, stop the wind and the clock, then settle. Idempotent.
    */
   prepareShot(frames?: number): void;
+
+  // ---- Phase 7 --------------------------------------------------------------
+  /** Every door in the active zone, with whether it is open right now. */
+  getDoors(): readonly DoorSnapshot[];
+  /**
+   * Go through a named door.
+   *
+   * Resolves false when the building is shut or the door is unknown, which is
+   * the same answer the prompt gives — so a test exercises the real path
+   * rather than a bypass.
+   */
+  enterDoor(doorId: string): Promise<boolean>;
+  /** What is open, what it contains, and where stepping outside leads. */
+  getInterior(): InteriorSnapshot | null;
+  getWallet(): WalletSnapshot;
+  /** Top up, so a test can reach a price without doing a shift first. */
+  giveMoney(amount: number): void;
+  getServiceMenu(serviceId: string): ServiceMenuSnapshot | null;
+  /** Run one offer. Returns 'ok' or the failure reason. */
+  useService(serviceId: string, offerId: string): string;
+  getTask(): TaskSnapshot | null;
+  startTask(taskId: string): boolean;
+  /** Report that a named place was used, as walking into it would. */
+  reportTask(place: string): boolean;
+  /** Feed the task clock without waiting. */
+  advanceTask(seconds: number): void;
+  cancelTask(): void;
 }
 
 declare global {
@@ -773,6 +873,54 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
       // Stale keys otherwise walk the player out of frame while settling.
       surface.releaseInput();
       bridge.settle(frames);
+    },
+
+    getDoors(): readonly DoorSnapshot[] {
+      return surface.doorList();
+    },
+
+    enterDoor(doorId: string): Promise<boolean> {
+      return surface.enterDoor(doorId);
+    },
+
+    getInterior(): InteriorSnapshot | null {
+      return surface.interiorState();
+    },
+
+    getWallet(): WalletSnapshot {
+      return surface.walletState();
+    },
+
+    giveMoney(amount: number): void {
+      surface.giveMoney(amount);
+    },
+
+    getServiceMenu(serviceId: string): ServiceMenuSnapshot | null {
+      return surface.serviceMenu(serviceId);
+    },
+
+    useService(serviceId: string, offerId: string): string {
+      return surface.runService(serviceId, offerId);
+    },
+
+    getTask(): TaskSnapshot | null {
+      return surface.taskState();
+    },
+
+    startTask(taskId: string): boolean {
+      return surface.beginTask(taskId);
+    },
+
+    reportTask(place: string): boolean {
+      return surface.reportTask(place);
+    },
+
+    advanceTask(seconds: number): void {
+      surface.advanceTask(seconds);
+    },
+
+    cancelTask(): void {
+      surface.cancelTask();
     },
   };
 

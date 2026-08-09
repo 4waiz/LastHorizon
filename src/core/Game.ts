@@ -58,7 +58,19 @@ import { DEFAULT_CAMERA, ThirdPersonCamera } from '../camera/ThirdPersonCamera';
 import { ContactShadow } from '../graphics/StylizedShadows';
 import { PostProcessing } from '../graphics/PostProcessing';
 import { WindowPortal } from '../graphics/WindowPortal';
-import { INTERIOR_ORIGIN } from '../world/Interiors';
+import type { InteriorRegistry } from '../world/interiors/InteriorRegistry';
+import { interiorInteractables } from '../interaction/WorldInteractables';
+import type { BuiltPoint } from '../world/interiors/InteriorBuilder';
+import { Economy } from '../economy/Economy';
+import { RENT_PERIOD_DAYS, SERVICE_FEES } from '../economy/PriceCatalog';
+import { TaskSystem, type StartRefusal } from '../tasks/TaskSystem';
+import { taskDef } from '../tasks/taskCatalog';
+import type { ServiceFailure, ServiceHost } from '../services/ServiceSystem';
+import type { DecorItemId } from '../services/ServiceCatalog';
+import type { KitPart } from '../world/interiors/InteriorKit';
+
+/** The lazily-imported half. See `src/world/interiors/InteriorSubsystem.ts`. */
+type InteriorApi = typeof import('../world/interiors/InteriorSubsystem');
 import { setToonPlayer, toonFromImported, updateToonTime } from '../graphics/ToonMaterial';
 import { HUD } from '../ui/HUD';
 import { LoadingScreen } from '../ui/LoadingScreen';
@@ -206,6 +218,8 @@ export class Game {
    * when the player walks away or travels.
    */
   private readonly garage = new VehicleRegistry();
+  /** Kept so the interior kit can be fetched later, on the first doorway. */
+  private assetManager: AssetManager | null = null;
   /** Distance each vehicle has driven since fuel was last charged, metres. */
   private readonly odometer = new Map<string, number>();
   /** Speed last step, to notice an impact without subscribing to contacts. */
@@ -278,7 +292,6 @@ export class Game {
   private readonly inventory = new Inventory();
   private readonly equipment = new Equipment();
   private readonly needs = new Needs();
-  private freeRoamMoney = 0;
   private readonly unlockedZones = new Set<ZoneId>(['village_coast']);
 
   private running = false;
@@ -297,16 +310,44 @@ export class Game {
   private lastInteraction: InteractionState | null = null;
   private readonly interactionHandlers: WorldActionHandlers = {
     sleep: () => void this.sleep(),
-    enter: () => void this.enterInterior(),
+    enter: (doorId) => void this.enterInterior(doorId),
     exit: () => void this.exitInterior(),
     sit: (on) => this.sit(on),
     wardrobe: () => this.hud.openWardrobe(true),
+    shower: () => this.shower(),
+    service: (serviceId, pointId) => this.useService(serviceId, pointId),
+    task: (taskId) => this.startTask(taskId),
+    point: (pointId, kind) => this.usePoint(pointId, kind),
   };
   private sleeping = false;
   private transitioning = false;
   private indoors = false;
-  private readonly returnPoint = new THREE.Vector3();
-  private returnFacing = 0;
+
+  // ---- Phase 7 -------------------------------------------------------------
+  /**
+   * Null until the first door is opened.
+   *
+   * The registry, the builder, the nine layouts and the whole service layer
+   * live behind a dynamic import -- see InteriorSubsystem. Every read below
+   * is optional-chained rather than asserted, because "nobody has gone inside
+   * yet" is the normal state for most of a session.
+   */
+  private interiors: InteriorRegistry | null = null;
+  private interiorApi: InteriorApi | null = null;
+  private readonly economy = new Economy(this.inventory);
+  private readonly tasks = new TaskSystem();
+  /**
+   * Decorations the player has placed, by interior id then slot id.
+   *
+   * Held here rather than on the built room, because the room is destroyed
+   * every time they walk out of it and the sofa should still be there when
+   * they come back.
+   */
+  private readonly decor = new Map<string, Map<string, DecorItemId>>();
+  /** Which owned vehicle the garage acts on. */
+  private garageSelection: string | null = null;
+  /** The last service menu opened, so a second press runs the first offer. */
+  private lastServiceId: string | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
@@ -318,6 +359,7 @@ export class Game {
     this.post = new PostProcessing(this.renderer.renderer, this.scene, this.camera.camera);
 
     const assetManager = new AssetManager();
+    this.assetManager = assetManager;
     const assets = await assetManager.loadAll((p) =>
       loading.setProgress(p.fraction * 0.7, p.label),
     );
@@ -341,7 +383,6 @@ export class Game {
       buildZone: (zone, scope) => {
         if (zone.id === 'village_coast') {
           const world = new World(assets, preset);
-          world.portalMaterial = this.portal.material;
           world.build();
           this.scene.add(world.group);
           scope.addTeardown(
@@ -434,11 +475,10 @@ export class Game {
     this.gameScope.add(this.portal, 'renderTarget', 'window-portal');
     this.gameScope.add(this.contact, 'geometry', 'contact-shadow');
 
-    // Where the room appears to sit when you look out of it: on the east
-    // verge, so the back window frames the road climbing toward the hill.
-    const view = new THREE.Vector3(12.5, 0, 30);
-    view.y = this.runtime.heightAt(view.x, view.z);
-    this.portal.setAnchor(INTERIOR_ORIGIN, view, 0);
+    // The portal anchor is per-interior now and set on entry: each room sits
+    // in its own pocket of space, so the mapping from room origin to the
+    // outdoor viewpoint changes with the door you came through. The registry
+    // that holds it does not exist until the first doorway.
 
     this.village!.onCollect = (def, count, total) => {
       this.hud.setCounter(count, total);
@@ -490,6 +530,7 @@ export class Game {
     }));
 
     // Needs the HUD, because the wardrobe handler opens it.
+    this.syncDoorLinks();
     this.syncInteractables();
     // Somewhere for recovered vehicles to reappear: the verge by the house,
     // clear of the road so a returned car is not dropped into traffic.
@@ -661,7 +702,7 @@ export class Game {
       rate: o.rate,
       activeSeconds: 0,
     });
-    this.freeRoamMoney = o.startMoney;
+    this.economy.wallet.restore({ cash: o.startMoney, bank: 0 });
 
     // A fresh run starts from a known inventory, not whatever the last one
     // left behind — this path is also reached when restarting from the menu.
@@ -702,8 +743,9 @@ export class Game {
   private captureSave(slot: SaveSlotId): SaveData {
     const p = this.player.position;
     const story = this.storyClock.snapshot();
+    const inside = this.interiors?.returnContext ?? null;
     return {
-      version: 2,
+      version: 3,
       contentVersion: CONTENT_VERSION,
       savedAt: 0, // stamped by SaveService
       mode: this.mode,
@@ -723,7 +765,9 @@ export class Game {
         completedChapters: [...this.completedChapters].sort(),
         quests: {},
       },
-      money: this.freeRoamMoney,
+      // Kept in step with the wallet so a reader that predates the economy
+      // still sees a sensible balance rather than a zero.
+      money: this.economy.wallet.cash,
       inventory: this.inventory.toJSON(),
       wardrobe: this.equipment.toJSON(),
       vehicles: this.garage.toJSON() as SaveData['vehicles'],
@@ -734,7 +778,42 @@ export class Game {
       npcs: this.population?.ageSnapshot() ?? this.npcAges,
       collectibles: this.village?.collectibles.foundIds ?? [],
       unlockedZones: [...this.unlockedZones],
+      // Phase 7. The door and the way back out, never the room's contents —
+      // the room is rebuilt from the catalogue, like the world from the
+      // manifest.
+      inside: inside
+        ? {
+            doorId: inside.doorId,
+            zone: inside.zone as SaveData['zone'],
+            x: inside.x,
+            y: inside.y,
+            z: inside.z,
+            facing: inside.facing,
+          }
+        : null,
+      economy: this.economy.toJSON(),
+      tasks: this.tasks.toJSON(),
+      decor: Object.fromEntries(
+        [...this.decor].map(([id, slots]) => [id, Object.fromEntries(slots)]),
+      ),
     };
+  }
+
+  /**
+   * Write a slot, rolling the economy back if the write fails.
+   *
+   * The failure this guards is narrow and real: a purchase applied in memory,
+   * then a save that throws on quota. Without the rollback the run carries
+   * goods that the next load will not have paid for.
+   */
+  private async saveWithRollback(slot: SaveSlotId): Promise<boolean> {
+    const before = this.economy.snapshot();
+    const result = await this.saves.save(slot, this.captureSave(slot));
+    if (!result.ok) {
+      this.economy.restore(before);
+      this.hud.showToast('Not saved', 'Nothing was lost, but nothing was written.');
+    }
+    return result.ok;
   }
 
   /**
@@ -763,7 +842,22 @@ export class Game {
     this.unlockedZones.clear();
     for (const z of data.unlockedZones) this.unlockedZones.add(z);
 
-    this.freeRoamMoney = data.money;
+    // The economy before the inventory, because `Economy.restoreFrom` only
+    // touches the wallet, the ledger and the award keys -- the stacks are the
+    // inventory's own and are restored below.
+    if (data.economy) this.economy.restoreFrom(data.economy);
+    else this.economy.wallet.restore({ cash: data.money, bank: 0 });
+    this.tasks.restore(data.tasks ?? {});
+
+    this.decor.clear();
+    for (const [interiorId, slots] of Object.entries(data.decor ?? {})) {
+      const map = new Map<DecorItemId, DecorItemId>() as unknown as Map<string, DecorItemId>;
+      for (const [slot, item] of Object.entries(slots)) {
+        if (this.interiorApi !== null && item in this.interiorApi.DECOR_PARTS) map.set(slot, item as DecorItemId);
+      }
+      if (map.size > 0) this.decor.set(interiorId, map);
+    }
+
     // Relationships and ages before the population is asked for anything: a
     // resident seeded from the catalogue would otherwise overwrite the history
     // the player actually has with them.
@@ -802,7 +896,46 @@ export class Game {
       this.camera.resetBehind(this.player.lookTarget, this.player.controller.facing);
     }
 
+    void this.restoreIndoors(data);
     this.syncAge();
+  }
+
+  /**
+   * Put the player back inside the building they saved in.
+   *
+   * Deliberately after the spawn resolution above, which has just placed them
+   * outdoors: if the kit cannot be fetched, or the door no longer exists, that
+   * outdoor position is a valid place to be and the load degrades to it rather
+   * than failing.
+   */
+  private async restoreIndoors(data: SaveData): Promise<void> {
+    const inside = data.inside;
+    if (!inside) {
+      if (this.indoors) await this.exitInterior();
+      return;
+    }
+    if (inside.zone !== this.zones.activeZoneId) return;
+    if (!(await this.ensureKit())) return;
+
+    const result = this.interiors!.reopen(
+      { ...inside, zone: inside.zone },
+      this.env.time * 24,
+      this.decorFor(this.interiors?.door(inside.doorId)?.interiorId ?? ''),
+    );
+    if (!result.ok) return;
+
+    this.enterBuiltInterior(result.interior);
+    this.indoors = true;
+    this.player.controller.boundsEnabled = false;
+    this.player.motor.teleport(
+      result.interior.spawn.x,
+      result.interior.spawn.y,
+      result.interior.spawn.z,
+    );
+    this.player.controller.facing = result.interior.spawnFacing;
+    this.camera.resetBehind(this.player.lookTarget, result.interior.spawnFacing);
+    this.camera.setMinDistance(1.15);
+    this.camera.setDistance(2.3);
   }
 
   private lifeSnapshot(): LifeSnapshot {
@@ -858,10 +991,8 @@ export class Game {
 
     // The clock is still stopped if the carried overflow reached another
     // boundary, so this remains a safe moment to write.
-    const result = await this.saves.save('autosave', this.captureSave('autosave'));
-    if (!result.ok) {
-      console.warn('[LastHorizon] birthday autosave failed', result.reason);
-      this.hud.showToast('Could not save', 'Your progress is still here, but not written.');
+    if (!(await this.saveWithRollback('autosave'))) {
+      console.warn('[LastHorizon] birthday autosave failed');
     }
   }
 
@@ -988,8 +1119,19 @@ export class Game {
       this.hud.setMapData(this.runtime.mapData);
 
       // Leaving a zone leaves these pointing at content that no longer exists.
+      // Travelling while indoors is not reachable -- the door prompts are the
+      // only way to travel and they are not registered inside -- but the room
+      // is torn down here anyway rather than trusted to be absent.
+      const openRoom = this.interiors?.active ?? null;
+      if (openRoom) {
+        this.scene.remove(openRoom.group);
+        this.runtime.collision.setOverlay(null);
+        this.interiors?.close();
+      }
       this.indoors = false;
       this.sleeping = false;
+      this.seatPoint = null;
+      this.syncDoorLinks();
       this.syncInteractables();
       this.hud.setPrompt(null);
       this.player.controller.boundsEnabled = true;
@@ -1121,7 +1263,7 @@ export class Game {
       ridingVehicle: () => this.ridingVehicleId,
       setVehicleLocked: (id, locked) => this.setVehicleLocked(id, locked),
       giveItem: (id, count) => this.inventory.add(id, count).added > 0,
-      recoverVehicle: (id) => this.recoverVehicle(id),
+      recoverVehicle: (id) => this.garage.recover(id, 'lost') !== null,
       rollVehicle: (id) => {
         this.vehicles.get(id)?.rollOver();
       },
@@ -1150,7 +1292,7 @@ export class Game {
       saveNow: async (slot) => {
         const parsed = SaveService.parseSlot(slot);
         if (!parsed) return false;
-        return (await this.saves.save(parsed, this.captureSave(parsed))).ok;
+        return this.saveWithRollback(parsed);
       },
       loadNow: async (slot) => {
         const parsed = SaveService.parseSlot(slot);
@@ -1201,6 +1343,111 @@ export class Game {
       },
       trafficList: () => this.population?.trafficPositions() ?? [],
       populationActive: (on) => this.population?.setActive(on),
+
+      // ---- Phase 7 ----------------------------------------------------------
+      doorList: () => {
+        const hour = this.env.time * 24;
+        const reg = this.interiors;
+        if (!reg) return [];
+        return reg.doorsInZone(this.zones.activeZoneId ?? 'village_coast').map((d) => ({
+          id: d.id,
+          interiorId: d.interiorId,
+          x: d.position.x,
+          y: d.position.y,
+          z: d.position.z,
+          label: d.label,
+          open: reg.isDoorOpen(d.id, hour),
+        }));
+      },
+      enterDoor: async (doorId) => {
+        await this.enterInterior(doorId);
+        return this.indoors && this.interiors?.returnContext?.doorId === doorId;
+      },
+      interiorState: () => {
+        const built = this.interiors?.active ?? null;
+        if (!built) return null;
+        const ctx = this.interiors?.returnContext ?? null;
+        return {
+          id: built.def.id,
+          name: built.def.name,
+          service: built.def.service,
+          originX: built.origin.x,
+          originY: built.origin.y,
+          parts: built.stats.parts,
+          triangles: built.stats.triangles,
+          colliderBoxes: built.stats.colliderBoxes,
+          points: built.points.map((p) => p.id),
+          livePortal: built.def.livePortal,
+          returnTo: ctx
+            ? { doorId: ctx.doorId, x: ctx.x, y: ctx.y, z: ctx.z, facing: ctx.facing }
+            : null,
+        };
+      },
+      walletState: () => ({
+        cash: this.economy.wallet.cash,
+        bank: this.economy.wallet.bank,
+        ledger: this.economy.ledger.size,
+        net: this.economy.ledger.net(),
+      }),
+      giveMoney: (amount) => {
+        this.economy.earn('refund', Math.max(0, Math.floor(amount)), 'Test top-up', Date.now());
+      },
+      serviceMenu: (serviceId) => {
+        const menu = this.interiorApi!.buildMenu(serviceId, this.serviceHost());
+        if (!menu) return null;
+        return {
+          id: menu.id,
+          title: menu.title,
+          open: menu.open,
+          entries: menu.entries.map((e) => ({
+            id: e.id,
+            label: e.label,
+            price: e.price,
+            available: e.available,
+            reason: e.reason,
+          })),
+        };
+      },
+      runService: (serviceId, offerId) => {
+        const r = this.interiorApi!.executeOffer(serviceId, offerId, this.serviceHost());
+        this.syncTaskProgress();
+        this.syncInteractables();
+        return r.ok ? 'ok' : r.reason;
+      },
+      taskState: () => {
+        const run = this.tasks.active;
+        if (!run) return null;
+        return {
+          id: run.def.id,
+          name: run.def.name,
+          status: this.tasks.status,
+          runNumber: run.runNumber,
+          difficulty: run.difficulty,
+          pay: run.pay,
+          timeRemaining: this.tasks.timeRemaining,
+          objectives: run.progress.map((p) => ({
+            id: p.id,
+            label: p.label,
+            done: p.done,
+            target: p.target,
+            complete: p.complete,
+          })),
+        };
+      },
+      beginTask: (taskId) => this.startTask(taskId),
+      reportTask: (place) => {
+        const ok = this.tasks.report({ place });
+        if (ok) this.afterTaskChange();
+        return ok;
+      },
+      advanceTask: (seconds) => {
+        this.tasks.advance(seconds);
+        this.afterTaskChange();
+      },
+      cancelTask: () => {
+        this.tasks.cancel();
+        this.tasks.clear();
+      },
     };
   }
 
@@ -1292,6 +1539,8 @@ export class Game {
     // 5b. the map, if it is open
     if (this.input.consumeMap()) this.hud.toggleMap();
     this.hud.updateMap();
+
+    this.hud.setWallet(this.economy.wallet.cash);
 
     // 6. radar — hidden indoors, where it has nothing useful to show
     this.minimap.setVisible(!this.indoors);
@@ -1792,11 +2041,46 @@ export class Game {
    */
   private syncInteractables(): void {
     this.interactions.clear();
+
+    const built = this.interiors?.active ?? null;
+    if (built) {
+      // Indoors, the room is the only thing in reach. Registering the outdoor
+      // doors as well would put a prompt for a house 600 m below your feet in
+      // the selector, because range is measured horizontally.
+      for (const it of interiorInteractables(built.points, built.exit, this.interactionHandlers)) {
+        this.interactions.register(it);
+      }
+      return;
+    }
+
     for (const it of worldInteractables(this.runtime.interactables, this.interactionHandlers)) {
       this.interactions.register(it);
     }
     for (const id of this.vehicles.keys()) this.registerVehicleInteractable(id);
     this.registerNpcInteractables();
+  }
+
+  /**
+   * Link every door in the active zone to the interior behind it.
+   *
+   * Rebuilt with the zone, and the previous zone's links dropped first, so a
+   * door in the village can never be opened from the city.
+   */
+  private syncDoorLinks(): void {
+    // No registry yet means nobody has opened a door, and `ensureKit` calls
+    // this again the moment one does.
+    if (!this.interiors) return;
+    const zone = this.zones.activeZoneId ?? 'village_coast';
+    this.interiors.clearZone(zone);
+    for (const it of this.runtime.interactables) {
+      this.interiors.linkDoor({
+        id: it.doorId,
+        zone,
+        interiorId: it.service,
+        position: it.position.clone(),
+        label: it.prompt,
+      });
+    }
   }
 
   /**
@@ -2303,27 +2587,43 @@ export class Game {
     if (pressed && !state.primary && this.indoors && !ctx.busy) void this.exitInterior();
   }
 
+  /** The seat the player is on, or was last on. */
+  private seatPoint: BuiltPoint | null = null;
+
   /**
    * Take the chair, or leave it.
    *
    * Sitting snaps onto the seat rather than blending, because a spring toward
    * the seat with collision still running just wedges the capsule in the desk.
+   *
+   * Standing steps 0.9 m back along the *opposite* of the seat's facing rather
+   * than a fixed offset. With one chair in one room a constant worked; with
+   * seats in four rooms facing four ways it walks you into a wall.
    */
-  private sit(on: boolean): void {
-    const room = this.village!.interiors;
+  private sit(on: boolean, point?: BuiltPoint): void {
+    const seat = point ?? this.seatPoint;
+    if (!seat) return;
+
     if (on) {
-      this.player.motor.teleport(room.chair.x, room.chair.y, room.chair.z);
-      this.player.controller.facing = Math.PI;
+      this.seatPoint = seat;
+      const facing = seat.facing ?? Math.PI;
+      this.player.motor.teleport(seat.world.x, seat.world.y - 0.4, seat.world.z);
+      this.player.controller.facing = facing;
       this.player.setSitting(true);
-      this.camera.resetBehind(this.player.lookTarget, Math.PI * 0.35);
+      this.camera.resetBehind(this.player.lookTarget, facing + Math.PI * 0.25);
       this.camera.setDistance(2.6);
       this.hud.setPrompt('Stand up');
     } else {
+      const facing = seat.facing ?? Math.PI;
       this.player.setSitting(false);
-      // Step clear of the seat so the sit prompt doesn't fire again instantly.
-      this.player.motor.teleport(room.chair.x + 0.85, room.chair.y, room.chair.z + 0.55);
+      this.player.motor.teleport(
+        seat.world.x - Math.sin(facing) * 0.9,
+        seat.world.y - 0.4,
+        seat.world.z - Math.cos(facing) * 0.9,
+      );
       this.camera.setDistance(2.3);
       this.hud.setPrompt(null);
+      this.seatPoint = null;
     }
   }
 
@@ -2340,7 +2640,6 @@ export class Game {
 
     await this.hud.setFade(true, outMs);
 
-    this.village!.interiors.setVisible(indoors);
     this.indoors = indoors;
     this.audio.setZone(indoors ? 'indoor' : 'outdoor');
     // The kill plane and world bounds only make sense outdoors — the interior
@@ -2364,22 +2663,205 @@ export class Game {
     this.render();
   }
 
-  private async enterInterior(): Promise<void> {
-    if (this.transitioning) return;
-    this.transitioning = true;
-    this.returnPoint.copy(this.player.position);
-    this.returnFacing = this.player.controller.facing;
+  /**
+   * The kit, fetched the first time somebody opens a door.
+   *
+   * 145 kB that only matters once you go inside, and this transition already
+   * fades to black — so the wait is hidden for the player who does and never
+   * paid by the player who does not.
+   */
+  /** Buy a vehicle: register it owned, and put it outside the garage. */
+  private purchaseVehicle(kind: string): boolean {
+    const zone = this.zones.activeZoneId ?? 'village_coast';
+    const ctx = this.interiors?.returnContext ?? null;
+    // Delivered to the garage's own spot if it has one, otherwise onto the
+    // pavement outside the door the player came in through. Never next to the
+    // player: they are 600 m up in a room at this moment.
+    const at = this.garage.garageFor(zone)?.transform ?? {
+      x: (ctx?.x ?? this.runtime.spawn.x) + 3,
+      y: ctx?.y ?? this.runtime.spawn.y,
+      z: ctx?.z ?? this.runtime.spawn.z,
+      facing: 0,
+    };
+    const id = `owned_${kind}_${this.garage.size + 1}`;
+    this.garage.register({
+      id,
+      kind,
+      zone,
+      transform: at,
+      owned: true,
+      locked: false,
+      impounded: false,
+    });
+    this.garageSelection = id;
+    return true;
+  }
 
-    await this.transit(this.village!.interiors.spawn, Math.PI, true);
-    this.transitioning = false;
-    this.hud.showToast('Inside', 'Quiet in here. The bed is by the window.');
+  private async ensureKit(): Promise<boolean> {
+    if (!this.assetManager) return false;
+
+    if (!this.interiorApi) {
+      // The code and the art in parallel: neither depends on the other, and
+      // this is the one moment in the session that pays for both.
+      const [api, kit] = await Promise.all([
+        import('../world/interiors/InteriorSubsystem'),
+        this.assetManager.loadInteriorKit(),
+      ]);
+      this.interiorApi = api;
+      this.interiors = new api.InteriorRegistry();
+      this.interiors.portalMaterial = this.portal.material;
+      this.interiors.setKit(kit);
+      // Links were collected while the registry did not exist yet.
+      this.syncDoorLinks();
+    } else if (!this.interiors!.hasKit) {
+      this.interiors!.setKit(await this.assetManager.loadInteriorKit());
+    }
+
+    return this.interiors?.hasKit === true;
+  }
+
+  /**
+   * Go through a door.
+   *
+   * The return context is captured from the player's *current* position and
+   * handed to the registry before anything moves. Reading it back afterwards
+   * is how you come out of the wrong door.
+   */
+  private async enterInterior(doorId?: string): Promise<void> {
+    if (this.transitioning || this.indoors) return;
+
+    const id = doorId ?? this.nearestDoorId();
+    if (!id) return;
+
+    this.transitioning = true;
+    try {
+      const hour = this.env.time * 24;
+      const link = this.interiors?.door(id);
+      const def = link ? this.interiors?.definition(link.interiorId) : null;
+
+      if (!(await this.ensureKit())) {
+        this.hud.showToast('Locked', 'The door will not budge.');
+        return;
+      }
+
+      const result = this.interiors!.open({
+        doorId: id,
+        hour,
+        from: {
+          x: this.player.position.x,
+          y: this.player.position.y,
+          z: this.player.position.z,
+          facing: this.player.controller.facing,
+        },
+        decor: this.decorFor(link?.interiorId ?? ''),
+      });
+
+      if (!result.ok) {
+        // Graceful closed state: the door tells you when to come back rather
+        // than doing nothing and reading as a broken prompt.
+        if (result.reason === 'closed') {
+          this.hud.showToast(result.name, `Closed. Opens at ${result.opensAt}.`);
+        } else if (result.reason === 'no-kit') {
+          this.hud.showToast('Locked', 'The door will not budge.');
+        }
+        return;
+      }
+
+      this.enterBuiltInterior(result.interior);
+      await this.transit(result.interior.spawn, result.interior.spawnFacing, true);
+      this.hud.showToast(def?.name ?? 'Inside', this.interiorGreeting(result.interior));
+    } finally {
+      this.transitioning = false;
+    }
+  }
+
+  /** Attach a freshly built room to the scene, collision, audio and prompts. */
+  private enterBuiltInterior(built: NonNullable<InteriorRegistry['active']>): void {
+    this.scene.add(built.group);
+    this.runtime.collision.setOverlay(built.colliders);
+    this.audio.setZone('indoor');
+
+    // Where this room appears to sit when you look out of its windows. Only
+    // the two hero interiors render a live view, but the anchor is cheap and
+    // setting it unconditionally keeps the two paths identical.
+    const view = new THREE.Vector3(12.5, 0, 30);
+    view.y = this.runtime.heightAt(view.x, view.z);
+    this.portal.setAnchor(built.origin, view, 0);
+
+    this.syncInteractables();
+  }
+
+  private interiorGreeting(built: NonNullable<InteriorRegistry['active']>): string {
+    const money = this.economy.wallet.cash;
+    switch (built.def.service) {
+      case 'grocery':
+        return `Shelves are stocked. You have $${money}.`;
+      case 'police':
+        return 'The desk sergeant looks up.';
+      case 'clinic':
+        return 'Quiet. Somebody will see you shortly.';
+      case 'garage':
+        return 'Smell of oil and warm metal.';
+      case 'cafe':
+        return 'Coffee, and somebody else’s conversation.';
+      case 'clothing':
+        return 'Racks, and a mirror at the back.';
+      case 'airstrip':
+        return 'The radio crackles. No aircraft yet.';
+      case 'apartment':
+        return 'Yours, more or less.';
+      default:
+        return 'Quiet in here.';
+    }
   }
 
   private async exitInterior(): Promise<void> {
-    if (this.transitioning) return;
+    if (this.transitioning || !this.indoors) return;
     this.transitioning = true;
-    await this.transit(this.returnPoint, this.returnFacing, false);
-    this.transitioning = false;
+    try {
+      const built = this.interiors?.active ?? null;
+      if (built) {
+        this.scene.remove(built.group);
+        this.runtime.collision.setOverlay(null);
+      }
+      // A shift you walk out of is a shift you abandoned.
+      if (this.tasks.active) this.tasks.fail('abandoned');
+
+      const ctx = this.interiors?.close() ?? null;
+      this.seatPoint = null;
+      const to = ctx
+        ? new THREE.Vector3(ctx.x, ctx.y, ctx.z)
+        : this.runtime.spawn.clone();
+      await this.transit(to, ctx?.facing ?? this.runtime.spawnFacing, false);
+      this.syncInteractables();
+    } finally {
+      this.transitioning = false;
+    }
+  }
+
+  /** The door the player is standing at, for the test bridge and fallbacks. */
+  private nearestDoorId(): string | null {
+    let best: string | null = null;
+    let bestDist = Infinity;
+    for (const it of this.runtime.interactables) {
+      const d = Math.hypot(
+        it.position.x - this.player.position.x,
+        it.position.z - this.player.position.z,
+      );
+      if (d < bestDist) {
+        bestDist = d;
+        best = it.doorId;
+      }
+    }
+    return bestDist <= 6 ? best : null;
+  }
+
+  private decorFor(interiorId: string): Map<string, KitPart> {
+    const placed = this.decor.get(interiorId);
+    const out = new Map<string, KitPart>();
+    if (!placed) return out;
+    for (const [slot, item] of placed) out.set(slot, this.interiorApi!.DECOR_PARTS[item]);
+    return out;
   }
 
   /**
@@ -2392,13 +2874,19 @@ export class Game {
     this.hud.setPrompt(null);
     this.input.releaseAll();
 
-    const room = this.village!.interiors;
+    const built = this.interiors?.active ?? null;
+    const bedPoint = built?.points.find((p) => p.kind === 'bed');
+    if (!built || !bedPoint) {
+      this.sleeping = false;
+      return;
+    }
 
-    // Lie down on the mattress and frame it from the side. `sleepSpot` is the
-    // *feet* position: tipping onto the back swings the head 1.36 m along -Z,
-    // so facing must stay at 0 for the head to land on the pillow.
-    const bed = room.sleepSpot;
-    this.player.motor.teleport(bed.x, bed.y, bed.z);
+    // Lie down on the mattress and frame it from the side. This is the *feet*
+    // position: tipping onto the back swings the head about 1.36 m along -Z,
+    // so facing must stay at 0 for the head to land on the pillow. Every bed
+    // in the kit is placed at yaw 0 with its headboard at -Z, which is what
+    // makes one offset correct for all of them.
+    this.player.motor.teleport(bedPoint.world.x, built.origin.y + 0.56, bedPoint.world.z + 0.9);
     this.player.controller.facing = 0;
     this.player.setLying(true);
     this.camera.resetBehind(this.player.lookTarget, Math.PI * 0.62);
@@ -2417,16 +2905,243 @@ export class Game {
     // A night's sleep fills energy and lifts mood. It does not feed you.
     this.needs.sleep();
 
+    // Rent falls due while you sleep, which is both realistic and the only
+    // moment the player is reliably standing in the flat they rent.
+    this.chargeRentIfDue(built.def.service === 'apartment');
+
+    // Get up at the entry spawn. It is the one spot in the room the layout
+    // validator guarantees is clear, and a hand-picked bedside offset is a
+    // hand-picked chance to stand somebody inside a wardrobe.
     this.player.setLying(false);
-    this.player.motor.teleport(room.bedside.x, room.bedside.y, room.bedside.z);
-    this.player.controller.facing = Math.PI;
-    this.camera.resetBehind(this.player.lookTarget, Math.PI);
+    this.player.motor.teleport(built.spawn.x, built.spawn.y, built.spawn.z);
+    this.player.controller.facing = built.spawnFacing;
+    this.camera.resetBehind(this.player.lookTarget, built.spawnFacing);
     this.camera.setDistance(2.3);
     this.stepQuiet();
 
     await this.hud.setFade(false, 1.5);
     this.sleeping = false;
     this.hud.showToast('Morning', 'You slept until the light came back.');
+  }
+
+  /** A shower: cleanliness, a little mood, no transition. */
+  private shower(): void {
+    this.needs.shower();
+    this.hud.showToast('Better', 'Clean clothes and a clear head.');
+  }
+
+  private chargeRentIfDue(inApartment: boolean): void {
+    if (!inApartment) return;
+    const day = this.worldClock.day;
+    if (this.economy.rentDue(day, RENT_PERIOD_DAYS) <= 0) return;
+
+    const r = this.economy.chargeRent(day, RENT_PERIOD_DAYS, SERVICE_FEES.rent, Date.now());
+    if (r.ok) {
+      this.hud.showToast('Rent', `Paid $${-r.transaction.amount}.`);
+    } else {
+      this.hud.showToast('Rent overdue', `You owe $${SERVICE_FEES.rent}. Find the money.`);
+    }
+  }
+
+  // ---- services and tasks --------------------------------------------------
+
+  /**
+   * The host `ServiceSystem` executes against.
+   *
+   * Rebuilt per call rather than held, because half of it — the age, the
+   * clock, whether the shop is open — is only true for an instant.
+   */
+  private serviceHost(): ServiceHost {
+    const built = this.interiors?.active ?? null;
+    const owned = [...this.garage.owned()].map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      condition: r.condition,
+      label: r.kind,
+    }));
+    const selected = owned.find((v) => v.id === this.garageSelection) ?? owned[0] ?? null;
+
+    return {
+      economy: this.economy,
+      inventory: this.inventory,
+      needs: this.needs,
+      age: this.life.ageYears,
+      now: Date.now(),
+      service: built?.def.service ?? 'home',
+      // Already inside, so the hours question is only about the counter --
+      // and a place with no hours at all is always serving.
+      open:
+        built !== null &&
+        (built.def.hours === null ||
+          (this.interiors?.isDoorOpen(
+            this.interiors.returnContext?.doorId ?? '',
+            this.env.time * 24,
+          ) ??
+            false)),
+      selectedVehicle: selected,
+      ownedVehicles: owned,
+      buyVehicle: (kind) => this.purchaseVehicle(kind),
+      repairVehicle: (id) => this.garage.repair(id) >= 0,
+      recolourVehicle: (id) => this.garage.get(id) !== null,
+      recoverVehicle: (id) => this.garage.recover(id, 'lost') !== null,
+      selectVehicle: (id) => {
+        this.garageSelection = id;
+        return true;
+      },
+      sleep: () => void this.sleep(),
+      shower: () => this.shower(),
+      saveGame: () => void this.saveWithRollback('autosave'),
+      placeDecor: (itemId) => this.placeDecor(itemId),
+      talk: (topic) => this.hud.showToast('Talk', TOPIC_LINES[topic] ?? '…'),
+      startTask: (taskId) => this.startTask(taskId),
+      treat: () => this.hud.showToast('Clinic', 'Patched up and sent on your way.'),
+    };
+  }
+
+  /**
+   * Use a counter.
+   *
+   * The first press opens the menu; with the panel already open on the same
+   * service, it runs the first available offer. That keeps every service
+   * reachable from one button on a gamepad and one tap on a phone, which is
+   * acceptance criterion 1 and not something to bolt on later.
+   */
+  private useService(serviceId: string, pointId: string): void {
+    const host = this.serviceHost();
+    const menu = this.interiorApi!.buildMenu(serviceId, host);
+    if (!menu) return;
+
+    if (this.lastServiceId !== serviceId) {
+      this.lastServiceId = serviceId;
+      const affordable = menu.entries.filter((e) => e.available).length;
+      this.hud.showToast(
+        menu.title,
+        menu.open
+          ? `${affordable} of ${menu.entries.length} available. Press again to take the first.`
+          : 'Closed for now.',
+      );
+      return;
+    }
+
+    const first = menu.entries.find((e) => e.available);
+    if (!first) {
+      this.hud.showToast(menu.title, menu.entries[0]?.reason ?? 'Nothing available.');
+      return;
+    }
+
+    const result = this.interiorApi!.executeOffer(serviceId, first.id, host);
+    this.lastServiceId = null;
+    if (result.ok) {
+      const money =
+        result.spent > 0 ? ` −$${result.spent}` : result.gained > 0 ? ` +$${result.gained}` : '';
+      this.hud.showToast(menu.title, `${result.label}${money}`);
+      // A purchase can satisfy a "collect" objective.
+      this.syncTaskProgress();
+      this.reportTaskPlace(pointId);
+    } else {
+      this.hud.showToast(menu.title, SERVICE_FAILURES[result.reason]);
+    }
+    this.syncInteractables();
+  }
+
+  private startTask(taskId: string): boolean {
+    const r = this.tasks.start(taskId, {
+      age: this.life.ageYears,
+      hasVehicle: this.riding !== null || this.garage.owned().length > 0,
+    });
+    if (!r.ok) {
+      this.hud.showToast('Not now', TASK_REFUSALS[r.reason]);
+      return false;
+    }
+    this.hud.showToast(r.run.def.name, r.run.def.summary);
+    this.syncTaskProgress();
+    return true;
+  }
+
+  /** A physical interaction with no menu behind it. */
+  private usePoint(pointId: string, kind: BuiltPoint['kind']): void {
+    const point = this.interiors?.active?.points.find((p) => p.id === pointId);
+    switch (kind) {
+      case 'bed':
+        void this.sleep();
+        break;
+      case 'chair':
+        if (point) this.sit(true, point);
+        break;
+      case 'wardrobe':
+        this.hud.openWardrobe(true);
+        break;
+      case 'shower':
+        this.shower();
+        break;
+      case 'shelf':
+      case 'lift':
+      case 'desk':
+        this.reportTaskPlace(pointId);
+        break;
+      case 'cell':
+        this.hud.showToast('Holding cell', 'Empty, and the door is locked.');
+        break;
+      default:
+        this.reportTaskPlace(pointId);
+    }
+  }
+
+  /** Tell the active task that a named place was used. */
+  private reportTaskPlace(place: string): void {
+    if (!this.tasks.active) return;
+    if (this.tasks.report({ place })) this.afterTaskChange();
+  }
+
+  /**
+   * Re-read every `collect` objective off the bag.
+   *
+   * Absolute rather than incremental, because the truth of "carry three
+   * boxes" is how many you are holding — and selling one has to move the bar
+   * back down.
+   */
+  private syncTaskProgress(): void {
+    const run = this.tasks.active;
+    if (!run) return;
+    for (const p of run.progress) {
+      if (p.kind !== 'collect' || !p.itemId) continue;
+      this.tasks.setProgress(p.id, this.inventory.count(p.itemId));
+    }
+    this.afterTaskChange();
+  }
+
+  private afterTaskChange(): void {
+    const outcome = this.tasks.outcome;
+    if (!outcome || outcome.state !== 'completed') return;
+
+    const paid = this.economy.award(
+      outcome.awardKey,
+      outcome.pay,
+      taskLabel(outcome.taskId),
+      Date.now(),
+    );
+    if (paid.ok) {
+      this.hud.showToast('Paid', `${taskLabel(outcome.taskId)} — $${outcome.pay}`);
+    }
+    this.tasks.clear();
+  }
+
+  private placeDecor(itemId: string): boolean {
+    const built = this.interiors?.active ?? null;
+    const slots = built?.def.decorSlots ?? [];
+    if (!built || slots.length === 0) return false;
+    if (!(this.interiorApi !== null && itemId in this.interiorApi.DECOR_PARTS)) return false;
+
+    const placed = this.decor.get(built.def.id) ?? new Map<string, DecorItemId>();
+    const free = slots.find((s) => !placed.has(s.id));
+    if (!free) {
+      this.hud.showToast('No room', 'Every corner is taken already.');
+      return false;
+    }
+    placed.set(free.id, itemId as DecorItemId);
+    this.decor.set(built.def.id, placed);
+    this.hud.showToast('Placed', 'It suits the room.');
+    return true;
   }
 
   private updateAudio(dt: number): void {
@@ -2454,12 +3169,19 @@ export class Game {
    * they live in the room, not out on the street.
    */
   private renderPortal(): void {
-    if (!this.indoors) return;
+    // Only the hero interiors pay for a live view. Everywhere else the pane
+    // is an ordinary toon material and this pass would re-render the outdoor
+    // world -- ~300 k triangles -- for a window nobody is looking through.
+    if (!this.indoors || !this.interiors?.active?.def.livePortal) return;
     this.portal.render(
       this.renderer.renderer,
       this.scene,
       this.camera.camera,
-      [this.village!.interiors.group, this.player.root, this.contact.mesh],
+      [
+        ...(this.interiors?.active ? [this.interiors.active.group] : []),
+        this.player.root,
+        this.contact.mesh,
+      ],
       (cam) => {
         // The sky dome rides the main camera, which is 600 m up. Move it onto
         // the portal camera or the window would look out at a tiny ball.
@@ -2557,6 +3279,47 @@ function thin<T>(points: readonly T[], step: number): T[] {
   const last = points[points.length - 1];
   if (last !== undefined && out[out.length - 1] !== last) out.push(last);
   return out;
+}
+
+/**
+ * What the toast says when a service refuses.
+ *
+ * A table rather than a string per call site, so a new failure reason is a
+ * compile error here instead of a silent empty toast in the game.
+ */
+const SERVICE_FAILURES: Readonly<Record<ServiceFailure, string>> = {
+  'unknown-service': 'Nobody is serving.',
+  'unknown-offer': 'They cannot do that here.',
+  closed: 'Closed for now.',
+  'too-young': 'Not at your age.',
+  unsupported: 'Not yet.',
+  'no-vehicle': 'Bring a vehicle round first.',
+  'nothing-to-sell': 'You have nothing they want.',
+  'not-needed': 'It is already fine.',
+  'insufficient-funds': 'You cannot afford that.',
+  'no-room': 'Your bag is full.',
+  refused: 'They shake their head.',
+};
+
+const TASK_REFUSALS: Readonly<Record<StartRefusal, string>> = {
+  'unknown-task': 'No work going.',
+  'already-active': 'Finish what you started first.',
+  'too-young': 'Come back when you are older.',
+  'needs-vehicle': 'You would need something to drive.',
+  'not-retryable': 'That one is done.',
+};
+
+/** The placeholder lines a counter says. Phase 11 owns the real dialogue UI. */
+const TOPIC_LINES: Readonly<Record<string, string>> = {
+  cafe: 'Somebody nods at you over their cup.',
+  clinic: 'Rest and eat properly, is the advice.',
+  police: 'Nothing doing today. Keep it that way.',
+  fitting: 'The mirror is round the back.',
+  airstrip: 'Strip is quiet. Nothing flying yet.',
+};
+
+function taskLabel(taskId: string): string {
+  return taskDef(taskId)?.name ?? 'Work';
 }
 
 function frame(): Promise<void> {

@@ -220,6 +220,48 @@ relationship axes have to be readable by `SaveSchema` from the first frame.
 
 330 kB is again deliberately close. The same rule applies to Phase 7.
 
+### Raised again, 330 kB to 360 kB, in Phase 7
+
+Phase 7 added 53 kB to the app chunk before any of it was split: nine interior
+layouts, the registry and builder, the economy, the service layer and the task
+system. **27 kB of that went lazy and 28 kB stayed**, and the split follows one
+line — can it wait for a doorway?
+
+`InteriorSubsystem-*.js` (26.5 kB) is the lazy half: the registry, the nine
+layouts, the builder and the whole service layer. Going through a door already
+awaits the 145 kB interior kit behind a fade to black, so the code rides along
+in a gap the player is already waiting through, and somebody who never goes
+inside downloads neither.
+
+What could not move is the part the HUD and the save layer touch from the first
+frame: `Wallet`, `Ledger`, `Economy` and the price catalogue — cash is on
+screen before anything is built — plus `TaskSystem`, whose completion counters
+are in the save format, and `InteriorKit`/`InteriorDefinition`, whose
+`ServiceType` union is what `World` labels its doors with.
+
+| | Phase 6 | Phase 7 | Budget |
+| --- | --- | --- | --- |
+| app chunk | 317.8 kB | 346.1 kB | ≤ 360 kB |
+| JS total (startup) | 1,058.3 kB | 1,086.5 kB | ≤ 1,100 kB |
+| initial load | 4,135.1 kB | 4,163.7 kB | ≤ 4,200 kB |
+| shipped total | 7,147.1 kB | 7,347.6 kB | ≤ 7,400 kB |
+
+**Initial load moved 28.6 kB for a phase that added 200 kB of content**, which
+is the split doing its job. It is now 36 kB under its limit and that is the
+number Phase 8 has to argue with — the shipped total has 52 kB left, which is
+less headroom than it looks given the GLB budget also moved.
+
+### GLB models, 1,200 kB to 1,360 kB, in Phase 7
+
+`interior_kit.glb` is 145.5 kB: 30 parts, 2,124 triangles. It is in
+`LAZY_ASSET_FILES`, a Phase 7 addition to `check-budgets.mjs` that does for art
+what `LAZY_CHUNK_PREFIXES` already did for code — it still counts toward the
+GLB total and the shipped total, and is excluded only from `initial load`.
+
+The same measurement also found the asset table in `docs/ASSET_LICENSES.md` was
+wrong in two places: `player.glb` was recorded 12 kB light, and `vehicles.glb`
+had no row at all despite shipping since Phase 5. Both corrected.
+
 ### Shipped total, 6,600 kB to 7,400 kB, in Phase 6
 
 `recast-navigation` inlines its WebAssembly as base64 and bundles to 727 kB.
@@ -236,14 +278,17 @@ the population handle in `Game`.
 
 ## Asset budget
 
+Re-measured in Phase 7; the GLB figure had been stale since Phase 5.
+
 | Group | Current | Budget |
 | --- | --- | --- |
-| GLB total | 965.3 kB | ≤ 1,200 kB |
+| GLB total | 1,280.7 kB | ≤ 1,360 kB |
+| — of which fetched on demand | 145.5 kB | *(interior kit)* |
 | Audio total | 1,667.8 kB | ≤ 2,000 kB |
 | `icon.png` | 237.4 kB | ≤ 300 kB |
 
 Totals live under "Bundle budget" above, split into **initial load** (≤ 4,200 kB)
-and **shipped total** (≤ 6,600 kB). Both are assets *plus* JS/CSS and the HTML
+and **shipped total** (≤ 7,400 kB). Both are assets *plus* JS/CSS and the HTML
 shell, not just the contents of `public/`.
 
 Meshopt is wired up in `AssetManager`; at this size the decoder costs more

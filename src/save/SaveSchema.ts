@@ -2,6 +2,8 @@ import type { ZoneId } from '../world/zones/Manifest';
 import type { GameMode } from '../core/Gates';
 import type { LifeRate } from '../core/clocks/LifeClock';
 import type { TimeMode } from '../core/Settings';
+import type { LedgerData } from '../economy/Ledger';
+import type { WalletData } from '../economy/Wallet';
 
 /**
  * The save format, versioned.
@@ -18,7 +20,7 @@ import type { TimeMode } from '../core/Settings';
  */
 
 /** Bump when the shape changes, and add a migration for the step. */
-export const CURRENT_SAVE_VERSION = 2;
+export const CURRENT_SAVE_VERSION = 3;
 
 /** Bump when *content* changes in a way that invalidates positions or quests. */
 export const CONTENT_VERSION = 1;
@@ -119,9 +121,50 @@ export interface NpcStateData {
   age: number;
 }
 
+/**
+ * Where the player is standing inside a building.
+ *
+ * The *door* and the return context, never the room's contents. The room is
+ * rebuilt from the catalogue on load, exactly as the world is rebuilt from the
+ * manifest — so a save stays valid when a layout changes underneath it, and a
+ * shop that has since shut still gives its occupant a way out.
+ */
+export interface InsideData {
+  doorId: string;
+  zone: ZoneId;
+  x: number;
+  y: number;
+  z: number;
+  facing: number;
+}
+
+/**
+ * The wallet and the ledger, borrowed from the economy rather than restated.
+ *
+ * Both are already plain data — numbers, strings and a discriminated union —
+ * so importing the types keeps one definition instead of two that drift.
+ * Restating `kind` as a bare `string` here is what made the first attempt fail
+ * to compile against its own reader.
+ */
+export interface EconomySaveData {
+  wallet: WalletData;
+  ledger: LedgerData;
+  /** Award keys already paid. What makes a reward idempotent across a reload. */
+  awards: string[];
+  rentPaidDay: number;
+}
+
+export interface TaskSaveData {
+  completions: Record<string, number>;
+  attempts: Record<string, number>;
+}
+
+/** Decorations placed, keyed interior id -> slot id -> item id. */
+export type DecorSaveData = Record<string, Record<string, string>>;
+
 /** The current save shape. */
-export interface SaveDataV2 {
-  version: 2;
+export interface SaveDataV3 {
+  version: 3;
   contentVersion: number;
   /** Milliseconds since epoch, stamped by the caller — never Date.now() here. */
   savedAt: number;
@@ -154,6 +197,41 @@ export interface SaveDataV2 {
   collectibles: string[];
   /** Free Roam zone unlocks, or story-earned ones. */
   unlockedZones: ZoneId[];
+
+  /**
+   * Added in Phase 7, all optional for the same reason `npcs` was: a v3 save
+   * written by a build without them still loads, and the defaults are what a
+   * fresh run has anyway. `money` above is kept in step with `economy.wallet`
+   * so an older reader still sees a sensible balance.
+   */
+  inside?: InsideData | null;
+  economy?: EconomySaveData;
+  tasks?: TaskSaveData;
+  decor?: DecorSaveData;
+}
+
+/** The shape before the economy, interiors and jobs existed. */
+export interface SaveDataV2 {
+  version: 2;
+  contentVersion: number;
+  savedAt: number;
+  mode: GameMode;
+  slot: SaveSlotId;
+  zone: ZoneId;
+  spawnId: string;
+  player: PlayerTransformData;
+  life: LifeClockData;
+  world: WorldTimeData;
+  story: StoryStateData;
+  money: number;
+  inventory: InventoryItemData[];
+  wardrobe: WardrobeData;
+  vehicles: VehicleData[];
+  needs: NeedsData;
+  relationships: RelationshipData[];
+  npcs?: NpcStateData[];
+  collectibles: string[];
+  unlockedZones: ZoneId[];
 }
 
 /** The shape before needs, relationships and vehicles existed. */
@@ -171,8 +249,8 @@ export interface SaveDataV1 {
   collectibles: string[];
 }
 
-export type AnySaveData = SaveDataV1 | SaveDataV2;
-export type SaveData = SaveDataV2;
+export type AnySaveData = SaveDataV1 | SaveDataV2 | SaveDataV3;
+export type SaveData = SaveDataV3;
 
 export type SaveSlotId = 'slot1' | 'slot2' | 'slot3' | 'autosave';
 export const SAVE_SLOTS: readonly SaveSlotId[] = ['slot1', 'slot2', 'slot3', 'autosave'];
@@ -278,6 +356,7 @@ export function migrateSave(raw: unknown): MigrationResult {
   const from = version;
 
   if (version === 1) data = v1ToV2(data as SaveDataV1);
+  if (version <= 2) data = v2ToV3(data as SaveDataV2);
 
   const check = validateSave(data);
   if (!check.ok) return { ok: false, from, error: check.errors.join('; ') };
@@ -321,6 +400,31 @@ function v1ToV2(old: SaveDataV1): SaveDataV2 {
   };
 }
 
+/**
+ * v2 -> v3: the economy, interiors and jobs.
+ *
+ * The old `money` becomes cash in hand with an empty bank and an empty ledger
+ * — the honest reading of a save that predates both. `inside` is null rather
+ * than guessed: a v2 save recorded neither a door nor a return context, so
+ * there is no way to know which building a player was standing in, and putting
+ * them outside is the one answer that is never wrong.
+ */
+function v2ToV3(old: SaveDataV2): SaveDataV3 {
+  return {
+    ...old,
+    version: 3,
+    inside: null,
+    economy: {
+      wallet: { cash: old.money, bank: 0 },
+      ledger: { seq: 1, entries: [] },
+      awards: [],
+      rentPaidDay: old.world?.day ?? 0,
+    },
+    tasks: { completions: {}, attempts: {} },
+    decor: {},
+  };
+}
+
 /** A fresh save for a new run. `savedAt` is injected so this stays pure. */
 export function newSave(opts: {
   mode: GameMode;
@@ -332,7 +436,7 @@ export function newSave(opts: {
   unlockedZones?: ZoneId[];
 }): SaveData {
   return {
-    version: 2,
+    version: 3,
     contentVersion: CONTENT_VERSION,
     savedAt: opts.savedAt,
     mode: opts.mode,
@@ -357,5 +461,14 @@ export function newSave(opts: {
     relationships: [],
     collectibles: [],
     unlockedZones: opts.unlockedZones ?? ['village_coast'],
+    inside: null,
+    economy: {
+      wallet: { cash: opts.money ?? 0, bank: 0 },
+      ledger: { seq: 1, entries: [] },
+      awards: [],
+      rentPaidDay: 1,
+    },
+    tasks: { completions: {}, attempts: {} },
+    decor: {},
   };
 }

@@ -6,7 +6,7 @@ import { naturalHeight } from './Terrain';
 import { Vegetation, VegetationPrototypes, Keepout } from './Vegetation';
 import { Birds } from './Birds';
 import { Collectibles, CollectibleDef } from './Collectibles';
-import { Interiors } from './Interiors';
+import type { ServiceType } from './interiors/InteriorDefinition';
 import { CollisionWorld } from '../physics/CollisionWorld';
 import { makeToon, toonFromImported } from '../graphics/ToonMaterial';
 import { QualityPreset } from '../core/Settings';
@@ -39,41 +39,78 @@ interface Placement {
   lift?: number;
   /** Front door position in local space; adds an "enter" prompt. */
   door?: { x: number; z: number };
+  /**
+   * Which interior is behind that door.
+   *
+   * Phase 7. Before this every door led to the same room; now a placement
+   * names its service and `InteriorRegistry` builds the matching layout.
+   * A door with no service is a door onto the family home, which keeps the
+   * pre-Phase-7 behaviour for anything not explicitly assigned.
+   */
+  service?: ServiceType;
   /** Depth of the foundation skirt that hides any gap on a slope. */
   skirt?: number;
 }
 
 const HALF_PI = Math.PI / 2;
 
+/** What the prompt outside each kind of building says. */
+const DOOR_PROMPTS: Readonly<Record<ServiceType, string>> = {
+  home: 'Go inside',
+  apartment: 'Go up to the flat',
+  grocery: 'Enter the grocery',
+  police: 'Enter the station',
+  clinic: 'Enter the clinic',
+  garage: 'Enter the garage',
+  cafe: 'Enter the cafe',
+  clothing: 'Enter the shop',
+  airstrip: 'Enter the airstrip office',
+};
+
+/**
+ * Which building is which service.
+ *
+ * Assigned by shape rather than at random: the two `HouseLarge` get the two
+ * places a player lives, the sheds get the two working buildings, and the
+ * grocery goes on the east side of the main road where the ambient crowd
+ * already walks past it.
+ */
 export const PLACEMENTS: Placement[] = [
   // ---- west side of the main road, the hero row ------------------------
   { model: 'HouseLarge', x: -15.8, z: 62, yaw: HALF_PI,
-    door: { x: 1.35, z: 4.0 }, skirt: 2.5,
+    door: { x: 1.35, z: 4.0 }, skirt: 2.5, service: 'home',
     collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5,
     pad: { hx: 3.9, hz: 4.7, blend: 2.8 } },
   { model: 'HouseSolar', x: -16.6, z: 43, yaw: HALF_PI + 0.06,
-    door: { x: 0.15, z: 3.7 }, skirt: 2.5,
+    door: { x: 0.15, z: 3.7 }, skirt: 2.5, service: 'clinic',
     collider: { hx: 3.1, hy: 2.4, hz: 3.7, oy: 1.6 }, keepout: 8.5,
     pad: { hx: 3.6, hz: 4.2, blend: 2.8 } },
   { model: 'Shed', x: -15.2, z: 31.5, yaw: HALF_PI - 0.22,
-    door: { x: 0, z: 2.5 }, skirt: 2.0,
+    door: { x: 0, z: 2.5 }, skirt: 2.0, service: 'garage',
     collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5,
     pad: { hx: 2.3, hz: 3.0, blend: 2.2 } },
 
   // ---- east side ---------------------------------------------------------
   // The one you can walk into.
   { model: 'HouseSmall', x: 15.6, z: 33, yaw: -HALF_PI,
-    door: { x: -0.55, z: 3.4 }, skirt: 2.5,
+    door: { x: -0.55, z: 3.4 }, skirt: 2.5, service: 'grocery',
     collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.5,
     pad: { hx: 3.2, hz: 3.9, blend: 2.6 } },
   // Was at z=6, which put it 5.4 m from the side road's centreline — its pad
   // cut into the carriageway. Moved south, clear of the junction.
   { model: 'PorchHouse', x: 17.6, z: -2, yaw: -HALF_PI - 0.05,
-    door: { x: 0.55, z: 1.9 }, skirt: 2.5,
+    door: { x: 0.55, z: 1.9 }, skirt: 2.5, service: 'cafe',
     collider: { hx: 2.4, hy: 2.0, hz: 3.9, oy: 1.6, oz: 0.9 }, keepout: 8.5,
     pad: { hx: 3.0, hz: 4.4, blend: 2.6 } },
+  // Added in Phase 7: the ninth service needed a ninth door. Sited midway
+  // between its two neighbours, both 11 m away — clear of the larger of the
+  // two keepouts and on the same building line, so it needed no other change.
+  { model: 'HouseSmall', x: 18.0, z: -13, yaw: -HALF_PI + 0.05,
+    door: { x: -0.55, z: 3.4 }, skirt: 2.5, service: 'clothing',
+    collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.0,
+    pad: { hx: 3.2, hz: 3.9, blend: 2.6 } },
   { model: 'HouseSmall', x: 18.6, z: -24, yaw: -HALF_PI + 0.14,
-    door: { x: -0.55, z: 3.4 }, skirt: 2.5,
+    door: { x: -0.55, z: 3.4 }, skirt: 2.5, service: 'police',
     collider: { hx: 2.7, hy: 2.6, hz: 3.4, oy: 1.7 }, keepout: 8.0,
     pad: { hx: 3.2, hz: 3.9, blend: 2.6 } },
 
@@ -81,21 +118,31 @@ export const PLACEMENTS: Placement[] = [
   // Both of these had their backs to the side road. Models face +Z, so the
   // yaw has to point local +Z at the carriageway, not away from it.
   { model: 'HouseLarge', x: 52, z: -22, yaw: 0.62,
-    door: { x: 1.35, z: 4.0 }, skirt: 2.5,
+    door: { x: 1.35, z: 4.0 }, skirt: 2.5, service: 'apartment',
     collider: { hx: 3.4, hy: 5.6, hz: 4.2, oy: 3.0 }, keepout: 9.5,
     pad: { hx: 3.9, hz: 4.7, blend: 2.8 } },
   { model: 'Shed', x: 66, z: -40, yaw: 0.60,
-    door: { x: 0, z: 2.5 }, skirt: 2.0,
+    door: { x: 0, z: 2.5 }, skirt: 2.0, service: 'airstrip',
     collider: { hx: 1.7, hy: 1.5, hz: 2.4, oy: 1.2 }, keepout: 4.5,
     pad: { hx: 2.3, hz: 3.0, blend: 3.0 } },
 ];
 
-/** Something the player can walk up to and press interact on. */
+/**
+ * Something the player can walk up to and press interact on, outdoors.
+ *
+ * Phase 7 narrowed this to doors. `sleep`, `sit`, `wardrobe` and `exit` used
+ * to live here because the one shared interior was built by `World`; they are
+ * now `InteriorPoint`s belonging to whichever layout declares them, which is
+ * how a garage ends up with a workbench and no bed.
+ */
 export interface Interactable {
   position: THREE.Vector3;
   radius: number;
-  kind: 'sleep' | 'enter' | 'exit' | 'sit' | 'wardrobe';
+  kind: 'enter';
   prompt: string;
+  /** Stable within a zone build. What `InteriorRegistry` links against. */
+  doorId: string;
+  service: ServiceType;
 }
 
 /** Retaining walls cut into the embankment, as in the reference frames. */
@@ -128,7 +175,6 @@ export class World implements ZoneRuntime {
   vegetation!: Vegetation;
   birds!: Birds;
   collectibles!: Collectibles;
-  interiors!: Interiors;
 
   /** Lamp heads that get a real point light after dark. */
   private lampPositions: THREE.Vector3[] = [];
@@ -144,9 +190,6 @@ export class World implements ZoneRuntime {
   private activePreset: QualityPreset;
 
   readonly interactables: Interactable[] = [];
-
-  /** Set before build() so the interior windows become live portals. */
-  portalMaterial: THREE.Material | undefined;
 
   constructor(
     private readonly assets: AssetBundle,
@@ -184,34 +227,12 @@ export class World implements ZoneRuntime {
     this.buildBirds();
     this.buildCollectibles();
 
-    // The interior cell shares the one static BVH — it just lives 600 m up.
-    this.interiors = new Interiors(this.assets.buildings.get('RoomInterior'), this.portalMaterial);
-    this.group.add(this.interiors.group);
-    this.colliderMeshes.push(...this.interiors.colliders);
-    this.interactables.push({
-      position: this.interiors.exit.clone(),
-      radius: 5.4,
-      kind: 'exit',
-      prompt: 'Step back outside',
-    });
-    this.interactables.push({
-      position: this.interiors.bed.clone(),
-      radius: 2.4,
-      kind: 'sleep',
-      prompt: 'Sleep until morning',
-    });
-    this.interactables.push({
-      position: this.interiors.chair.clone().setY(this.interiors.chair.y + 0.9),
-      radius: 1.9,
-      kind: 'sit',
-      prompt: 'Sit down',
-    });
-    this.interactables.push({
-      position: this.interiors.wardrobe.clone(),
-      radius: 2.3,
-      kind: 'wardrobe',
-      prompt: 'Open the wardrobe',
-    });
+    // Interiors are no longer built here. Until Phase 7 there was exactly one
+    // room, it was eager, and its colliders went into the world's own BVH.
+    // Now there are nine, only the open one exists, and it carries its own
+    // small BVH -- see `CollisionWorld.setOverlay`. The bed, the chair and the
+    // wardrobe left with it: those are interior *points* now, declared by
+    // whichever layout has them, rather than four entries every zone inherits.
 
     this.rebuildCollision();
 
@@ -267,7 +288,7 @@ export class World implements ZoneRuntime {
   }
 
   private placeBuildings(): void {
-    for (const p of PLACEMENTS) {
+    for (const [index, p] of PLACEMENTS.entries()) {
       const obj = this.instantiate(p.model);
       if (!obj) continue;
       // The pad under the footprint is level, so the centre height seats every
@@ -325,11 +346,17 @@ export class World implements ZoneRuntime {
 
       if (p.door) {
         const [dx, dz] = this.localToWorld(p, p.door.x, p.door.z);
+        const service = p.service ?? 'home';
+        // Positional id, stable for a given zone build and changing exactly
+        // when the zone does -- which is when the links are rebuilt anyway.
+        // The same reasoning `worldInteractables` already used for its ids.
         this.interactables.push({
           position: new THREE.Vector3(dx, y + 1.0, dz),
           radius: 2.4,
           kind: 'enter',
-          prompt: 'Go inside',
+          prompt: DOOR_PROMPTS[service],
+          doorId: `village_coast:${service}:${index}`,
+          service,
         });
       }
     }
