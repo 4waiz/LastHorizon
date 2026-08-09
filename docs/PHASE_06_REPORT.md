@@ -172,10 +172,10 @@ obstacle, never as a participant. That is the entire interface between the two.
 
 ---
 
-## 4. Four bugs the measurements found
+## 4. Five bugs the measurements found
 
-None of these were visible in a unit test. All four came out of running the
-thing and profiling it.
+None of these were visible in a unit test. All five came out of running the
+thing, looking at it and profiling it. Each has a regression test now.
 
 ### The navmesh included every roof
 
@@ -216,6 +216,29 @@ result.
 What remains is the world itself, still walked in full. The proper fix is a
 registry of fadeable meshes in `CameraCollision`; it is Phase 1 code and is
 recorded in `docs/PERFORMANCE_BUDGETS.md` rather than made here.
+
+### The city crowd walked down the middle of the road
+
+The navmesh covers tarmac perfectly well, and two of Old Market's three ambient
+areas were centred on the carriageway, so pedestrians spawned on it and
+wandered across it. The first district screenshot is a column of people
+walking up the main road.
+
+The areas moved off the road, and `validateZone` now refuses one whose centre
+is within 6 m of a lane — measured to the nearest lane *segment*, not the
+nearest node, because a district's main road is two nodes 80 m apart and a
+point beside the midpoint is nowhere near either end.
+
+That rule then failed the village, which turned out to be a second bug: the
+village's manifest lane nodes were a four-point sketch running up to eleven
+metres off the road `RoadSystem` actually builds. Traffic never used them —
+village centrelines come from the spline at runtime — but they were the only
+road data the validator, and anything else reading the manifest, could see.
+They now follow the same control points as the spline.
+
+And while fixing that: a zone supplying its own centrelines now **replaces**
+the manifest's rather than adding to them. Taking both gave the village two
+overlapping road networks, one of which is not where the tarmac is.
 
 ### The watchdog barged every car through every red light
 
@@ -364,9 +387,15 @@ witness; relationships and ages surviving save/reload and a birthday; leaving
 the zone and coming back; driving through the village; and no duplicate
 three.js.
 
-**Screenshots:** `.shots/p6_street.jpg`, `p6_stall.jpg`, `p6_road.jpg` — the
-village with residents and traffic in it, taken through the offscreen render
-path so they do not depend on a visible window.
+**Screenshots:** `.shots/p6_street.jpg`, `p6_stall.jpg`, `p6_road.jpg` and
+`p6_city2.jpg` — the village and Old Market with residents and traffic in them,
+taken through the offscreen render path so they do not depend on a visible
+window.
+
+**By hand, in the browser:** the Old Market travelled to and populated (5
+named, 18 ambient, 8 cars, navmesh in 94 ms, 5 off-mesh links); the navmesh
+probed inside and outside the chunks resident when it was baked; every
+resident's height checked against the terrain under them.
 
 **Commands run:** `npm run typecheck`, `npm run lint`, `npm test`,
 `npm run build`, `npm run check:budgets`, `npx playwright test --project=chromium`.
@@ -417,9 +446,16 @@ Listed rather than rounded away.
   baseline scenes is worth doing before Phase 7 adds interiors.
 - **The frame budget has never been measured on real mid-tier hardware.** That
   caveat is inherited from Phase 1 and this phase does not lift it.
+- **A district's navmesh does not follow its streaming.** It is baked once,
+  from whatever chunks are resident at that moment. Probed in Old Market: a
+  point in a chunk that streamed in *later* returns no navmesh sample, while
+  everything baked-in samples fine. It degrades rather than breaks — agents
+  there fall back to coarse movement and straight-line paths — but it is the
+  thing to fix before Phase 7 gives districts interiors, and tiled generation
+  was chosen partly so a per-tile rebuild is possible.
 - **District populations are untested beyond travel.** The Old Market has five
-  residents and a navmesh, verified by the travel scenario; nobody has walked a
-  full day there.
+  residents, eighteen pedestrians, eight cars and a 94 ms navmesh, checked by
+  hand and by the travel scenario; nobody has walked a full day there.
 
 ## 10. Next safe phase
 

@@ -51,11 +51,30 @@ const village: ZoneManifest = {
   interiors: [
     { id: 'village_home', x: -11.8, z: 60.6, interiorId: 'room_shared', prompt: 'Go inside' },
   ],
+  /**
+   * The road, as the road actually runs.
+   *
+   * These were a four-node sketch through (5,-40), (0,0), (-12,50), (-14,68),
+   * which is up to eleven metres off the carriageway `RoadSystem` builds — at
+   * z = 46 the sketch sits at x = -11 and the tarmac at x = -1. The nodes now
+   * follow the same control points the spline is built from, clipped to the
+   * zone bounds. Traffic still derives its village centrelines from the spline
+   * itself at runtime, because a nine-node sketch is not a curve; what this
+   * fixes is everything *else* that reads the manifest and believed it.
+   */
   lanes: [
-    { id: 'v_lane_0', x: 5.0, z: -40.0, next: ['v_lane_1'], speedLimit: 12 },
-    { id: 'v_lane_1', x: 0.0, z: 0.0, next: ['v_lane_2'], speedLimit: 12 },
-    { id: 'v_lane_2', x: -12.0, z: 50.0, next: ['v_lane_3'], speedLimit: 12 },
-    { id: 'v_lane_3', x: -14.0, z: 68.0, next: [], speedLimit: 12 },
+    { id: 'v_lane_s2', x: 5.0, z: -98.0, next: ['v_lane_s1'], speedLimit: 12 },
+    { id: 'v_lane_s1', x: 8.0, z: -56.0, next: ['v_lane_0'], speedLimit: 12 },
+    { id: 'v_lane_0', x: 0.0, z: -14.0, next: ['v_lane_1'], speedLimit: 12 },
+    { id: 'v_lane_1', x: -4.0, z: 28.0, next: ['v_lane_2'], speedLimit: 12 },
+    { id: 'v_lane_2', x: 4.0, z: 74.0, next: ['v_lane_3'], speedLimit: 12 },
+    { id: 'v_lane_3', x: 1.0, z: 120.0, next: [], speedLimit: 12 },
+    { id: 'v_side_0', x: -1.0, z: 20.0, next: ['v_side_1'], speedLimit: 10 },
+    { id: 'v_side_1', x: 16.0, z: 12.0, next: ['v_side_2'], speedLimit: 10 },
+    { id: 'v_side_2', x: 40.0, z: 2.0, next: ['v_side_3'], speedLimit: 10 },
+    { id: 'v_side_3', x: 62.0, z: -14.0, next: ['v_side_4'], speedLimit: 10 },
+    { id: 'v_side_4', x: 78.0, z: -40.0, next: ['v_side_5'], speedLimit: 10 },
+    { id: 'v_side_5', x: 86.0, z: -72.0, next: [], speedLimit: 10 },
   ],
   // Two places a villager would actually step across the road: outside the
   // hero row of houses, and just south of the side-road junction.
@@ -64,9 +83,9 @@ const village: ZoneManifest = {
     { id: 'v_cross_junction', ax: -8.5, az: 14, bx: 5.5, bz: 14 },
   ],
   ambientAreas: [
-    { id: 'v_amb_row', x: -6, z: 46, radius: 22, weight: 3 },
-    { id: 'v_amb_junction', x: 12, z: 8, radius: 20, weight: 2 },
-    { id: 'v_amb_sideroad', x: 52, z: -22, radius: 18, weight: 1 },
+    { id: 'v_amb_row', x: -10, z: 46, radius: 14, weight: 3 },
+    { id: 'v_amb_junction', x: 15, z: 2, radius: 12, weight: 2 },
+    { id: 'v_amb_sideroad', x: 52, z: -22, radius: 14, weight: 1 },
   ],
   audio: { zoneTrack: 'outdoor', ambience: ['cicadas', 'wind', 'birds'], reverb: 0.12 },
   weather: { windStrength: 1.0, fogFar: 560, defaultTimeMode: 'cycle' },
@@ -119,10 +138,15 @@ const oldMarket: ZoneManifest = {
     { id: 'om_cross_south', ax: -6.2, az: -18, bx: 6.2, bz: -18 },
     { id: 'om_cross_side', ax: -34, az: -6.2, bx: -34, bz: 6.2 },
   ],
+  // Off the carriageway, deliberately. `ROAD_HALF` is 5 m and the pavement
+  // 2.2, so an area reaching inside |x| < 8 puts pedestrians in the road: the
+  // navmesh covers tarmac perfectly well and they will happily stand on it.
+  // The first version centred one of these on the main road and produced a
+  // crowd walking down the middle of it.
   ambientAreas: [
-    { id: 'om_amb_square', x: 12, z: 24, radius: 20, weight: 4 },
-    { id: 'om_amb_high_street', x: 0, z: 58, radius: 26, weight: 3 },
-    { id: 'om_amb_parking', x: -30, z: 8, radius: 16, weight: 2 },
+    { id: 'om_amb_square', x: 19, z: 26, radius: 10, weight: 4 },
+    { id: 'om_amb_high_street', x: 20, z: 58, radius: 11, weight: 3 },
+    { id: 'om_amb_parking', x: -32, z: 16, radius: 10, weight: 2 },
   ],
   audio: { zoneTrack: 'city', ambience: ['traffic_far', 'crowd_low'], reverb: 0.3 },
   weather: { windStrength: 0.6, fogFar: 420, defaultTimeMode: 'cycle' },
@@ -161,10 +185,10 @@ const downtown: ZoneManifest = {
     { id: 'dt_cross_north', ax: -6.2, az: 196, bx: 6.2, bz: 196 },
   ],
   ambientAreas: [
-    { id: 'dt_amb_plaza', x: 20, z: 160, radius: 22, weight: 5 },
-    { id: 'dt_amb_station', x: 24, z: 146, radius: 14, weight: 2 },
-    { id: 'dt_amb_flats', x: -22, z: 140, radius: 18, weight: 3 },
-    { id: 'dt_amb_north', x: 0, z: 206, radius: 24, weight: 2 },
+    { id: 'dt_amb_plaza', x: 24, z: 160, radius: 14, weight: 5 },
+    { id: 'dt_amb_station', x: 24, z: 142, radius: 12, weight: 2 },
+    { id: 'dt_amb_flats', x: -24, z: 140, radius: 14, weight: 3 },
+    { id: 'dt_amb_north', x: 22, z: 206, radius: 12, weight: 2 },
   ],
   audio: { zoneTrack: 'city', ambience: ['traffic_near', 'crowd_mid'], reverb: 0.38 },
   weather: { windStrength: 0.5, fogFar: 380, defaultTimeMode: 'cycle' },
@@ -196,8 +220,8 @@ const waterfront: ZoneManifest = {
   ],
   crossings: [{ id: 'wf_cross_dock', ax: -6.2, az: -112, bx: 6.2, bz: -112 }],
   ambientAreas: [
-    { id: 'wf_amb_dock', x: -24, z: -120, radius: 20, weight: 3 },
-    { id: 'wf_amb_promenade', x: 0, z: -78, radius: 24, weight: 2 },
+    { id: 'wf_amb_dock', x: -26, z: -120, radius: 14, weight: 3 },
+    { id: 'wf_amb_promenade', x: 20, z: -78, radius: 11, weight: 2 },
   ],
   audio: { zoneTrack: 'city', ambience: ['gulls', 'water', 'traffic_far'], reverb: 0.22 },
   weather: { windStrength: 1.2, fogFar: 500, defaultTimeMode: 'cycle' },

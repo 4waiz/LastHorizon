@@ -198,11 +198,21 @@ export class Population {
     this.d.relationships.set(def.id, def.initialRelationship ?? {});
   }
 
+  /**
+   * The lane graph, from whichever description of the roads is better.
+   *
+   * A zone that supplies `extraCentrelines` **replaces** the manifest's, it
+   * does not add to them. The village is the case: its manifest lanes are a
+   * nine-node sketch of a 260-point spline, and taking both would give the
+   * village two overlapping road networks and cars driving down the one that
+   * is not there.
+   */
   private buildTraffic(): void {
-    const centrelines = [
-      ...centrelinesFromManifest(this.d.zone, this.d.heightAt),
-      ...(this.d.extraCentrelines ?? []),
-    ];
+    const supplied = this.d.extraCentrelines;
+    const centrelines =
+      supplied && supplied.length > 0
+        ? [...supplied]
+        : centrelinesFromManifest(this.d.zone, this.d.heightAt);
     if (centrelines.length === 0) return;
     const graph = buildLaneGraph(centrelines);
     if (graph.lanes.length === 0) return;

@@ -64,6 +64,29 @@ describe('the shipped catalogue', () => {
   });
 });
 
+describe('zone absence', () => {
+  it('gives a zone nobody lives in an empty list rather than a surprise', () => {
+    // `hill_airstrip` is declared and not yet playable. A population built for
+    // it must be empty, not undefined and not everybody.
+    expect(npcsInZone(NPC_CATALOGUE, 'hill_airstrip')).toEqual([]);
+  });
+
+  it('never returns a resident of one zone when asked about another', () => {
+    for (const zone of ['village_coast', 'city_old_market', 'city_downtown', 'city_waterfront'] as const) {
+      for (const npc of npcsInZone(NPC_CATALOGUE, zone)) {
+        expect(npc.zone).toBe(zone);
+      }
+    }
+  });
+
+  it('accounts for every resident exactly once across the zones', () => {
+    const counted = (['village_coast', 'city_old_market', 'city_downtown', 'city_waterfront', 'hill_airstrip'] as const)
+      .flatMap((z) => npcsInZone(NPC_CATALOGUE, z));
+    expect(counted).toHaveLength(NPC_CATALOGUE.length);
+    expect(new Set(counted.map((n) => n.id)).size).toBe(NPC_CATALOGUE.length);
+  });
+});
+
 describe('the child rule', () => {
   it('has no combat-capable NPC at all in this phase', () => {
     for (const npc of NPC_CATALOGUE) {

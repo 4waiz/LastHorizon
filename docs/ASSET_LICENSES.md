@@ -82,12 +82,19 @@ Runtime dependencies, credited in-game and in the README:
 | --- | --- |
 | three.js | MIT |
 | three-mesh-bvh | MIT |
+| `@dimforge/rapier3d-compat` | Apache-2.0 |
+| `recast-navigation` | MIT |
 | GSAP | Standard "No Charge" license |
 | Vite | MIT |
 | TypeScript | Apache-2.0 |
 | Vitest | MIT |
 | ESLint | MIT |
 | Playwright | Apache-2.0 |
+
+Rapier and Recast were both installed before they were used — Rapier in Phase 5,
+Recast in Phase 2 — and both ship a copy of their WebAssembly inside the
+JavaScript bundle. Neither is an *asset* in the sense the rest of this document
+means, but both are redistributed in `dist/`, so both belong here.
 
 > **GSAP note:** the standard GSAP license is free for most uses but is *not*
 > an OSI open-source license, and its terms differ for paid products. Confirm

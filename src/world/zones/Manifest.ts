@@ -321,6 +321,17 @@ export function validateZone(z: ZoneManifest): ValidationIssue[] {
     if (!withinBounds(z, a.x, a.z)) {
       push('ambient-area-out-of-bounds', `ambient area ${a.id} lies outside the zone`);
     }
+    // Pedestrians spawn and wander inside these, and the navmesh covers tarmac
+    // perfectly well, so an area centred on a carriageway produces a crowd
+    // walking down the middle of the road. That is exactly what the first
+    // Old Market layout did.
+    const toLane = distanceToLanes(z, a.x, a.z);
+    if (toLane < AMBIENT_LANE_CLEARANCE) {
+      push(
+        'ambient-area-on-road',
+        `ambient area ${a.id} is ${toLane.toFixed(1)} m from a lane; pedestrians will stand in the road`,
+      );
+    }
   }
   if (z.playable && z.kind === 'streamed' && z.ambientAreas.length === 0) {
     push('no-ambient-areas', 'playable district has nowhere for pedestrians to appear');
@@ -331,6 +342,39 @@ export function validateZone(z: ZoneManifest): ValidationIssue[] {
 
 export function withinBounds(z: ZoneManifest, x: number, zc: number): boolean {
   return x >= z.bounds.minX && x <= z.bounds.maxX && zc >= z.bounds.minZ && zc <= z.bounds.maxZ;
+}
+
+/**
+ * How close an ambient area's centre may come to a carriageway.
+ *
+ * Deliberately under the 7.2 m a city road plus pavement occupies. The village
+ * has no pavements and its lane graph is a four-node approximation of a curved
+ * spline, so a stricter rule would flag verges that read perfectly well. This
+ * catches the failure that actually happened — an area centred *on* the road —
+ * rather than trying to police every metre.
+ */
+export const AMBIENT_LANE_CLEARANCE = 6;
+
+/** Shortest distance from a point to any lane segment, or Infinity. */
+export function distanceToLanes(z: ZoneManifest, x: number, zc: number): number {
+  const byId = new Map(z.lanes.map((l) => [l.id, l]));
+  let best = Infinity;
+
+  for (const lane of z.lanes) {
+    for (const nextId of lane.next) {
+      const b = byId.get(nextId);
+      if (!b) continue;
+      const dx = b.x - lane.x;
+      const dz = b.z - lane.z;
+      const lenSq = dx * dx + dz * dz;
+      if (lenSq < 1e-9) continue;
+      const t = Math.max(0, Math.min(1, ((x - lane.x) * dx + (zc - lane.z) * dz) / lenSq));
+      const d = Math.hypot(x - (lane.x + dx * t), zc - (lane.z + dz * t));
+      if (d < best) best = d;
+    }
+  }
+
+  return best;
 }
 
 /**

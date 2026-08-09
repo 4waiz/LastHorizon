@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   buildChunkGrid,
   chunkSeed,
+  distanceToLanes,
   validateWorldManifest,
   validateZone,
   type ZoneManifest,
@@ -141,6 +142,48 @@ describe('world manifest validation', () => {
 
   it('refuses a playable district with nowhere for pedestrians to appear', () => {
     expect(codes(validateZone(streamedZone({ ambientAreas: [] })))).toContain('no-ambient-areas');
+  });
+
+  it('catches an ambient area centred on a carriageway', () => {
+    // The failure this exists for shipped once: pedestrians spawn and wander
+    // inside these, the navmesh covers tarmac perfectly well, and the first
+    // Old Market layout produced a crowd walking down the middle of the road.
+    const z = streamedZone({
+      lanes: [
+        { id: 'a', x: 0, z: -40, next: ['b'], speedLimit: 14 },
+        { id: 'b', x: 0, z: 40, next: [], speedLimit: 14 },
+      ],
+      ambientAreas: [{ id: 'square', x: 0, z: 10, radius: 12, weight: 1 }],
+    });
+    expect(codes(validateZone(z))).toContain('ambient-area-on-road');
+  });
+
+  it('allows an ambient area beside the road', () => {
+    const z = streamedZone({
+      lanes: [
+        { id: 'a', x: 0, z: -40, next: ['b'], speedLimit: 14 },
+        { id: 'b', x: 0, z: 40, next: [], speedLimit: 14 },
+      ],
+      ambientAreas: [{ id: 'square', x: 18, z: 10, radius: 10, weight: 1 }],
+    });
+    expect(codes(validateZone(z))).not.toContain('ambient-area-on-road');
+  });
+
+  it('measures to the nearest segment, not the nearest node', () => {
+    // Two nodes 80 m apart: a point beside the midpoint is nowhere near either
+    // end, and checking nodes alone would call it clear.
+    const z = streamedZone({
+      lanes: [
+        { id: 'a', x: 0, z: -40, next: ['b'], speedLimit: 14 },
+        { id: 'b', x: 0, z: 40, next: [], speedLimit: 14 },
+      ],
+    });
+    expect(distanceToLanes(z, 3, 0)).toBeCloseTo(3, 6);
+    expect(distanceToLanes(z, 0, 100)).toBeCloseTo(60, 6);
+  });
+
+  it('reports no road at all as infinitely far away', () => {
+    expect(distanceToLanes(streamedZone({ lanes: [] }), 0, 0)).toBe(Infinity);
   });
 
   it('catches an ambient area outside the zone', () => {
