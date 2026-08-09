@@ -131,14 +131,25 @@ const POINT_PRIORITY: Readonly<Record<BuiltPoint['kind'], number>> = {
   fish: 20,
 };
 
-/** Kinds where facing matters. A bed does not care; a shop counter does. */
+/**
+ * Kinds where facing matters.
+ *
+ * A door does not — one you cannot use from behind strands people outside
+ * their own house. Everything else does, including the bed: that is
+ * pre-Phase-7 behaviour with a browser scenario behind it ("does not offer a
+ * bed that is behind the player"), and this list is where it lives now.
+ */
 const NEEDS_FACING: ReadonlySet<BuiltPoint['kind']> = new Set<BuiltPoint['kind']>([
+  'bed',
   'counter',
   'desk',
   'shelf',
   'wardrobe',
   'rack',
   'save',
+  'shower',
+  'lift',
+  'decorate',
 ]);
 
 /**

@@ -68,6 +68,12 @@ import { taskDef } from '../tasks/taskCatalog';
 import type { ServiceFailure, ServiceHost } from '../services/ServiceSystem';
 import type { DecorItemId } from '../services/ServiceCatalog';
 import type { KitPart } from '../world/interiors/InteriorKit';
+import {
+  SERVICE_HOURS,
+  formatHour,
+  isOpenAt,
+  type ServiceType,
+} from '../world/interiors/InteriorDefinition';
 
 /** The lazily-imported half. See `src/world/interiors/InteriorSubsystem.ts`. */
 type InteriorApi = typeof import('../world/interiors/InteriorSubsystem');
@@ -1178,9 +1184,21 @@ export class Game {
         this.update(dt);
         if (render) this.render();
       },
-      enterInterior: () => this.enterInterior(),
+      // No door named: take the nearest, or the zone's first if the caller is
+      // nowhere near one. "Put me inside a building" is what the pre-Phase-7
+      // bridge op meant and several specs still say it that way; the *game*
+      // path always names a door, so this convenience cannot loosen it.
+      enterInterior: async () => {
+        await this.ensureKit();
+        const id = this.nearestDoorId() ?? this.runtime.interactables[0]?.doorId;
+        if (id) await this.enterInterior(id);
+      },
       exitInterior: () => this.exitInterior(),
-      sit: (on) => this.sit(on),
+      // Likewise: sitting with no seat named takes the room's first chair.
+      sit: (on) => {
+        const seat = this.interiors?.active?.points.find((p) => p.kind === 'chair');
+        this.sit(on, on ? seat : undefined);
+      },
       setLying: (on) => this.player.setLying(on),
       openWardrobe: (open) => this.hud.openWardrobe(open),
       isIndoors: () => this.indoors,
@@ -1262,8 +1280,14 @@ export class Game {
       exitVehicle: () => this.exitVehicle(),
       ridingVehicle: () => this.ridingVehicleId,
       setVehicleLocked: (id, locked) => this.setVehicleLocked(id, locked),
-      giveItem: (id, count) => this.inventory.add(id, count).added > 0,
-      recoverVehicle: (id) => this.garage.recover(id, 'lost') !== null,
+      giveItem: (id, count) => {
+        const added = this.inventory.add(id, count).added > 0;
+        // A `collect` objective reads off the bag, so a test that hands over
+        // three boxes has done the objective.
+        this.syncTaskProgress();
+        return added;
+      },
+      recoverVehicle: (id) => this.recoverVehicle(id),
       rollVehicle: (id) => {
         this.vehicles.get(id)?.rollOver();
       },
@@ -1345,18 +1369,19 @@ export class Game {
       populationActive: (on) => this.population?.setActive(on),
 
       // ---- Phase 7 ----------------------------------------------------------
+      // Read off the zone rather than the registry: the registry does not
+      // exist until somebody opens a door, and a test has to be able to ask
+      // what the doors *are* before going through one.
       doorList: () => {
         const hour = this.env.time * 24;
-        const reg = this.interiors;
-        if (!reg) return [];
-        return reg.doorsInZone(this.zones.activeZoneId ?? 'village_coast').map((d) => ({
-          id: d.id,
-          interiorId: d.interiorId,
-          x: d.position.x,
-          y: d.position.y,
-          z: d.position.z,
-          label: d.label,
-          open: reg.isDoorOpen(d.id, hour),
+        return this.runtime.interactables.map((it) => ({
+          id: it.doorId,
+          interiorId: it.service,
+          x: it.position.x,
+          y: it.position.y,
+          z: it.position.z,
+          label: it.prompt,
+          open: isOpenAt(SERVICE_HOURS[it.service], hour),
         }));
       },
       enterDoor: async (doorId) => {
@@ -1435,8 +1460,9 @@ export class Game {
         };
       },
       beginTask: (taskId) => this.startTask(taskId),
-      reportTask: (place) => {
-        const ok = this.tasks.report({ place });
+      // Accepts a place name or an objective id, whichever the caller has.
+      reportTask: (name) => {
+        const ok = this.tasks.report({ place: name }) || this.tasks.report({ objectiveId: name });
         if (ok) this.afterTaskChange();
         return ok;
       },
@@ -1548,7 +1574,16 @@ export class Game {
       this.minimap.update(dt, this.player.position, this.player.controller.facing);
     }
 
-    // 7. interactables
+    // 7. interactables, and the running job
+    //
+    // `collect` objectives are re-read off the bag every frame rather than
+    // pushed at each source. Items arrive from a shop, a pickup, a reward and
+    // a save restore, and wiring four call sites is four chances to miss one
+    // -- while the truth of "carry three boxes" is just how many you hold.
+    if (this.tasks.active) {
+      this.tasks.advance(dt);
+      this.syncTaskProgress();
+    }
     this.updateInteraction(dt);
 
     // 8. physics, on its own fixed step
@@ -2736,13 +2771,41 @@ export class Game {
     this.transitioning = true;
     try {
       const hour = this.env.time * 24;
-      const link = this.interiors?.door(id);
-      const def = link ? this.interiors?.definition(link.interiorId) : null;
+
+      // Hours are checked *before* the subsystem loads. They live in the eager
+      // half precisely so bouncing off a shut shop costs no download.
+      const service = this.runtime.interactables.find((it) => it.doorId === id)?.service;
+      if (service && !isOpenAt(SERVICE_HOURS[service], hour)) {
+        const opens = SERVICE_HOURS[service];
+        this.hud.showToast(
+          DOOR_NAMES[service],
+          opens ? `Closed. Opens at ${formatHour(opens.open)}.` : 'Closed.',
+        );
+        return;
+      }
+
+      // Fade *before* fetching, not after.
+      //
+      // The whole argument for the interior subsystem and the kit being lazy
+      // is that the download hides behind a transition the player is already
+      // waiting through. That is only true if the screen goes black first —
+      // otherwise the first doorway of a session visibly stalls, and the
+      // justification is a comment rather than a fact.
+      const firstEntry = this.interiors?.hasKit !== true;
+      if (firstEntry) {
+        this.hud.setPrompt(null);
+        this.input.releaseAll();
+        await this.hud.setFade(true, 0.75);
+      }
 
       if (!(await this.ensureKit())) {
         this.hud.showToast('Locked', 'The door will not budge.');
+        if (firstEntry) await this.hud.setFade(false, 0.5);
         return;
       }
+
+      const link = this.interiors?.door(id);
+      const def = link ? this.interiors?.definition(link.interiorId) : null;
 
       const result = this.interiors!.open({
         doorId: id,
@@ -2764,11 +2827,18 @@ export class Game {
         } else if (result.reason === 'no-kit') {
           this.hud.showToast('Locked', 'The door will not budge.');
         }
+        if (firstEntry) await this.hud.setFade(false, 0.5);
         return;
       }
 
       this.enterBuiltInterior(result.interior);
-      await this.transit(result.interior.spawn, result.interior.spawnFacing, true);
+      // Already black on the first entry, so do not fade out twice.
+      await this.transit(
+        result.interior.spawn,
+        result.interior.spawnFacing,
+        true,
+        firstEntry ? 0 : 0.75,
+      );
       this.hud.showToast(def?.name ?? 'Inside', this.interiorGreeting(result.interior));
     } finally {
       this.transitioning = false;
@@ -2779,6 +2849,7 @@ export class Game {
   private enterBuiltInterior(built: NonNullable<InteriorRegistry['active']>): void {
     this.scene.add(built.group);
     this.runtime.collision.setOverlay(built.colliders);
+    this.audio.setInteriorProfile(built.def.audio);
     this.audio.setZone('indoor');
 
     // Where this room appears to sit when you look out of its windows. Only
@@ -2823,6 +2894,7 @@ export class Game {
       if (built) {
         this.scene.remove(built.group);
         this.runtime.collision.setOverlay(null);
+        this.audio.setInteriorProfile(null);
       }
       // A shift you walk out of is a shift you abandoned.
       if (this.tasks.active) this.tasks.fail('abandoned');
@@ -2983,7 +3055,9 @@ export class Game {
       buyVehicle: (kind) => this.purchaseVehicle(kind),
       repairVehicle: (id) => this.garage.repair(id) >= 0,
       recolourVehicle: (id) => this.garage.get(id) !== null,
-      recoverVehicle: (id) => this.garage.recover(id, 'lost') !== null,
+      // The full path, not a bare record move: it also rights the live body
+      // and puts the player out of it if they were sitting in the thing.
+      recoverVehicle: (id) => this.recoverVehicle(id),
       selectVehicle: (id) => {
         this.garageSelection = id;
         return true;
@@ -3307,6 +3381,19 @@ const TASK_REFUSALS: Readonly<Record<StartRefusal, string>> = {
   'too-young': 'Come back when you are older.',
   'needs-vehicle': 'You would need something to drive.',
   'not-retryable': 'That one is done.',
+};
+
+/** What a closed door calls itself, before the layouts have been fetched. */
+const DOOR_NAMES: Readonly<Record<ServiceType, string>> = {
+  home: 'Family home',
+  apartment: 'Starter apartment',
+  grocery: 'Village grocery',
+  police: 'Police station',
+  clinic: 'Village clinic',
+  garage: 'Garage and forecourt',
+  cafe: 'Corner cafe',
+  clothing: 'Clothing shop',
+  airstrip: 'Airstrip office',
 };
 
 /** The placeholder lines a counter says. Phase 11 owns the real dialogue UI. */

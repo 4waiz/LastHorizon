@@ -232,7 +232,8 @@ test.describe('gamepad', () => {
     await stand(page, 10.7, 32.45, Math.PI / 2);
 
     const offered = await page.evaluate(() => window.__LH_TEST__!.getInteraction());
-    expect(offered.prompt).toBe('Go inside');
+    // Phase 7: this door is the grocery's now.
+    expect(offered.prompt).toBe('Enter the grocery');
 
     await setButton(page, BTN.interact, 1);
     await settle(page, 4);

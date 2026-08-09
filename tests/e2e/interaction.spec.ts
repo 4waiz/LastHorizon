@@ -26,13 +26,20 @@ async function boot(page: Page) {
   await page.evaluate(() => window.__LH_TEST__!.ready());
 }
 
-/** Interior landmarks, from `src/world/Interiors.ts`. The cell sits at y=600. */
+/**
+ * Interior landmarks for the family home, from `interiorCatalog.ts`.
+ *
+ * Phase 7 replaced the single shared room with nine layouts. `home` is index 0
+ * in the catalogue, so its cell origin is (0, 600, 0) and these are its points
+ * in room-local metres — which, at that origin, are also world metres in x/z.
+ */
 const ROOM = {
   y: 600.02,
-  bed: { x: 2.89, z: -1.89 },
-  chair: { x: -1.6, z: -1.6 },
-  wardrobe: { x: -3.6, z: 2.04 },
-  exit: { x: 0, z: 3.35 },
+  bed: { x: 4.3, z: 0.3 },
+  chair: { x: 0.35, z: 1.4 },
+  desk: { x: -0.5, z: 1.4 },
+  wardrobe: { x: 0.0, z: -0.55 },
+  exit: { x: 2, z: 2.55 },
 };
 
 /**
@@ -64,7 +71,9 @@ test.describe('interaction', () => {
       return { near, far };
     }, DOOR_STAND);
 
-    expect(seen.near.prompt).toBe('Go inside');
+    // Phase 7: every door names its service, so HouseSmall at (15.6, 33) --
+    // the one this spec stands at -- is the grocery now.
+    expect(seen.near.prompt).toBe('Enter the grocery');
     expect(seen.far.prompt).toBeNull();
     expect(seen.far.actionId).toBeNull();
     expect(errors).toEqual([]);
@@ -118,13 +127,14 @@ test.describe('interaction', () => {
         return t.getInteraction().prompt;
       };
 
-      // Stand a step back from each fixture, looking at it.
+      // Stand a step back from each fixture, looking at it. Offsets are
+      // inside each point's own radius -- the chair's is 1.2 m.
       const bed = read(room.bed.x - 1.1, room.bed.z + 0.6, Math.atan2(1.1, -0.6));
-      const chair = read(room.chair.x + 1.0, room.chair.z + 0.9, Math.atan2(-1.0, -0.9));
+      const chair = read(room.chair.x + 0.7, room.chair.z + 0.6, Math.atan2(-0.7, -0.6));
       const wardrobe = read(
         room.wardrobe.x + 1.2,
-        room.wardrobe.z - 0.4,
-        Math.atan2(-1.2, 0.4),
+        room.wardrobe.z - 0.2,
+        Math.atan2(-1.2, 0.2),
       );
       return { bed, chair, wardrobe };
     }, ROOM);
@@ -162,7 +172,7 @@ test.describe('interaction', () => {
 
     // The exit is in range from beside the bed and ignores facing, so
     // *something* is offered -- but it must not be the bed.
-    expect(seen.backToBed.candidates.some((id) => id.includes('sleep'))).toBe(false);
+    expect(seen.backToBed.candidates.some((id) => id.includes('home_bed'))).toBe(false);
     expect(seen.backToDoor.prompt).not.toBeNull();
     expect(errors).toEqual([]);
   });
@@ -203,10 +213,12 @@ test.describe('interaction', () => {
       await t.enterInterior();
       t.settle(10);
 
-      // Midway between the chair and the wardrobe, looking between them.
-      const mx = (room.chair.x + room.wardrobe.x) / 2;
-      const mz = (room.chair.z + room.wardrobe.z) / 2;
-      t.teleportTo(mx + 1.4, room.y, mz, Math.atan2(-1.4, 0));
+      // Midway between the chair and the desk, a step back, looking at both.
+      // They sit either side of the same spot, so a single facing is inside
+      // the cone for each.
+      const mx = (room.chair.x + room.desk.x) / 2;
+      const mz = (room.chair.z + room.desk.z) / 2;
+      t.teleportTo(mx, room.y, mz + 0.9, Math.PI);
       t.settle(6);
       return t.getInteraction();
     }, ROOM);

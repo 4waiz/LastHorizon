@@ -169,6 +169,31 @@ export interface OpeningHours {
   readonly close: number;
 }
 
+/**
+ * When each kind of place is open, kept out here rather than inside the
+ * layouts.
+ *
+ * Opening hours belong to the *service*, not to the room: the sign on the
+ * door has to say "closed until 07:00" before anything has decided what the
+ * inside looks like. Keeping this in the eager half means a shut shop costs
+ * nothing to bounce off — the 26 kB interior subsystem is never fetched.
+ *
+ * `null` is round-the-clock. Somewhere to sleep and somewhere to be treated
+ * have to be open when you need them, and a station with office hours is not
+ * a police station.
+ */
+export const SERVICE_HOURS: Readonly<Record<ServiceType, OpeningHours | null>> = {
+  home: null,
+  apartment: null,
+  clinic: null,
+  police: null,
+  grocery: { open: 7, close: 21 },
+  cafe: { open: 6, close: 22 },
+  clothing: { open: 9, close: 20 },
+  garage: { open: 8, close: 19 },
+  airstrip: { open: 6, close: 20 },
+};
+
 export interface InteriorDef {
   readonly id: string;
   readonly name: string;

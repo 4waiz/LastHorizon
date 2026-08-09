@@ -1,11 +1,12 @@
 {
   "version": "0.0.1",
+  "autoPort": true,
   "configurations": [
     {
-      "name": "lasthorizon",
+      "name": "lasthorizon-p7",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "5199", "--strictPort"],
-      "port": 5199
+      "runtimeArgs": ["run", "dev"],
+      "port": 5201
     }
   ]
 }

@@ -163,10 +163,13 @@ describe('facing', () => {
     expect(s.candidates(query({ facing: justInside }), ctx({ indoors: true }))).toHaveLength(1);
   });
 
-  it('ignores facing for a bed, which you can climb into from either side', () => {
+  it('does not offer a bed that is behind the player', () => {
+    // Pre-Phase-7 behaviour, kept: `sleep` carried the same cone before the
+    // kinds moved out of `World` and into the interior layouts.
     const h = handlers();
     const s = systemFor([], [point('b', 'bed', 0, 2)], h, { x: 40, y: 1, z: 40 });
-    expect(s.candidates(query({ facing: Math.PI }), ctx({ indoors: true }))).toHaveLength(1);
+    expect(s.candidates(query({ facing: Math.PI }), ctx({ indoors: true }))).toHaveLength(0);
+    expect(s.candidates(query(), ctx({ indoors: true }))).toHaveLength(1);
   });
 });
 

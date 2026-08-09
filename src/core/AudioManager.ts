@@ -1,4 +1,5 @@
 import { clamp, lerp } from '../utils/MathUtils';
+import type { InteriorAudioProfile } from '../world/interiors/InteriorDefinition';
 
 /**
  * Original soundscape, synthesised in the Web Audio API.
@@ -49,6 +50,22 @@ const CHORDS: number[][] = [
 /** A gentle bell figure that drifts over the pad. */
 const MOTIF = [523.25, 587.33, 698.46, 587.33, 523.25, 440.0];
 
+/**
+ * How loud the one indoor bed sits, per kind of room.
+ *
+ * Authored against the rooms rather than derived: a workshop and a cafe are
+ * both busy places and a clinic is not, and the numbers say so.
+ */
+const INTERIOR_PROFILE_GAIN: Readonly<Record<InteriorAudioProfile, number>> = {
+  home: 0.9,
+  shop: 1.0,
+  office: 0.75,
+  clinic: 0.6,
+  workshop: 1.0,
+  cafe: 1.05,
+  hangar: 0.55,
+};
+
 export class AudioManager {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -71,6 +88,8 @@ export class AudioManager {
   private padTarget = 1;
   private tracks: Partial<Record<'outdoor' | 'indoor', { el: HTMLAudioElement; gain: GainNode }>> = {};
   private zone: 'outdoor' | 'indoor' = 'outdoor';
+  /** Multiplier on the indoor bed, set from the room's declared profile. */
+  private interiorGain = 1;
   private tracksReady = false;
   private trackFailed = false;
   private nextChordAt = 0;
@@ -210,7 +229,8 @@ export class AudioManager {
       const t = this.tracks[zone];
       if (!t) continue;
       const want = !this.trackFailed && this.tracksReady && this.zone === zone;
-      t.gain.gain.setTargetAtTime(want ? 0.9 : 0.0, now, 0.7);
+      const level = zone === 'indoor' ? 0.9 * this.interiorGain : 0.9;
+      t.gain.gain.setTargetAtTime(want ? level : 0.0, now, 0.7);
       if (want && t.el.paused) {
         void t.el.play().catch(() => {
           /* blocked until a gesture; retried on the next zone change */
@@ -231,6 +251,25 @@ export class AudioManager {
   setZone(zone: 'outdoor' | 'indoor'): void {
     if (this.zone === zone) return;
     this.zone = zone;
+    this.applyZone();
+  }
+
+  /**
+   * Shape the indoor bed for the kind of room you are in.
+   *
+   * There is **one** indoor loop, and Phase 7 introduced nine buildings. Rather
+   * than ship seven more MP3s — 1.67 MB of audio is already most of the asset
+   * budget — each interior declares a profile and that profile scales the bed.
+   * A clinic sits quiet and a cafe sits forward, off the same file.
+   *
+   * This is deliberately modest. It is a level trim, not reverb; a hangar does
+   * not sound like a hangar, it sounds like a quiet room. Recorded as such in
+   * the Phase 7 report rather than described as room acoustics.
+   */
+  setInteriorProfile(profile: InteriorAudioProfile | null): void {
+    const next = profile === null ? 1 : (INTERIOR_PROFILE_GAIN[profile] ?? 1);
+    if (this.interiorGain === next) return;
+    this.interiorGain = next;
     this.applyZone();
   }
 

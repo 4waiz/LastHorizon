@@ -15,7 +15,7 @@
  * turns its front into the room: yaw 0 faces +Z, π faces -Z, π/2 faces +X.
  */
 
-import type { InteriorDef } from './InteriorDefinition';
+import { SERVICE_HOURS, type InteriorDef } from './InteriorDefinition';
 
 const HALF_PI = Math.PI / 2;
 
@@ -45,7 +45,7 @@ const HOME: InteriorDef = {
   // window portal was built for in Phase 4.
   livePortal: true,
   audio: 'home',
-  hours: null,
+  hours: SERVICE_HOURS.home,
   props: [
     { part: 'KitBed', x: 4.3, z: 0.3 },
     { part: 'KitWardrobe', x: 0.0, z: -0.55 },
@@ -96,7 +96,7 @@ const GROCERY: InteriorDef = {
   ],
   livePortal: false,
   audio: 'shop',
-  hours: { open: 7, close: 21 },
+  hours: SERVICE_HOURS.grocery,
   props: [
     { part: 'KitCounter', x: 5.0, z: 3.4 },
     { part: 'KitTill', x: 5.0, z: 3.3, y: 1.01 },
@@ -172,7 +172,7 @@ const POLICE: InteriorDef = {
   ],
   livePortal: false,
   audio: 'office',
-  hours: null,
+  hours: SERVICE_HOURS.police,
   props: [
     { part: 'KitCounter', x: 2.0, z: 1.6 },
     { part: 'KitDesk', x: 0.2, z: 3.4, yaw: Math.PI },
@@ -233,7 +233,7 @@ const CLINIC: InteriorDef = {
   audio: 'clinic',
   // No hours: somewhere to wake up after a bad fall has to be open when you
   // need it, and a closed clinic would make the recovery spawn a dead end.
-  hours: null,
+  hours: SERVICE_HOURS.clinic,
   props: [
     // West of the entry spawn, not in front of it: the player lands at
     // (2, 2) and a counter centred on x = 2 would have them inside it.
@@ -290,7 +290,7 @@ const GARAGE: InteriorDef = {
   ],
   livePortal: false,
   audio: 'workshop',
-  hours: { open: 8, close: 19 },
+  hours: SERVICE_HOURS.garage,
   props: [
     { part: 'KitCarLift', x: 4.4, z: 0.6 },
     { part: 'KitToolBench', x: 0.6, z: -0.5 },
@@ -352,7 +352,7 @@ const APARTMENT: InteriorDef = {
   // evenings, so the window earns a live view the way the family home does.
   livePortal: true,
   audio: 'home',
-  hours: null,
+  hours: SERVICE_HOURS.apartment,
   // Everything is kept off the entry lane — x in [1.6, 2.4] from the door at
   // (2, 3) up to the bed. The shower started life in the south-east corner,
   // where its glass side panel stood exactly where the player materialises.
@@ -396,7 +396,7 @@ const CAFE: InteriorDef = {
   ],
   livePortal: false,
   audio: 'cafe',
-  hours: { open: 6, close: 22 },
+  hours: SERVICE_HOURS.cafe,
   props: [
     { part: 'KitCounter', x: 0.4, z: -0.5 },
     { part: 'KitCoffeeBar', x: 0.4, z: -0.6, y: 1.01 },
@@ -450,7 +450,7 @@ const CLOTHING: InteriorDef = {
   ],
   livePortal: false,
   audio: 'shop',
-  hours: { open: 9, close: 20 },
+  hours: SERVICE_HOURS.clothing,
   props: [
     { part: 'KitCounter', x: 3.6, z: 1.6 },
     { part: 'KitTill', x: 3.6, z: 1.5, y: 1.01 },
@@ -509,7 +509,7 @@ const AIRSTRIP: InteriorDef = {
   ],
   livePortal: false,
   audio: 'hangar',
-  hours: { open: 6, close: 20 },
+  hours: SERVICE_HOURS.airstrip,
   // Deliberately sparse. This is a shell for the aircraft phase, and filling
   // it now would mean deleting furniture later to make room for an aeroplane.
   props: [
