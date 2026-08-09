@@ -15,8 +15,8 @@
  * - **`InteriorKit` and `InteriorDefinition`.** Types and small pure helpers;
  *   `World` needs the `ServiceType` union to label its doors.
  *
- * Measured: the split took the app chunk from 370.8 kB to 344.1 kB and
- * `initial load` from 4188.4 kB — 11.6 kB under its limit — back to 4161.7 kB.
+ * Measured: the split took the app chunk from 370.8 kB to 346.1 kB and
+ * `initial load` from 4188.4 kB — 11.6 kB under its limit — back to 4163.7 kB.
  */
 
 export { InteriorRegistry, type DoorLink, type OpenResult, type ReturnContext } from './InteriorRegistry';

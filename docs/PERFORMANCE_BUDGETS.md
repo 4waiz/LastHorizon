@@ -12,17 +12,24 @@ canvas 1554×1273, High quality preset auto-selected.
 
 ## The rule that surprises people
 
-**The interior is the worst case, not the open village.**
+**The interior is the worst case for triangles — but only the two rooms that
+still render a live window.**
 
 | Scene | Draw calls | Triangles |
 | --- | --- | --- |
 | Village, day | 285 | 482,488 |
 | Village, night | 377 | ~482,000 |
-| **Interior** | **183** | **~780,000** |
+| **Interior, live portal** (home) | **254** | **516,106** |
+| Interior, no portal (grocery) | 239 | 340,970 |
 
 `WindowPortal` renders the outdoor world a second time into a half-resolution
-target so the windows parallax correctly. Draw calls drop indoors because the
-room is small; triangle load rises ~61%. Budget against the interior.
+target so the windows parallax correctly. Until Phase 7 the one interior always
+paid for it. Now **two of nine do** — the family home and the apartment, the
+places a player spends evenings — and the other seven get ordinary toon panes.
+
+Draw calls are *higher* indoors than they were, and that is the price of
+modularity: the Phase 1 room was one merged GLB, and a room assembled from 30
+kit parts is 30 objects, doubled by the portal pass. See below.
 
 Night is the outdoor peak for draw calls (377) as the lamp point-light pool
 engages.
@@ -46,9 +53,9 @@ any release claim.
 | --- | --- | --- |
 | Draw calls, outdoor day | 285 | ≤ 410 |
 | Draw calls, outdoor night | 377 | ≤ 500 |
-| Draw calls, interior | 183 | ≤ 240 |
+| Draw calls, interior | 254 | ≤ 290 |
 | Triangles, outdoor | 482 k | ≤ 700 k |
-| Triangles, interior | 780 k | ≤ 880 k |
+| Triangles, interior | 516 k | ≤ 880 k |
 | Shader programs | 56 | ≤ 70 |
 | Geometries | 198 | ≤ 260 |
 | Textures | 17 | ≤ 32 |
@@ -57,6 +64,55 @@ Program count is the one to watch: material sharing plus
 `customProgramCacheKey` is what keeps ~99 imported materials on ~23–40
 programs. A change that multiplies programs will not show up as a frame-rate
 cliff immediately, but it fragments batching.
+
+### The interior budgets, re-derived in Phase 7
+
+Measured per building in `tests/e2e/interiorBudget.spec.ts`, which now runs in
+CI. Population disabled, clock pinned, camera at each room's entry spawn.
+Outdoors at the same moment: 294 calls, 368,558 triangles, 23 programs.
+
+| Service | Portal | Draw calls | Triangles | Programs | Kit parts | Room tris |
+| --- | --- | --- | --- | --- | --- | --- |
+| **home** | live | **254** | **516,106** | 53 | 30 | 1,420 |
+| grocery | — | 239 | 340,970 | 53 | 50 | 1,932 |
+| police | — | 205 | 341,602 | 53 | 39 | 1,692 |
+| clinic | — | 172 | 339,754 | 53 | 27 | 1,128 |
+| garage | — | 219 | 277,066 | 53 | 47 | 1,512 |
+| apartment | live | 222 | 513,074 | 53 | 21 | 840 |
+| cafe | — | 188 | 276,722 | 53 | 32 | 1,588 |
+| clothing | — | 206 | 277,938 | 53 | 30 | 1,476 |
+| airstrip | — | 223 | 278,070 | 54 | 46 | 1,596 |
+
+**Draw calls: 240 → 290.** The Phase 1 figure of 183 was one merged GLB room.
+A modular room is 30–50 separate objects, and the portal pass draws the scene
+twice. 254 is the worst case and 290 leaves 14% headroom.
+
+The named follow-up is **merging a built interior's static parts by material**
+at assembly time. The kit deliberately shares materials by colour, so a room
+of 50 parts should collapse to roughly the number of distinct colours in it —
+call it a dozen. That would take the worst case back under 200 and is a change
+to `InteriorBuilder` alone. It is not done here because the phase already
+carries a renderer change (the collision overlay) and one at a time is the rule.
+
+**Triangles: the interior is no longer uniformly the worst case.** 780 k was
+the shared room with its portal; without a portal a room now runs at ~277–341 k,
+*below* the outdoor scene. The 880 k budget stands, and what it protects is the
+two hero interiors at ~516 k.
+
+#### One lighting configuration, or the program count doubles
+
+Programs sat at 53 for eight interiors and jumped to **69** the moment the
+apartment was entered — against a budget of 70.
+
+Nothing about the apartment's materials is unusual. three.js includes the
+scene's **point-light count** in its program cache key, so a room lit with one
+light where the others use two makes every material in the scene compile a
+second time. The apartment now has two lights like everything else; the second
+is 4.5 W of fill and exists for the cache key, which its comment says.
+
+53 → 54 across all nine afterwards. **16 programs recovered for one light**,
+and `interiorBudget.spec.ts` asserts the spread across the nine stays within 2
+so this cannot come back unnoticed.
 
 ### The outdoor budgets, raised in Phase 6 for the population
 
@@ -241,13 +297,13 @@ are in the save format, and `InteriorKit`/`InteriorDefinition`, whose
 
 | | Phase 6 | Phase 7 | Budget |
 | --- | --- | --- | --- |
-| app chunk | 317.8 kB | 346.1 kB | ≤ 360 kB |
-| JS total (startup) | 1,058.3 kB | 1,086.5 kB | ≤ 1,100 kB |
-| initial load | 4,135.1 kB | 4,163.7 kB | ≤ 4,200 kB |
-| shipped total | 7,147.1 kB | 7,347.6 kB | ≤ 7,400 kB |
+| app chunk | 317.8 kB | 351.1 kB | ≤ 360 kB |
+| JS total (startup) | 1,058.3 kB | 1,091.5 kB | ≤ 1,100 kB |
+| initial load | 4,135.1 kB | 4,168.7 kB | ≤ 4,200 kB |
+| shipped total | 7,147.1 kB | 7,349.1 kB | ≤ 7,400 kB |
 
-**Initial load moved 28.6 kB for a phase that added 200 kB of content**, which
-is the split doing its job. It is now 36 kB under its limit and that is the
+**Initial load moved 33.6 kB for a phase that added 200 kB of content**, which
+is the split doing its job. It is now 31 kB under its limit and that is the
 number Phase 8 has to argue with — the shipped total has 52 kB left, which is
 less headroom than it looks given the GLB budget also moved.
 

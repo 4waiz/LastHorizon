@@ -11,7 +11,7 @@ village-only, and nobody works in them yet.
 **Date:** 2026-08-10
 **Base:** `phase-06-population`
 **Gate:** `npm run verify` green — **1,169 unit tests**, up from 999;
-**80 Playwright scenarios green**, up from 68
+**81 Playwright scenarios green**, up from 68
 **Branch:** `phase-06-population`
 
 ---
@@ -159,6 +159,18 @@ paid for.
 
 The balance argument for every number is in `docs/ECONOMY_BALANCE.md`.
 
+### Nine rooms, one audio loop
+
+Each interior declares an audio profile, and the profile does something real
+rather than sitting in the data unread: it trims the level of the single indoor
+bed. A clinic sits quiet, a cafe sits forward, a hangar sits back.
+
+That is deliberately modest, and worth being plain about — **it is a level
+trim, not room acoustics.** A hangar does not sound like a hangar; it sounds
+like a quiet room. Shipping seven more loops would have cost more of an audio
+budget that is already 1.67 MB of a 2 MB ceiling, for a difference most players
+would not name.
+
 ### Tasks are not quests
 
 A quest is a one-off with a place in the story and a stage the save remembers
@@ -264,15 +276,15 @@ save format, and the kit/definition modules, whose `ServiceType` union is what
 
 | | Phase 6 | Phase 7 | Budget |
 | --- | --- | --- | --- |
-| app chunk | 317.8 kB | 346.1 kB | ≤ 360 kB *(was 330)* |
-| JS total (startup) | 1,058.3 kB | 1,086.5 kB | ≤ 1,100 kB |
+| app chunk | 317.8 kB | 351.1 kB | ≤ 360 kB *(was 330)* |
+| JS total (startup) | 1,058.3 kB | 1,091.5 kB | ≤ 1,100 kB |
 | GLB models | 1,135.2 kB | 1,280.7 kB | ≤ 1,360 kB *(was 1,200)* |
-| **initial load** | **4,135.1 kB** | **4,163.7 kB** | **≤ 4,200 kB** |
-| shipped total | 7,147.1 kB | 7,347.6 kB | ≤ 7,400 kB |
+| **initial load** | **4,135.1 kB** | **4,168.7 kB** | **≤ 4,200 kB** |
+| shipped total | 7,147.1 kB | 7,349.1 kB | ≤ 7,400 kB |
 
-**Initial load moved 28.6 kB for a phase that added ~200 kB of content.** That
+**Initial load moved 33.6 kB for a phase that added ~200 kB of content.** That
 is the split doing its job, and it is the number the next phase has to argue
-with — 36 kB of headroom left.
+with — 31 kB of headroom left.
 
 `check-budgets.mjs` grew a `LAZY_ASSET_FILES` list, which does for art what
 `LAZY_CHUNK_PREFIXES` already did for code: the interior kit still counts
@@ -281,7 +293,51 @@ load.
 
 ### Scene
 
-*(Measured in the browser; see §7.)*
+Measured per building in Chromium against the production build, population
+disposed, clock pinned, camera at each room's entry spawn. Outdoors at the same
+moment: **294 calls, 368,558 triangles, 23 programs.**
+
+| Service | Portal | Draw calls | Triangles | Programs | Kit parts | Room tris |
+| --- | --- | --- | --- | --- | --- | --- |
+| **home** | live | **254** | **516,106** | 53 | 30 | 1,420 |
+| grocery | — | 239 | 340,970 | 53 | 50 | 1,932 |
+| police | — | 205 | 341,602 | 53 | 39 | 1,692 |
+| clinic | — | 172 | 339,754 | 53 | 27 | 1,128 |
+| garage | — | 219 | 277,066 | 53 | 47 | 1,512 |
+| apartment | live | 222 | 513,074 | 53 | 21 | 840 |
+| cafe | — | 188 | 276,722 | 53 | 32 | 1,588 |
+| clothing | — | 206 | 277,938 | 53 | 30 | 1,476 |
+| airstrip | — | 223 | 278,070 | 54 | 46 | 1,596 |
+
+**The interior is no longer uniformly the worst case.** The documented
+183 calls / 780 k triangles was the Phase 1 shared room *with its portal*.
+Without one a room now runs at ~277–341 k triangles — **below** the outdoor
+scene. The 880 k budget stands and what it protects is the two hero interiors
+at ~516 k.
+
+**Draw calls went the other way**, and that is the honest price of modularity:
+the Phase 1 room was one merged GLB, and a room assembled from 30–50 kit parts
+is 30–50 objects, doubled by the portal pass. 254 against a 240 budget, so the
+budget moved to 290 with the reasoning written up in
+`docs/PERFORMANCE_BUDGETS.md`. The named follow-up is merging a built room's
+parts by material at assembly time; the kit already shares materials by colour,
+so 50 parts should collapse to about a dozen draws.
+
+#### One lighting configuration, or the program count doubles
+
+The measurement caught something nothing else would have. Programs sat at 53
+across eight interiors and jumped to **69** the moment the apartment was
+entered — against a budget of **70**.
+
+Nothing about the apartment's materials is unusual. three.js puts the scene's
+**point-light count** in its program cache key, and the apartment was the only
+room lit with one light where the rest use two. That made every material in the
+scene compile a second time.
+
+It now has a second light — 4.5 W of fill, placed for the cache key, and its
+comment says so. **53 → 54 across all nine, 16 programs recovered for one
+light.** `tests/e2e/interiorBudget.spec.ts` asserts the spread across the nine
+stays within 2, so it cannot come back unnoticed.
 
 ---
 
@@ -310,15 +366,17 @@ Two of the brief's other constraints are enforced rather than observed:
 **Unit:** 1,169 tests across 46 files. Five new files, 170 new tests, and
 `worldInteractables.test.ts` rewritten for the two-source split.
 
-**Browser:** 80 scenarios across 9 specs, green in Chromium against the
-production build. `services.spec.ts` contributes 12: all nine entered and left
+**Browser:** 81 scenarios across 10 specs, green in Chromium against the
+production build in 16.9 minutes. `services.spec.ts` contributes 12 and
+`interiorBudget.spec.ts` one: all nine entered and left
 with the return position checked to 5 cm; nine distinct cells and exactly two
 live portals; a closed shop refusing cleanly at 03:00 while the clinic admits;
 twenty enter/exit cycles with no accumulation; a save taken inside restored
 inside and exiting to the same doorstep; buy-then-reload not duplicating; an
 empty wallet refused and still listed with a reason; a vehicle bought and paid
 for once; a fine and a treatment; one complete shift at each of the five jobs;
-the grocery loop end to end; and cancel/retry paying only on success.
+the grocery loop end to end; and cancel/retry paying only on success. `interiorBudget.spec.ts` measures all
+nine rooms and holds them to the draw-call, triangle and program budgets.
 
 **Commands run:** `npm run typecheck`, `npm run lint`, `npm test`,
 `npm run build`, `npm run check:budgets`,
@@ -350,10 +408,11 @@ the grocery loop end to end; and cancel/retry paying only on success.
   sleeps there never pays. That is a gap in the fiction rather than a bug in
   the arithmetic — `rentDue` is a pure function of the day and is correct
   whenever it is asked.
-- **The interior draw-call budget was written for one room.** The documented
-  183/780 k figures are the Phase 1 shared room with its portal. Seven of nine
-  interiors now have no portal at all, so the interior is no longer reliably
-  the worst case, and the budget line has not been re-derived per service.
+- **A modular room costs more draw calls than a merged one.** 254 against the
+  290 budget at the worst case, where Phase 1's single merged GLB was 183.
+  Merging a built room's parts by material at assembly time should take it back
+  under 200; it is a change to `InteriorBuilder` alone and is deliberately not
+  folded into a phase that already carries a renderer change.
 - **The browser suite is longer again.** Twenty enter/exit cycles is minutes of
   real-time fade on its own, and that one scenario carries an explicit
   300-second timeout. Phase 6 flagged sharding as the answer when this next
@@ -391,5 +450,6 @@ Phase 8 attaches to the work points and the city doors: put residents behind
 the counters they already have anchors for, and give the districts interiors.
 Both are additive and neither needs anything in this phase to change.
 
-Worth doing first: re-derive the interior scene budget per service, now that
-seven of the nine no longer carry a portal pass.
+Worth doing first: merge a built interior's static parts by material. The
+measurement is in place, the budget is documented, and it is the one number
+this phase moved in the wrong direction.

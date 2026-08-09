@@ -376,7 +376,20 @@ const APARTMENT: InteriorDef = {
     { id: 'apt_decorate', kind: 'decorate', x: 0.8, z: 2.0, y: 0.9, radius: 1.3, prompt: 'Decorate', service: 'apartment_decorate' },
   ],
   workPoints: [],
-  lights: [{ x: 1.0, y: 2.6, z: 0.8, colour: 0xffe0ad, power: 12 }],
+  /**
+   * Two lights, like every other interior — and the second one is not for the
+   * look of the room.
+   *
+   * three.js puts the scene's point-light *count* in its program cache key, so
+   * a room lit differently from the other eight forces every material in the
+   * scene to compile a second time. Measured: the apartment alone took the
+   * session from 53 programs to 69, against a budget of 70. One extra light
+   * costs a draw of nothing and keeps all nine on one lighting configuration.
+   */
+  lights: [
+    { x: 1.0, y: 2.6, z: 0.8, colour: 0xffe0ad, power: 12 },
+    { x: 1.4, y: 1.1, z: 2.2, colour: 0xffd39a, power: 4.5 },
+  ],
 };
 
 // ---------------------------------------------------------------------------
