@@ -25,7 +25,16 @@ export interface TestSurface {
   teleport(x: number, y: number, z: number, facing: number): void;
   groundAt(x: number, z: number): number;
   frameCamera(facing: number, distance: number, pitch?: number): void;
-  step(dt: number): void;
+  /**
+   * Advance one simulation step, optionally drawing it.
+   *
+   * `render` defaults to true because a screenshot or a `getRenderStats` read
+   * needs the canvas to be current. It is turned off for the intermediate
+   * frames of a long settle: headless Chromium rasterises in software, and a
+   * populated village is ~600 k triangles over ~480 draw calls, so drawing
+   * every one of nine hundred frames nobody looks at was taking two minutes.
+   */
+  step(dt: number, render?: boolean): void;
   enterInterior(): Promise<void>;
   exitInterior(): Promise<void>;
   sit(on: boolean): void;
@@ -132,6 +141,16 @@ export interface NpcSnapshot {
 }
 
 export interface TrafficSnapshot {
+  /**
+   * Stable per-vehicle id.
+   *
+   * Needed to answer "where did this car *first* appear", which is the
+   * acceptance criterion about not spawning in the player's view. Identifying
+   * cars by rounded position instead — the first attempt — counts a car
+   * *driving* toward you as a new one every few metres, and then reports it as
+   * having appeared under your nose.
+   */
+  id: number;
   x: number;
   z: number;
   radius: number;
@@ -678,8 +697,21 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
       return surface.zoneDebug();
     },
 
+    /**
+     * Advance the simulation, drawing only the frame that is left on screen.
+     *
+     * Nothing observes an intermediate frame — a screenshot, a
+     * `getRenderStats` read or a visual assertion all happen after `settle`
+     * returns, and the last frame is drawn. What this removes is 899 software
+     * rasterisations of a scene nobody looks at.
+     *
+     * It is not a micro-optimisation. Headless Chromium has no GPU, and a
+     * populated village is ~600 k triangles over ~480 draw calls; the browser
+     * suite was spending minutes per scenario here and timing out on it.
+     */
     settle(frames = 40): void {
-      for (let i = 0; i < frames; i++) surface.step(FIXED_DT);
+      for (let i = 0; i < frames - 1; i++) surface.step(FIXED_DT, false);
+      if (frames > 0) surface.step(FIXED_DT, true);
     },
 
     async awaitPopulation(timeoutMs = 30000): Promise<PopulationSnapshot> {

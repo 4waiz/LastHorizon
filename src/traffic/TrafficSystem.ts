@@ -34,6 +34,11 @@ import {
  */
 
 export interface TrafficObstacle {
+  /**
+   * Stable per-vehicle id, so a caller can tell one car from the same car
+   * later. Zero for anything that is not a traffic vehicle.
+   */
+  readonly id: number;
   readonly x: number;
   readonly z: number;
   /** Metres of clearance to leave. */
@@ -171,6 +176,7 @@ export class TrafficSystem {
   /** Every vehicle's position, so pedestrians and perception can see them. */
   positions(): TrafficObstacle[] {
     return this.vehicles.map((v) => ({
+      id: v.id,
       x: v.model.position.x,
       z: v.model.position.z,
       radius: 2.2,

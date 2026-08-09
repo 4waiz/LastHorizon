@@ -481,12 +481,12 @@ export class Population {
     const out: TrafficObstacle[] = [];
     for (const agent of this.named) {
       if (agent.band === 'near' && !agent.indoors) {
-        out.push({ x: agent.position.x, z: agent.position.z, radius: 0.6 });
+        out.push({ id: 0, x: agent.position.x, z: agent.position.z, radius: 0.6 });
       }
     }
     for (const slot of this.ambient) {
       if (slot.agent.band === 'near' && !slot.agent.indoors) {
-        out.push({ x: slot.agent.position.x, z: slot.agent.position.z, radius: 0.6 });
+        out.push({ id: 0, x: slot.agent.position.x, z: slot.agent.position.z, radius: 0.6 });
       }
     }
     return out;

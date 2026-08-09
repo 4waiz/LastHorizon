@@ -1032,9 +1032,9 @@ export class Game {
         this.camera.setDistance(distance);
         if (pitch !== undefined) this.camera.pitch = pitch;
       },
-      step: (dt) => {
+      step: (dt, render = true) => {
         this.update(dt);
-        this.render();
+        if (render) this.render();
       },
       enterInterior: () => this.enterInterior(),
       exitInterior: () => this.exitInterior(),
@@ -1320,12 +1320,14 @@ export class Game {
     // The player's own vehicle is an obstacle to traffic, not a participant:
     // it is a Rapier body with a driver, and the lane graph has no opinion
     // about it beyond "do not drive into that".
-    const obstacles: Array<{ x: number; z: number; radius: number }> = [];
+    // `id: 0` marks "not a traffic vehicle" — the field exists so a test can
+    // follow one car across frames, and nothing here is one.
+    const obstacles: Array<{ id: number; x: number; z: number; radius: number }> = [];
     for (const proxy of this.vehicleProxies.values()) {
-      obstacles.push({ x: proxy.position.x, z: proxy.position.z, radius: 2.4 });
+      obstacles.push({ id: 0, x: proxy.position.x, z: proxy.position.z, radius: 2.4 });
     }
     if (!this.riding && !this.indoors) {
-      obstacles.push({ x: this.player.position.x, z: this.player.position.z, radius: 0.8 });
+      obstacles.push({ id: 0, x: this.player.position.x, z: this.player.position.z, radius: 0.8 });
     }
 
     population.update(
