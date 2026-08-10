@@ -64,7 +64,7 @@ import type { BuiltPoint } from '../world/interiors/InteriorBuilder';
 import { Economy } from '../economy/Economy';
 import { RENT_PERIOD_DAYS, SERVICE_FEES } from '../economy/PriceCatalog';
 import { TaskSystem, type StartRefusal } from '../tasks/TaskSystem';
-import { JOB_IDS, taskDef } from '../tasks/taskCatalog';
+import { jobIds, loadTasks, taskDef } from '../tasks/taskRegistry';
 import type { ServiceFailure, ServiceHost } from '../services/ServiceSystem';
 import type { DecorItemId } from '../services/ServiceCatalog';
 import type { KitPart } from '../world/interiors/InteriorKit';
@@ -599,6 +599,7 @@ export class Game {
     // The phone's data sources, handed over once the HUD exists. Without this
     // `openPhone` refuses rather than showing an empty handset.
     this.hud.setPhoneDeps(this.phoneDeps());
+    this.hud.setPauseDeps(this.pauseDeps());
     this.hud.syncOutfit(this.player.outfit);
     this.hud.setCounter(this.village!.collectibles.count, this.village!.collectibles.total);
     // Runs every frame, including while a district is active — a district has
@@ -706,6 +707,12 @@ export class Game {
     this.audio.setMuted(this.settings.current.muted);
     this.applyNeedsSettings();
     this.gameScope.addTeardown(this.settings.onChange(() => this.applyNeedsSettings()));
+
+    // The six job definitions, in both modes. Fire-and-forget for the same
+    // reason as the population: nothing can start a task until an interior
+    // counter, a quest stage or the phone's Work app exists, and all three are
+    // themselves lazy and await this first. The village is walkable meanwhile.
+    void loadTasks();
 
     // Story Mode brings the authored story in; Free Roam never downloads it.
     // Fire-and-forget: the village is already standing and playable, and
@@ -1839,6 +1846,50 @@ export class Game {
     };
   }
 
+  /**
+   * What the pause menu reads.
+   *
+   * `saveWithRollback` rather than a bare write, because that is the path the
+   * desk in the family home already uses and the one that keeps a readable
+   * backup if the write fails halfway.
+   */
+  private pauseDeps(): import('../ui/PauseMenu').PauseDeps {
+    return {
+      slots: async () => {
+        const list = await this.saves.listSlots();
+        return list.map((s) => ({
+          slot: s.slot,
+          exists: s.exists,
+          ageYears: s.ageYears,
+          mode: s.mode,
+          savedAt: s.savedAt,
+          // `listSlots` reports a slot it could not read as existing with no
+          // detail. Surfacing that as "damaged" rather than as "empty" is the
+          // difference between a player knowing a run is gone and wondering.
+          damaged: s.exists && s.ageYears === undefined,
+        }));
+      },
+      save: async (slot) => {
+        const parsed = SaveService.parseSlot(slot);
+        return parsed ? this.saveWithRollback(parsed) : false;
+      },
+      load: async (slot) => {
+        const parsed = SaveService.parseSlot(slot);
+        if (!parsed) return false;
+        const read = await this.saves.load(parsed);
+        if (!read.ok) return false;
+        this.applySave(read.data);
+        return true;
+      },
+      resume: () => this.hud.openPause(false),
+      openSettings: () => {
+        this.hud.openPause(false);
+        this.hud.openInfoPanel();
+      },
+      toast: (title, body) => this.hud.showToast(title, body),
+    };
+  }
+
   /** One line on how somebody feels about you, from the trust axis. */
   private static describeTrust(trust: number): string {
     if (trust >= 0.75) return 'knows you well';
@@ -1860,7 +1911,7 @@ export class Game {
     return {
       jobs: () => {
         const active = this.tasks.active;
-        return JOB_IDS.map((id) => {
+        return jobIds().map((id) => {
           const def = taskDef(id);
           return {
             id,
@@ -1909,6 +1960,7 @@ export class Game {
       },
       money: () => this.economy.wallet.cash,
       toast: (title, body) => this.hud.showToast(title, body),
+      ready: () => loadTasks(),
     };
   }
 
@@ -3347,10 +3399,13 @@ export class Game {
 
     if (!this.interiorApi) {
       // The code and the art in parallel: neither depends on the other, and
-      // this is the one moment in the session that pays for both.
+      // this is the one moment in the session that pays for both. The task
+      // catalogue joins them because a counter behind this door can start a
+      // shift, and a shift needs its definition to exist by then.
       const [api, kit] = await Promise.all([
         import('../world/interiors/InteriorSubsystem'),
         this.assetManager.loadInteriorKit(),
+        loadTasks(),
       ]);
       this.interiorApi = api;
       this.interiors = new api.InteriorRegistry();
@@ -3702,7 +3757,9 @@ export class Game {
     if (this.director) return Promise.resolve();
     if (this.storyLoading) return this.storyLoading;
 
-    this.storyLoading = import('../story/StorySubsystem').then((api) => {
+    // The catalogue rides along: a chapter-2 stage is a *real* grocery shift,
+    // so `work_shift` cannot resolve before the definitions exist.
+    this.storyLoading = Promise.all([import('../story/StorySubsystem'), loadTasks()]).then(([api]) => {
       this.storyApi = api;
       this.director = new api.StoryDirector(this.story, this.storyDirectorHost());
       this.panels = new api.StoryPanels();
@@ -3864,7 +3921,7 @@ export class Game {
     return {
       age: this.life.ageYears,
       money: this.economy.wallet.cash + this.economy.wallet.bank,
-      shiftsWorked: JOB_IDS.reduce((n, id) => n + this.tasks.completionsOf(id), 0),
+      shiftsWorked: jobIds().reduce((n, id) => n + this.tasks.completionsOf(id), 0),
       vehiclesOwned: this.garage.owned().length,
       keepsakes: this.village?.collectibles.count ?? 0,
       keepsakeTotal: this.village?.collectibles.total ?? 5,

@@ -229,6 +229,30 @@ phone code, which was correct throughout.
 
 ---
 
+## 3e. Pause and the save slots
+
+The screen criterion 3 actually hangs on. Two of its four verbs — *save* and
+*exit* — had nowhere to happen: the game could save from a desk in the family
+home and from an autosave, and a player could not ask for either.
+
+**Esc** with nothing else open. Resume, Save, Load, Settings, and the three
+slots plus autosave. Fifth panel on the lazy pattern (2.99 kB JS, 2.33 kB CSS).
+
+Two decisions worth stating:
+
+- **Autosave is loadable but never hand-writable.** A player who overwrites it
+  has destroyed the one save they did not choose to make.
+- **A damaged slot says so.** `SaveService.listSlots` already reports an
+  unreadable slot distinctly from an empty one, and the menu keeps that
+  difference. A corrupt save presenting as "no save" is how somebody loses a
+  run and never finds out why.
+
+Verified in Chromium after writing a real save: 0 unstyled frames, the four
+menu items present, Slot 2 reading `story · age 25 · 8/11/2026` with its button
+live, empty slots disabled, autosave loadable.
+
+---
+
 ## 4. Against the acceptance criteria
 
 **1. Every system added in prior phases is reachable through a coherent UI.**
@@ -245,7 +269,11 @@ Phase 11 changed none of it, and the screenshots in this phase show the world
 unobstructed. No new HUD element was added.
 
 **3. Keyboard-only, touch and gamepad users can start, save, play and exit.**
-**Not assessed**, and unchanged by this phase. No keyboard-only or
+**Partly addressed, still not assessed.** *Save* and *exit* now have a screen
+(§3e) and every panel added this phase focuses its first control on open, so a
+keyboard player is never stranded. But no keyboard-only run, accessibility
+snapshot, touch-viewport run or gamepad path has been executed, so the
+criterion is not evidenced. No keyboard-only or
 accessibility-snapshot tests were written, so claiming it either way would be
 inventing a result. The accessibility *options* added in §3b are a different
 thing from input coverage and are not evidence for this criterion.

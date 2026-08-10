@@ -19,6 +19,7 @@
  */
 
 import type { TaskDef } from './TaskDefinition';
+import { registerTasks } from './taskRegistry';
 
 const GROCERY_SHIFT: TaskDef = {
   id: 'job_grocery_shift',
@@ -298,3 +299,14 @@ export function taskDef(id: string): TaskDef | null {
 }
 
 export const JOB_IDS: readonly string[] = TASKS.filter((t) => t.kind === 'job').map((t) => t.id);
+
+/**
+ * Publish to the eager registry as a side effect of being imported.
+ *
+ * This is the only thing that populates `taskRegistry`, which is what makes
+ * "the runtime looks the catalogue up, the catalogue is not on the startup
+ * path" true by construction rather than by everyone remembering to call a
+ * setup function. `storyValidation.ts` and the unit tests import `TASKS`
+ * directly and get the registration for free.
+ */
+registerTasks(TASKS);

@@ -272,12 +272,64 @@ export class HUD {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         // Innermost panel first: Esc should close what is actually on top.
+        // Innermost panel first, then pointer lock, and only with nothing
+        // else showing does Escape mean "pause".
         if (!this.mapPanel.hidden) this.openMap(false);
         else if (!this.phone.hidden) this.openPhone(false);
         else if (!this.info.hidden) this.openInfo(false);
+        else if (!this.pause.hidden) this.openPause(false);
         else if (document.pointerLockElement) document.exitPointerLock();
+        else this.togglePause();
       }
     });
+  }
+
+  // -- pause ----------------------------------------------------------------
+  private pause = $('pause');
+  private pausePanel: import('./PauseMenu').PauseMenu | null = null;
+  private pauseLoading: Promise<void> | null = null;
+  private pauseWanted = false;
+  private pauseDeps: import('./PauseMenu').PauseDeps | null = null;
+
+  setPauseDeps(deps: import('./PauseMenu').PauseDeps): void {
+    this.pauseDeps = deps;
+  }
+
+  get pauseOpen(): boolean {
+    return this.pause.hidden === false;
+  }
+
+  togglePause(): void {
+    this.openPause(!this.pauseWanted);
+  }
+
+  /** Fifth panel to reveal only once its chunk has landed. */
+  openPause(open: boolean): void {
+    if (!open) {
+      this.pauseWanted = false;
+      this.pause.classList.remove('is-on');
+      window.setTimeout(() => {
+        this.pause.hidden = true;
+      }, 220);
+      return;
+    }
+    if (!this.pauseDeps) return;
+
+    this.pauseWanted = true;
+    void this.loadPause().then(() => {
+      if (!this.pauseWanted) return;
+      this.pausePanel?.open();
+      this.pause.hidden = false;
+      requestAnimationFrame(() => this.pause.classList.add('is-on'));
+      this.input.releaseAll();
+    });
+  }
+
+  private loadPause(): Promise<void> {
+    this.pauseLoading ??= import('./PauseMenu').then((api) => {
+      this.pausePanel = new api.PauseMenu(this.pauseDeps!);
+    });
+    return this.pauseLoading;
   }
 
   // -- the phone ------------------------------------------------------------
@@ -330,7 +382,10 @@ export class HUD {
   }
 
   private loadPhone(): Promise<void> {
-    this.phoneLoading ??= import('./Phone').then((api) => {
+    // The chunk and the data it renders. `ready()` is the host's promise that
+    // the job catalogue has landed; without awaiting it the Work app opens
+    // empty and reads as "no jobs" rather than "not yet".
+    this.phoneLoading ??= Promise.all([import('./Phone'), this.phoneDeps!.ready()]).then(([api]) => {
       this.phonePanel = new api.Phone(this.phoneDeps!);
     });
     return this.phoneLoading;
@@ -443,6 +498,11 @@ export class HUD {
    * first would give a flash of unstyled settings *and* a panel whose buttons
    * do nothing yet. The second half of that is worse than the first.
    */
+  /** Public entry point, for the pause menu's Settings item. */
+  openInfoPanel(): void {
+    this.openInfo(true);
+  }
+
   private openInfo(open: boolean): void {
     if (!open) {
       this.infoWanted = false;

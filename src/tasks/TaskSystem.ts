@@ -6,7 +6,10 @@ import {
   type Objective,
   type TaskDef,
 } from './TaskDefinition';
-import { taskDef } from './taskCatalog';
+// The registry, not the catalogue. `TaskSystem` needs to *look a job up*; it
+// does not need the six definitions on the startup path, and importing them
+// here is what kept them there. See `taskRegistry.ts` for the argument.
+import { taskDef } from './taskRegistry';
 
 /**
  * Running one short job at a time.

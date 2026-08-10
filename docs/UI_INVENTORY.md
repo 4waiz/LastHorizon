@@ -89,6 +89,7 @@ the convention Phases 1–10 established and this keeps.
 | Journal | `.journal`, `.journal__quest`, `.journal__quest--side`, `.journal__stage`, `.journal__objs` | Story progress |
 | Map panel | `.mapp` + `__head/body/foot/legend/scale/tools/hint/card` | Full-screen map on **M** |
 | Life Reel | `.modal__card--reel`, `.reel__note`, `.reel__tools` | End-of-life summary, local export |
+| Pause | `.pause` + `__card/head/title/back/body/menu/item/note/slots/slot/slotMain/slotName/slotNote/act` | **Esc** with nothing else open: Resume, Save, Load, Settings, and the three slots plus autosave |
 | Phone | `.phone` + `__card/head/title/money/back/close/body/grid/app/glyph/label/soon/list/row/rowMain/rowSide/rowName/rowNote/pay/act/empty/foot` | Hub on **P**: Work, People, Garage, Map, Journal |
 
 ### Boot and platform

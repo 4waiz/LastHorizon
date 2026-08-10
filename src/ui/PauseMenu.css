@@ -1,0 +1,182 @@
+/*
+ * Pause and the save slots.
+ *
+ * Loaded with `PauseMenu.ts`, fifth panel to follow the pattern. Same warm
+ * paper card as everything else — a pause menu is not the place to introduce a
+ * second visual language, and the brief rules out imitating anybody else's.
+ *
+ * Every value is a token. The only literal is the card width, which is a
+ * measure decision: a menu of four items reads badly across a full desktop.
+ */
+
+.pause {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  display: grid;
+  place-items: center;
+  background: rgba(48, 42, 34, 0.42);
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease);
+}
+
+.pause.is-on {
+  opacity: 1;
+}
+
+.pause__card {
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 420px);
+  max-height: 86vh;
+  padding: var(--sp-4);
+  border-radius: var(--radius);
+  background: var(--paper);
+  border: var(--border-soft);
+  box-shadow: var(--shadow);
+  transform: translateY(8px);
+  transition: transform var(--dur-base) var(--ease);
+}
+
+.pause.is-on .pause__card {
+  transform: none;
+}
+
+.pause__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  border-bottom: var(--border-soft);
+}
+
+.pause__title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.pause__back {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--paper-dim);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pause__back:hover,
+.pause__back:focus-visible {
+  background: var(--cream);
+}
+
+.pause__body {
+  overflow-y: auto;
+  padding-top: var(--sp-3);
+}
+
+/* ---- main menu -------------------------------------------------------- */
+
+.pause__menu,
+.pause__slots {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pause__item {
+  width: 100%;
+  /* 44px is the touch floor, and it holds at every text size because the
+     padding is a token rather than a fixed height. */
+  min-height: 44px;
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--paper-dim);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.pause__item:hover,
+.pause__item:focus-visible {
+  background: var(--cream);
+}
+
+.pause__note {
+  margin: var(--sp-4) 0 0;
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+/* ---- slots ------------------------------------------------------------ */
+
+.pause__slot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+  border-bottom: var(--border-soft);
+}
+
+.pause__slot:last-child {
+  border-bottom: 0;
+}
+
+/* A rule and a word, not a colour alone — the row has to read for a player
+   who cannot tell the two backgrounds apart. `describe()` says "damaged". */
+.pause__slot.is-damaged {
+  border-left: 3px solid var(--accent);
+  padding-left: var(--sp-2);
+}
+
+.pause__slotMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pause__slotName {
+  font-size: var(--text-sm);
+}
+
+.pause__slotNote {
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+}
+
+.pause__act {
+  flex: none;
+  min-height: 36px;
+  padding: var(--sp-1) var(--sp-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--paper);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.pause__act:hover:not(:disabled),
+.pause__act:focus-visible {
+  background: var(--ink);
+}
+
+.pause__act:disabled {
+  background: var(--paper-dim);
+  color: var(--ink-soft);
+  cursor: default;
+}

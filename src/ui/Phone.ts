@@ -61,6 +61,16 @@ export interface PhoneDeps {
   openJournal(): void;
   money(): number;
   toast(title: string, body: string): void;
+  /**
+   * Resolved once the data behind the apps is actually loadable.
+   *
+   * The Work app lists the job catalogue, which is a lazy chunk from Phase 12
+   * onward. Opening the phone before it lands would render an empty Work
+   * screen that is indistinguishable from "you have no jobs" — the phone's own
+   * rule is that a tile which lies is worse than one that waits, and an app
+   * that lies is worse still.
+   */
+  ready(): Promise<void>;
 }
 
 /** Which screen is showing. `home` is the app grid. */
