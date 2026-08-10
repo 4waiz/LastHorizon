@@ -158,7 +158,6 @@ export const STRINGS: Readonly<Record<string, string>> = {
   'obj.q4_first_key.clerk': 'Talk to Dawit',
   'stage.q4_first_key.sign': 'Move in',
   'hint.q4_first_key.sign': 'It is yours until you stop paying for it.',
-  'obj.q4_first_key.apartment': 'Get to the apartment',
   'obj.q4_first_key.sleep': 'Sleep there once',
   'obj.q4_first_key.decorate': 'Put something of yours in it',
   'outcome.q4_first_key.done': 'You had a door that locked behind you',

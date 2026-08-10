@@ -78,7 +78,18 @@ are likewise not served — retained deliberately at the author's request.
 
 ## Fonts
 
-None bundled. The UI uses system font stacks.
+None bundled. The UI uses system font stacks, and so does the Life Reel card —
+it is drawn on a canvas with `system-ui`, which is why the exported PNG differs
+slightly between machines and why its test asserts layout anchors rather than a
+pixel hash.
+
+## Phase 8 added no assets
+
+Checked rather than assumed. The authored story is 108 kB of JavaScript — quest
+definitions, dialogue trees, a string table — and its only visual output is the
+Life Reel, which is drawn at runtime from shapes and text. No model, no audio,
+no image, no font, no portrait. The nine cutscenes reuse the camera, the ten
+clips already in `player.glb`, and the world as it stands.
 
 ## Open-source libraries
 

@@ -209,6 +209,82 @@ describe('migration', () => {
   it('refuses a save with no version at all', () => {
     expect(migrateSave({ money: 5 }).ok).toBe(false);
   });
+
+  /**
+   * v3 -> v4, the Phase 8 step.
+   *
+   * The interesting assertion is the *absence*: a v3 save had no story, so it
+   * does not get one invented. `story.progress` stays undefined, which
+   * `StoryState.restore` reads as "nothing has happened yet" — while
+   * everything the player actually earned in Free Roam comes through intact.
+   */
+  it('brings a v3 save up to v4 without inventing a story', () => {
+    const v3 = {
+      ...migrateSave(v1).data!,
+      version: 3,
+      money: 900,
+      story: {
+        chapter: 2,
+        chapterSeconds: 40,
+        totalSeconds: 400,
+        completedChapters: ['chapter_1'],
+        quests: {},
+      },
+    };
+
+    const r = migrateSave(v3);
+    expect(r.ok).toBe(true);
+    expect(r.from).toBe(3);
+    expect(r.data?.version).toBe(4);
+    expect(r.data?.story.progress, 'a v3 save had no story to restore').toBeUndefined();
+
+    // Everything it *did* have survives.
+    expect(r.data?.money).toBe(900);
+    expect(r.data?.story.completedChapters).toEqual(['chapter_1']);
+    expect(r.data?.story.chapter).toBe(2);
+  });
+
+  it('round-trips a v4 story block, choices and paid rewards included', async () => {
+    const { svc } = service();
+    const data = story({
+      story: {
+        chapter: 6,
+        chapterSeconds: 12,
+        totalSeconds: 9000,
+        completedChapters: ['chapter_1', 'village_departure'],
+        quests: { q6_the_offer: 0 },
+        progress: {
+          flags: ['ch4_in_city', 'ch5_shortcut'],
+          choices: { ch6_route: 'law', ch3_mentor: 'trade' },
+          reputation: { community: 0.42, law: 0.7 },
+          reel: [{ kind: 'choice', age: 17, textKey: 'choice.ch3_mentor.trade' }],
+          quests: [
+            {
+              id: 'q6_the_offer',
+              stage: 'law',
+              progress: { amina: 1, file: 1 },
+              state: 'active',
+              elapsed: 12,
+            },
+          ],
+          paidRewards: ['quest:q5_a_name:shortcut:fast_money'],
+          endingId: null,
+        },
+      },
+    });
+
+    await svc.save('slot1', data);
+    const read = await svc.load('slot1');
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+
+    const p = read.data.story.progress!;
+    expect(p.choices.ch6_route).toBe('law');
+    expect(p.reputation.law).toBeCloseTo(0.7);
+    expect(p.quests[0].progress).toEqual({ amina: 1, file: 1 });
+    // The key that stops a reward paying twice has to be in the file.
+    expect(p.paidRewards).toContain('quest:q5_a_name:shortcut:fast_money');
+  });
 });
 
 describe('population state', () => {

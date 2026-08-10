@@ -35,11 +35,12 @@ Then open <http://localhost:5173>.
 | `npm run dev` | Vite dev server with HMR |
 | `npm run build` | Type-check, then bundle to `dist/` |
 | `npm run preview` | Serve the production bundle |
-| `npm test` | Vitest suite (980 tests, no WebGL needed) |
-| `npm run test:e2e` | Playwright smoke tests against the production build |
+| `npm test` | Vitest suite (1,251 tests, no WebGL needed) |
+| `npm run test:e2e` | Playwright scenarios against the production build |
 | `npm run typecheck` | `tsc --noEmit` under strict mode |
 | `npm run lint` | ESLint (flat config) over `src/` and `tests/` |
 | `npm run check:budgets` | Bundle and asset budget gate |
+| `npm run check:story` | The authored story as a graph — prerequisites, cycles, missing strings, invalid targets |
 | `npm run verify` | The full release gate — all of the above |
 
 ## Controls
@@ -49,7 +50,10 @@ Then open <http://localhost:5173>.
 | `W` `A` `S` `D` / arrows | Walk (relative to the camera) |
 | `Shift` | Run |
 | `Space` | Jump |
-| `E` / `F` | Interact — sleep in the bed |
+| `E` / `F` | Interact — doors, beds, chairs, counters, vehicles |
+| `R` | Right a rolled vehicle |
+| `M` | Map |
+| `J` | Story journal |
 | Drag the mouse | Orbit the camera |
 | Scroll wheel | Zoom, within limits |
 | `Esc` | Close the info panel / release pointer lock |
@@ -111,15 +115,25 @@ src/
   nav/                     tiled Recast navmesh and the crowd (lazy)
   npc/                     residents, schedules, perception, relationships (lazy)
   traffic/                 the road lane graph and the cars on it (lazy)
-  ui/                      HUD, loading screen, radar, map panel
+  economy/                 wallet, ledger, prices — eager, cash is on the HUD
+  tasks/                   the five repeatable job loops
+  services/                shop counters and what they offer (lazy)
+  world/interiors/         the modular kit, nine layouts, the registry (lazy)
+  story/                   quests, dialogue, cutscenes, endings, Life Reel (lazy)
+  ui/                      HUD, loading screen, radar, map panel, story panels
   utils/                   pure maths and disposal helpers
 scripts/blender/           the generators for every model in the game
 ```
 
-Four of those are marked *lazy*: they are reached through a dynamic `import()`
+Seven of those are marked *lazy*: they are reached through a dynamic `import()`
 and are not in the startup bundle. Between them they carry Rapier's and
-Recast's WebAssembly, which is more than half of everything the game ships and
-none of what it needs to start.
+Recast's WebAssembly and the whole authored story, which is more than half of
+everything the game ships and none of what it needs to start.
+
+The line each split follows is the same one: **what does the save layer touch
+on the first frame?** That is why `economy/` is eager and `services/` is not,
+and why `story/StoryState.ts` sits outside the lazy story chunk that holds
+everything else about the story.
 
 ### Notes on the design
 
@@ -284,8 +298,9 @@ make the player sink or float.
 
 ## Tests
 
-`npm test` runs 980 tests across 40 files, covering the logic that doesn't
-need a GPU. The largest groups:
+`npm test` runs **1,251 tests across 49 files**, covering the logic that doesn't
+need a GPU, and `npm run test:e2e` runs **91 scenarios in a real browser**
+against the production build. The largest groups:
 
 | File | Covers |
 | --- | --- |
@@ -323,19 +338,29 @@ what is *not* yet covered.
   desktop). Streaming exists and carries the city district, which loads in
   chunks around the player — the village predates it and does not use it.
 - The city districts are prototypes: blocks, roads and a skyline. They have
-  residents and traffic from Phase 6, but no interiors.
-- Talking to a resident works and moves the relationship, but there is no
-  dialogue panel yet — the first available choice is taken and the outcome is
-  a toast. Phase 11 owns the interface.
+  residents and traffic from Phase 6, but **no enterable interiors** — the nine
+  building types Phase 7 added are village-only, and the story points at city
+  places that resolve to outdoor anchors rather than rooms.
+- Talking to a resident who is part of the current story stage opens an
+  authored conversation with a real panel; talking to anybody else still takes
+  the first available small-talk choice and reports it as a toast. Phase 11
+  owns the full interface.
+- **The twenty side tasks are authored, validated and unreachable.** Nothing
+  offers them yet — `offersTask` exists on the dialogue choice type and nothing
+  sets it. That is a wiring job, not a content one.
 - Ambient pedestrians do not use doors. They wander between the areas the zone
   manifest marks out and are recycled at the edge of the simulation bubble;
   only named residents have homes to go into.
 - A mid-distance pedestrian is drawn with the player's full-detail body,
   4,890 triangles. A decimated variant is a known follow-up.
-- Needs, inventory and age proportions are simulated and saved, but the world
-  barely feeds them. Sleeping restores energy and mood; bread, coffee and soap
-  are in the item catalogue with no way yet to acquire or use them.
-- Only the tile-column UI is localised to English.
+- Photo mode and weapons do not exist, so the `photograph` and `combat`
+  objective kinds are declared and deliberately unauthored. The story validator
+  fails any quest that uses one.
+- There is no credits sequence. The ending resolves and the Life Reel renders;
+  what comes *after* the credits — continued Free Roam with ageing on, slowed
+  or frozen — is state that already exists behind a screen that does not.
+- One locale. `t()` falls back to its key, so a missing string shows as the key
+  rather than as a blank.
 - The camera fades foliage and trunks that block the character, but buildings
   are deliberately left solid — walking behind a house hides you briefly.
 - All eight doors lead to the same room; there is one interior, not eight.

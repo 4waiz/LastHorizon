@@ -49,6 +49,7 @@ export class InputManager {
   private flipQueued = false;
   /** True once per press of the map key. */
   private mapQueued = false;
+  private journalQueued = false;
   private interactQueued = false;
   /** Touch or gamepad interact, which have no entry in `keys`. */
   private pointerInteractHeld = false;
@@ -153,6 +154,10 @@ export class InputManager {
       }
       if (code === 'KeyM') {
         this.mapQueued = true;
+        e.preventDefault();
+      }
+      if (code === 'KeyJ') {
+        this.journalQueued = true;
         e.preventDefault();
       }
       if (code in MOVE_KEYS || code === 'Space') e.preventDefault();
@@ -295,6 +300,19 @@ export class InputManager {
   consumeMap(): boolean {
     if (!this.mapQueued) return false;
     this.mapQueued = false;
+    return true;
+  }
+
+  /**
+   * J, for the story journal.
+   *
+   * Queued and consumed like the map rather than read as a held key: both open
+   * a panel, and a panel that toggles once per frame while the key is down is
+   * a panel that flickers.
+   */
+  consumeJournal(): boolean {
+    if (!this.journalQueued) return false;
+    this.journalQueued = false;
     return true;
   }
 

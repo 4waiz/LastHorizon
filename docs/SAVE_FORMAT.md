@@ -1,6 +1,6 @@
 # Save format reference
 
-**Current schema version: 2.** Content version: 1.
+**Current schema version: 4.** Content version: 1.
 Source of truth: [`src/save/SaveSchema.ts`](../src/save/SaveSchema.ts).
 
 ---
@@ -49,11 +49,11 @@ parse the live record falls back to `:backup` automatically and reports
 
 ---
 
-## Schema (v2)
+## Schema (v4)
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `version` | `2` | Schema version |
+| `version` | `4` | Schema version |
 | `contentVersion` | number | Bumped when content invalidates positions or quests |
 | `savedAt` | number | ms since epoch, **injected** by the caller |
 | `mode` | `'story' \| 'freeRoam'` | Load refuses a mismatch |
@@ -63,7 +63,7 @@ parse the live record falls back to `:backup` automatically and reports
 | `player` | `{ position: Vec3, facing }` | Plain numbers |
 | `life` | `{ ageYears, yearProgress, lastHandledAge, rate, activeSeconds }` | `lastHandledAge` is what stops a birthday replaying |
 | `world` | `{ time, mode, day }` | Day/night presentation state |
-| `story` | `{ chapter, chapterSeconds, totalSeconds, completedChapters[], quests }` | `quests` maps id → stage |
+| `story` | `{ chapter, chapterSeconds, totalSeconds, completedChapters[], quests, progress? }` | See below |
 | `money` | number | |
 | `inventory` | `{ id, count }[]` | |
 | `wardrobe` | `{ shirt, trousers, hat, hatOn }` | Colours as hex strings |
@@ -73,12 +73,56 @@ parse the live record falls back to `:backup` automatically and reports
 | `collectibles` | `string[]` | Ids of found keepsakes |
 | `unlockedZones` | `ZoneId[]` | Free Roam presets, or story-earned |
 
+### `story.progress`, added in v4
+
+The authored story's own state, borrowed from
+[`StoryState`](../src/story/StoryState.ts) rather than restated here. That
+matters: Phase 7's `EconomySaveData` restated `kind` as a bare `string` and
+failed to compile against its own reader, and the first draft of this field did
+exactly the same thing to the reel's event kind. One definition, imported,
+cannot drift from the thing it describes.
+
+| Field | Notes |
+| --- | --- |
+| `flags` | Story flags, sorted |
+| `choices` | Recorded decisions, id → value. **First write wins** |
+| `reputation` | `{ community, law }`, each 0..1 |
+| `reel` | Life Reel moments: kind, age, localisation key, optional detail |
+| `quests` | Per quest: stage id, per-objective progress, state, elapsed |
+| `paidRewards` | Award keys already paid. What makes a quest reward idempotent |
+| `endingId` | Null until chapter 7 resolves |
+
+Two things are deliberately **not** in it. There is no copy of the quest
+*definitions* — a save records where you are, and the graph is rebuilt from the
+catalogue, exactly as the world is rebuilt from the manifest. And there is no
+cutscene or dialogue position: a conversation is a thing you are in the middle
+of for thirty seconds, and restoring one mid-sentence is worse than reopening it.
+
+The sibling `quests` field (id → number) predates this and is kept in step for
+the same reason `money` is kept in step with `economy.wallet`: a reader written
+against v3 still sees roughly where the player is. Nothing in this build reads it.
+
+### Stages that no longer exist
+
+A save can name a stage a later build has deleted. `QuestSystem.repairAfterRestore`
+walks every active run and, for any whose stage is gone, drops it to the last
+**checkpoint at or before** where it was — somewhere the player has already
+been. Dropping the quest instead would lose the run; guessing forward would
+skip content.
+
 ### Validation
 
 `validateSave` is strict about the fields that decide **where the player ends
 up** and lenient elsewhere: a wrong money value is a nuisance, a `NaN` position
 drops the character through the world. It returns every problem it found, not
 just the first.
+
+`story.progress` is deliberately *not* validated strictly. `StoryState.restore`
+is defensive field by field — every one is optional with a default that reads
+as a plausible run — so a malformed story block degrades to "nothing has
+happened yet" rather than refusing the save. A player who loses their quest
+log keeps their house, their money and their friends; refusing the whole save
+would lose all four.
 
 ---
 
@@ -105,6 +149,24 @@ than a broken one:
 
 The **original** is copied to `:backup` before the migrated form is written, so
 a migration that goes wrong is not the only copy left.
+
+### v2 → v3
+
+The economy, interiors and jobs. The old `money` becomes cash in hand with an
+empty bank and an empty ledger. `inside` is `null` rather than guessed: a v2
+save recorded neither a door nor a return context, so there is no way to know
+which building a player was standing in, and putting them outside is the one
+answer that is never wrong.
+
+### v3 → v4
+
+The authored story, and it adds exactly one optional field.
+
+`story.progress` is left **absent** rather than filled with an empty run.
+Absent and empty mean the same thing to `StoryState.restore`, and absent is the
+honest record: a v3 save did not have a story, so it does not get one invented.
+The player picks it up at chapter 1 with whatever money, vehicles and
+friendships they had already earned.
 
 ---
 

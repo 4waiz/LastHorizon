@@ -19,7 +19,7 @@ still render a live window.**
 | --- | --- | --- |
 | Village, day | 285 | 482,488 |
 | Village, night | 377 | ~482,000 |
-| **Interior, live portal** (home) | **254** | **516,106** |
+| **Interior, live portal** (home) | **252** | **514,746** |
 | Interior, no portal (grocery) | 239 | 340,970 |
 
 `WindowPortal` renders the outdoor world a second time into a half-resolution
@@ -53,7 +53,7 @@ any release claim.
 | --- | --- | --- |
 | Draw calls, outdoor day | 285 | ≤ 410 |
 | Draw calls, outdoor night | 377 | ≤ 500 |
-| Draw calls, interior | 254 | ≤ 290 |
+| Draw calls, interior | 252 | ≤ 290 |
 | Triangles, outdoor | 482 k | ≤ 700 k |
 | Triangles, interior | 516 k | ≤ 880 k |
 | Shader programs | 56 | ≤ 70 |
@@ -65,23 +65,40 @@ Program count is the one to watch: material sharing plus
 programs. A change that multiplies programs will not show up as a frame-rate
 cliff immediately, but it fragments batching.
 
-### The interior budgets, re-derived in Phase 7
+### The interior budgets, re-derived in Phase 7 and re-measured warm in Phase 8
 
-Measured per building in `tests/e2e/interiorBudget.spec.ts`, which now runs in
-CI. Population disabled, clock pinned, camera at each room's entry spawn.
+Measured per building in `tests/e2e/interiorBudget.spec.ts`, which runs in CI.
+Population disabled, clock pinned, camera at each room's entry spawn.
 Outdoors at the same moment: 294 calls, 368,558 triangles, 23 programs.
+
+**These are the Phase 8 figures, taken on a warmed pass.** Phase 7's table
+measured every room on its *first* entry, and `renderer.info.programs` counts
+what has compiled — so the first room through the door was always reported
+cold. It read 50 programs where the rest read 53, which is a spread of 4
+against a limit of 2, and it eventually failed for that reason and no other.
+The spec now takes a warm-up lap through all nine before measuring.
+
+The numbers moved slightly and all in the same direction — a warmed pass is
+2–3 draw calls and ~1–2 k triangles lower, because nothing is still being
+built while it is being counted.
 
 | Service | Portal | Draw calls | Triangles | Programs | Kit parts | Room tris |
 | --- | --- | --- | --- | --- | --- | --- |
-| **home** | live | **254** | **516,106** | 53 | 30 | 1,420 |
-| grocery | — | 239 | 340,970 | 53 | 50 | 1,932 |
-| police | — | 205 | 341,602 | 53 | 39 | 1,692 |
-| clinic | — | 172 | 339,754 | 53 | 27 | 1,128 |
-| garage | — | 219 | 277,066 | 53 | 47 | 1,512 |
-| apartment | live | 222 | 513,074 | 53 | 21 | 840 |
-| cafe | — | 188 | 276,722 | 53 | 32 | 1,588 |
-| clothing | — | 206 | 277,938 | 53 | 30 | 1,476 |
-| airstrip | — | 223 | 278,070 | 54 | 46 | 1,596 |
+| **home** | live | **252** | **514,746** | 54 | 30 | 1,420 |
+| grocery | — | 239 | 340,970 | 54 | 50 | 1,932 |
+| police | — | 202 | 339,442 | 54 | 39 | 1,692 |
+| clinic | — | 169 | 337,594 | 54 | 27 | 1,128 |
+| garage | — | 217 | 275,626 | 54 | 47 | 1,512 |
+| apartment | live | 220 | 512,226 | 54 | 21 | 840 |
+| cafe | — | 187 | 275,922 | 54 | 32 | 1,588 |
+| clothing | — | 203 | 275,698 | 54 | 30 | 1,476 |
+| airstrip | — | 220 | 275,830 | 54 | 46 | 1,596 |
+
+**The program spread is now 0, not 2.** Every room compiles to exactly 54, and
+that is the strongest possible confirmation that the old variance was
+cold-start compilation rather than a lighting difference — the thing this test
+exists to catch is still caught, and it no longer reports a difference that was
+never there.
 
 **Draw calls: 240 → 290.** The Phase 1 figure of 183 was one merged GLB room.
 A modular room is 30–50 separate objects, and the portal pass draws the scene
@@ -306,6 +323,53 @@ are in the save format, and `InteriorKit`/`InteriorDefinition`, whose
 is the split doing its job. It is now 31 kB under its limit and that is the
 number Phase 8 has to argue with — the shipped total has 52 kB left, which is
 less headroom than it looks given the GLB budget also moved.
+
+### Raised again in Phase 8 — and `initial load` barely moved
+
+Phase 8 is the largest *content* addition in the project and one of the
+smallest additions to what a player waits for. That gap is the whole story of
+this section.
+
+| | Phase 7 | Phase 8 | Budget |
+| --- | --- | --- | --- |
+| app chunk | 351.1 kB | **363.2 kB** | ≤ 375 kB *(was 360)* |
+| `StorySubsystem-*.js` *(lazy)* | — | **108.4 kB** | — |
+| JS total (startup) | 1,091.5 kB | 1,103.6 kB | ≤ 1,120 kB *(was 1,100)* |
+| **initial load** | **4,168.7 kB** | **4,186.5 kB** | **≤ 4,200 kB** |
+| shipped total | 7,349.1 kB | 7,473.8 kB | ≤ 7,600 kB *(was 7,400)* |
+
+**120.5 kB of new code, and 17.8 kB of it reaches the loading screen.** The other
+108 kB is the authored story — 35 quests, 15 dialogue trees, 9 cutscenes, 13
+endings, a ~460-entry string table and the Life Reel renderer — behind a
+dynamic import that only Story Mode triggers, at a moment the mode selector is
+already showing a loading screen. A Free Roam player never fetches any of it.
+
+The split line is the same one Phase 7 drew for interiors: **what does the save
+layer touch on the first frame?**
+
+- **Eager (11.6 kB).** `StoryState` — flags, recorded choices, two reputation
+  numbers, the reel's event list, quest positions and the paid-reward keys —
+  plus the wiring in `Game` that reports world events into it. `SaveService`
+  has to read and write all of that whether or not a quest has ever loaded,
+  which is the same argument that keeps `RelationshipStore` above `Population`.
+- **Lazy (108 kB).** Everything else.
+
+**Two things were moved rather than absorbed.** The catalogue was always going
+to be lazy. The three Story-Mode panels — dialogue, journal, Life Reel — were
+written inside `HUD` and moved out to `src/ui/StoryPanels.ts` *because this
+gate said no*: the app chunk hit 365.2 kB against a 360 kB limit, and the rule
+in this repository is to move something before raising a ceiling. `MapPanel`
+was moved for the same reason in Phase 6. The move recovered 2.5 kB and left a
+better boundary: `HUD` is the chrome that is always on, and a conversation is
+not.
+
+The remaining 2.7 kB of overage is the wiring itself and cannot be split — it
+is reached from the first frame by definition. Hence 360 → 375, with about 3%
+headroom, which is deliberately tight for the same reason every previous raise
+was: the next phase has to come back and argue here rather than absorb it.
+
+**The stylesheet moved 17.9 kB → 20.8 kB** against a 24 kB budget, for the
+objective line, captions, the dialogue bar, the journal and the reel panel.
 
 ### GLB models, 1,200 kB to 1,360 kB, in Phase 7
 

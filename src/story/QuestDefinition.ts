@@ -84,7 +84,13 @@ export interface QuestObjective {
   readonly itemId?: string;
   readonly taskId?: string;
   readonly serviceOffer?: string;
-  /** `wait`, `follow`, `escape`. */
+  /**
+   * `wait` and `follow`.
+   *
+   * Not `escape` — an escape's target is its distance, and its deadline is the
+   * *stage's* `fail.timeLimit`. Two numbers claiming to be the same deadline
+   * is one number too many, and only one of them would ever be read.
+   */
   readonly seconds?: number;
   /** `drive`, `escape`, `follow`. */
   readonly metres?: number;

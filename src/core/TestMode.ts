@@ -619,6 +619,44 @@ export interface LHTestBridge {
   /** Feed the task clock without waiting. */
   advanceTask(seconds: number): void;
   cancelTask(): void;
+
+  // ---- Phase 8 --------------------------------------------------------------
+  /** Pull the story chunk in and open chapter 1. Story Mode does this itself. */
+  awaitStory(): Promise<StorySnapshot>;
+  getStory(): StorySnapshot;
+  startQuest(id: string): boolean;
+  getQuest(id: string): QuestSnapshot | null;
+  getActiveQuests(): readonly string[];
+  /**
+   * Jump straight to a stage.
+   *
+   * The debug tooling the phase brief asks for, and the one operation on this
+   * bridge that can skip authored content — hence `?e2e=1` only, like
+   * everything else here.
+   */
+  jumpToStage(questId: string, stageId: string): boolean;
+  /** Set an objective's progress absolutely, as the world would. */
+  reportObjective(questId: string, objectiveId: string, amount: number): boolean;
+  /** Feed the story clock without waiting on a stage timer. */
+  advanceStory(seconds: number): void;
+  /** Record an authored choice, as taking it in dialogue would. */
+  setChoice(id: string, value: string): void;
+  setStoryFlag(id: string): void;
+  adjustReputation(axis: string, delta: number): void;
+  /** True when an authored conversation opened rather than small talk. */
+  talkTo(npcId: string): boolean;
+  getDialogue(): DialogueSnapshot | null;
+  /** Take a choice by its authored index. True while the panel is still up. */
+  chooseDialogue(index: number): boolean;
+  getScene(): string | null;
+  skipScene(): void;
+  getReel(): ReelSnapshot | null;
+  openReel(open: boolean): void;
+  /** Bytes of the exported PNG. Zero when the browser refused a canvas. */
+  exportReel(): Promise<number>;
+  /** The HUD's one objective line, as rendered. */
+  getObjectiveLine(): string | null;
+  openJournal(open: boolean): void;
 }
 
 declare global {
@@ -1000,6 +1038,91 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     cancelTask(): void {
       surface.cancelTask();
+    },
+
+    // ---- Phase 8 ------------------------------------------------------------
+    awaitStory(): Promise<StorySnapshot> {
+      return surface.awaitStory();
+    },
+
+    getStory(): StorySnapshot {
+      return surface.storyState();
+    },
+
+    startQuest(id: string): boolean {
+      return surface.startQuest(id);
+    },
+
+    getQuest(id: string): QuestSnapshot | null {
+      return surface.questState(id);
+    },
+
+    getActiveQuests(): readonly string[] {
+      return surface.activeQuests();
+    },
+
+    jumpToStage(questId: string, stageId: string): boolean {
+      return surface.jumpToStage(questId, stageId);
+    },
+
+    reportObjective(questId: string, objectiveId: string, amount: number): boolean {
+      return surface.reportObjective(questId, objectiveId, amount);
+    },
+
+    advanceStory(seconds: number): void {
+      surface.advanceStory(seconds);
+    },
+
+    setChoice(id: string, value: string): void {
+      surface.setChoice(id, value);
+    },
+
+    setStoryFlag(id: string): void {
+      surface.setFlag(id);
+    },
+
+    adjustReputation(axis: string, delta: number): void {
+      surface.adjustReputation(axis, delta);
+    },
+
+    talkTo(npcId: string): boolean {
+      return surface.talkToNpc(npcId);
+    },
+
+    getDialogue(): DialogueSnapshot | null {
+      return surface.dialogueState();
+    },
+
+    chooseDialogue(index: number): boolean {
+      return surface.chooseDialogue(index);
+    },
+
+    getScene(): string | null {
+      return surface.sceneState();
+    },
+
+    skipScene(): void {
+      surface.skipScene();
+    },
+
+    getReel(): ReelSnapshot | null {
+      return surface.reelModel();
+    },
+
+    openReel(open: boolean): void {
+      surface.openReel(open);
+    },
+
+    exportReel(): Promise<number> {
+      return surface.exportReel();
+    },
+
+    getObjectiveLine(): string | null {
+      return surface.objectiveLine();
+    },
+
+    openJournal(open: boolean): void {
+      surface.openJournal(open);
     },
   };
 

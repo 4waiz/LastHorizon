@@ -46,6 +46,27 @@ test('interior scene cost, per service', async ({ page }) => {
     t.prepareShot();
     const outdoor = t.getRenderStats();
 
+    // Warm up through all nine before measuring any of them.
+    //
+    // `renderer.info.programs` counts what has *compiled*, and the first room
+    // entered in a fresh page has not yet compiled everything the later ones
+    // will need. Measured cold, `home` reported 50 programs against the 53
+    // every other room reports — a spread of 4 against a limit of 2, and a
+    // failure about nothing.
+    //
+    // This is the same trap Phase 7 wrote up for the leak test ("warmed up on
+    // one room and measured nine") and did not apply here; it stayed hidden
+    // until Phase 8's lazy story import shifted the opening frames enough to
+    // change which programs had landed by the time the first door opened.
+    // Lap two is the honest lap.
+    for (const s of services) {
+      const warm = t.getDoors().find((d) => d.interiorId === s)!;
+      await t.enterDoor(warm.id);
+      t.settle(2);
+      await t.exitInterior();
+      t.settle(2);
+    }
+
     const out: Array<Record<string, number | string | boolean>> = [];
     for (const s of services) {
       const door = t.getDoors().find((d) => d.interiorId === s)!;

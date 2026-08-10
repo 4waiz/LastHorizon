@@ -776,24 +776,26 @@ const FIRST_KEY: QuestDef = {
       id: 'sign',
       titleKey: 'stage.q4_first_key.sign',
       hintKey: 'hint.q4_first_key.sign',
+      // Point ids are the interior catalogue's, not invented ones: `apt_bed`,
+      // not `apartment_bed`. The validator caught four of those the first time
+      // it checked place names, and each would have been an objective that
+      // could never complete — nothing would ever report a name nothing has.
+      //
+      // There is no separate "get to the apartment" objective. Sleeping there
+      // requires getting there, and an objective that another objective
+      // implies is a line on the HUD doing no work.
       objectives: [
-        {
-          id: 'apartment',
-          kind: 'travel',
-          labelKey: 'obj.q4_first_key.apartment',
-          place: 'apartment_door',
-        },
         {
           id: 'sleep',
           kind: 'interact',
           labelKey: 'obj.q4_first_key.sleep',
-          place: 'apartment_bed',
+          place: 'apt_bed',
         },
         {
           id: 'decorate',
           kind: 'interact',
           labelKey: 'obj.q4_first_key.decorate',
-          place: 'apartment_decor',
+          place: 'apt_decorate',
           optional: true,
         },
       ],
@@ -1115,7 +1117,7 @@ const THE_OFFER: QuestDef = {
       hintKey: 'hint.q6_the_offer.letter',
       sceneId: 'cs_the_letter',
       objectives: [
-        { id: 'read', kind: 'interact', labelKey: 'obj.q6_the_offer.read', place: 'apartment_desk' },
+        { id: 'read', kind: 'interact', labelKey: 'obj.q6_the_offer.read', place: 'apt_desk' },
         { id: 'home', kind: 'travel', labelKey: 'obj.q6_the_offer.home', zone: 'village_coast' },
       ],
       checkpoint: true,
@@ -1261,7 +1263,16 @@ const THE_OFFER: QuestDef = {
       objectives: [
         { id: 'night', kind: 'travel', labelKey: 'obj.q6_the_offer.night', place: 'village_field' },
         { id: 'pegs', kind: 'interact', labelKey: 'obj.q6_the_offer.pegs', place: 'village_field', count: 3 },
-        { id: 'away', kind: 'escape', labelKey: 'obj.q6_the_offer.away', metres: 120, seconds: 90 },
+        // 70 m, not the 120 the first draft asked for. The village measures
+        // roughly 120 m corner to corner — the far house to the shore bench is
+        // 119 — so an escape of 120 m from a field in the middle of it is
+        // geometrically impossible. Found by a browser test that measured 81 m
+        // across the longest run available and could not finish.
+        // No `seconds` here: an escape's target is its distance, and the time
+        // limit is the *stage's* — `fail.timeLimit` below. Carrying both would
+        // be two numbers claiming to be the deadline, and only one of them
+        // would be read.
+        { id: 'away', kind: 'escape', labelKey: 'obj.q6_the_offer.away', metres: 70 },
       ],
       checkpoint: true,
       fail: { timeLimit: 180, onFail: 'checkpoint', messageKey: 'fail.q6_the_offer.seen' },
@@ -1337,7 +1348,7 @@ const LAST_HORIZON: QuestDef = {
           id: 'partner',
           kind: 'interact',
           labelKey: 'obj.q7_last_horizon.partner',
-          place: 'cafe_table',
+          place: 'cafe_seat_a',
           optional: true,
         },
       ],

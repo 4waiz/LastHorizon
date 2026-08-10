@@ -63,7 +63,7 @@ const scene = (
  *
  * `storyValidation` enforces the ceiling. Thirty seconds is about the point at
  * which a browser game's audience reaches for the tab bar, and none of these
- * beats needs longer — the longest is the ending at 26 s and it is carrying a
+ * beats needs longer — the longest is the ending at 24 s, and it is carrying a
  * decade.
  */
 export const CUTSCENES: readonly CutsceneDef[] = [
@@ -101,7 +101,7 @@ export const CUTSCENES: readonly CutsceneDef[] = [
     { seconds: 4, from: { x: 0, y: 12, z: 10 }, to: { x: 0, y: 18, z: 20 }, look: 'anchor' },
   ]),
 
-  scene('cs_the_letter', 'apartment_desk', [
+  scene('cs_the_letter', 'apt_desk', [
     { seconds: 3.5, from: { x: 0.5, y: 1.3, z: 1.1 }, to: { x: 0.2, y: 1.0, z: 0.7 }, look: 'anchor',
       captionKey: 'scene.cs_the_letter.1', gesture: 'UsePhone' },
     { seconds: 3.5, from: { x: -1.4, y: 1.6, z: 1.8 }, look: 'player',

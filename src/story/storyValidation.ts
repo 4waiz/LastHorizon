@@ -13,6 +13,8 @@ import { CUTSCENES, cutscene } from './Cutscenes';
 import { validateDialogue } from '../npc/Dialogue';
 import { NPC_CATALOGUE } from '../npc/npcCatalog';
 import { TASKS } from '../tasks/taskCatalog';
+import { STORY_PLACES } from './storyPlaces';
+import { INTERIORS } from '../world/interiors/interiorCatalog';
 
 /**
  * The story, checked.
@@ -49,6 +51,29 @@ export interface StoryIssue {
 
 const NPC_IDS = new Set(NPC_CATALOGUE.map((n) => n.id));
 const TASK_IDS = new Set(TASKS.map((t) => t.id));
+
+/**
+ * Every place name a quest is allowed to say.
+ *
+ * Three sources, because a place genuinely comes from three:
+ * `STORY_PLACES` for outdoor anchors, an interior's own point ids for
+ * anything inside a room, and the task catalogue's names for objectives that
+ * ride on a job.
+ *
+ * This check was added after the fact and immediately found four objectives
+ * naming points that do not exist — `apartment_bed` where the catalogue says
+ * `apt_bed`, and a `cafe_table` that was never a thing. Each of those would
+ * have sat there uncompletable forever, because `matches()` needs a report
+ * naming the same string and nothing would ever send one. It is exactly the
+ * "invalid objective targets" failure the phase brief asks for and the first
+ * version of this file did not look for it.
+ */
+const PLACE_NAMES = new Set<string>([
+  ...Object.keys(STORY_PLACES),
+  ...INTERIORS.flatMap((i) => i.points.map((p) => p.id)),
+  ...INTERIORS.flatMap((i) => (i.decorSlots ?? []).map((s) => s.id)),
+  ...TASKS.flatMap((t) => t.objectives.map((o) => o.place).filter((p): p is string => !!p)),
+]);
 
 export function validateStory(): StoryIssue[] {
   const issues: StoryIssue[] = [];
@@ -319,6 +344,9 @@ function validateObjective(where: string, o: QuestObjective): StoryIssue[] {
       break;
   }
 
+  if (o.place !== undefined && !PLACE_NAMES.has(o.place)) {
+    push('unknown-place', `${o.place} is not a story place, an interior point or a task place`);
+  }
   if (o.npcId !== undefined && !NPC_IDS.has(o.npcId)) {
     push('unknown-npc', `${o.npcId} is not in the NPC catalogue`);
   }

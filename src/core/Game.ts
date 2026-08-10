@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { createRendererBackend, type RendererBackend } from './RendererBackend';
 import { Settings, QualityLevel, TimeMode } from './Settings';
 import type { LifeSnapshot, NpcSnapshot, PopulationSnapshot, TestSurface } from './TestMode';
@@ -143,7 +143,7 @@ export class Game {
    * `WindowPortal` own render targets sized to the *viewport*, and both are
    * built before any world exists and outlive every zone change. Putting them
    * in a zone scope would tear them down on travel and leave rendering broken
-   * on arrival. Zone content â€” the World, and the CollisionWorld it owns â€”
+   * on arrival. Zone content — the World, and the CollisionWorld it owns —
    * belongs to the zone scope; these belong here.
    */
   private readonly gameScope = new DisposalRegistry('game');
@@ -159,7 +159,7 @@ export class Game {
   /**
    * The village specifically, for the handful of things only it has:
    * collectibles, the shared interior cell, keepsake markers. Null once a
-   * district is active â€” the narrowing is the point, since a district has no
+   * district is active — the narrowing is the point, since a district has no
    * keepsakes to count.
    */
   private village: World | null = null;
@@ -192,7 +192,7 @@ export class Game {
    * the sake of the thing that does not exist yet. So the accumulator wraps
    * physics alone, and everything else is left as it was.
    *
-   * `physics` stays null until something actually needs it â€” Rapier is 2.2 MB
+   * `physics` stays null until something actually needs it — Rapier is 2.2 MB
    * and arrives by dynamic import, so a player who never gets on a bicycle
    * never downloads it.
    */
@@ -216,7 +216,7 @@ export class Game {
   /**
    * The character GLB, kept so NPC bodies can be cloned from it.
    *
-   * One rig for the whole population â€” the brief's "do not create one GLB per
+   * One rig for the whole population — the brief's "do not create one GLB per
    * NPC", and the reason twenty residents cost one download.
    */
   private playerRig: THREE.Object3D | null = null;
@@ -262,7 +262,7 @@ export class Game {
    *
    * `updateRiding` runs every frame, so it cannot await an import. It also
    * cannot run before a vehicle exists, and a vehicle cannot exist before
-   * `spawnVehicle` has finished importing â€” so capturing the namespaces there
+   * `spawnVehicle` has finished importing — so capturing the namespaces there
    * makes the frame path synchronous without pulling ~19 kB of driving code
    * into the startup bundle.
    */
@@ -278,8 +278,8 @@ export class Game {
    * The zone's population, once it has arrived.
    *
    * Null before the dynamic import resolves and null again between zones. The
-   * game is fully playable in that state â€” the village stands, the player
-   * walks, vehicles drive â€” which is exactly why the population is allowed to
+   * game is fully playable in that state — the village stands, the player
+   * walks, vehicles drive — which is exactly why the population is allowed to
    * be late. It carries Recast's WebAssembly with it, and the initial-load
    * budget has no room for that.
    */
@@ -399,7 +399,7 @@ export class Game {
     this.portal = new WindowPortal(window.innerWidth, window.innerHeight);
 
     // The village is now a zone. It is still the same hand-authored World,
-    // built exactly as before â€” the difference is that the ZoneManager owns
+    // built exactly as before — the difference is that the ZoneManager owns
     // it through a disposal scope, so leaving the zone is guaranteed to give
     // its geometry, materials and textures back rather than relying on
     // Game.dispose() remembering to.
@@ -534,7 +534,7 @@ export class Game {
     });
     this.hud.syncOutfit(this.player.outfit);
     this.hud.setCounter(this.village!.collectibles.count, this.village!.collectibles.total);
-    // Runs every frame, including while a district is active â€” a district has
+    // Runs every frame, including while a district is active — a district has
     // no keepsakes, so this must degrade rather than assert.
     this.minimap = new Minimap(this.runtime.mapData, () => this.village?.keepsakeMarkers ?? []);
     // The proving ground, if asked for. Built before the interactables are
@@ -574,7 +574,7 @@ export class Game {
     }
     // Resume the autosave if there is one. Loaded without an expected mode:
     // there is no mode-selection screen yet, so the save's own mode is
-    // adopted. That is resuming, not mixing â€” the guard matters once the
+    // adopted. That is resuming, not mixing — the guard matters once the
     // player has actively chosen a mode.
     // Reading a save can migrate it, and the phase rules say life must not
     // advance during a migration. Blocking across the whole read is the simple
@@ -601,8 +601,8 @@ export class Game {
       this.life.unblock('saveMigration');
     }
 
-    // A save written between reaching a birthday and acknowledging it â€” the
-    // crash case â€” restores with one still armed. Deliver it now rather than
+    // A save written between reaching a birthday and acknowledging it — the
+    // crash case — restores with one still armed. Deliver it now rather than
     // leaving the clock permanently blocked on it.
     if (this.life.pendingBirthday !== null) {
       await this.handleBirthday(this.life.pendingBirthday);
@@ -622,7 +622,7 @@ export class Game {
    *
    * The chosen mode only applies to a fresh run: a resumed save already has
    * one, and switching it would silently change the rules of a run in
-   * progress â€” story gates applied to a Free Roam save, or the reverse.
+   * progress — story gates applied to a Free Roam save, or the reverse.
    */
   begin(mode: GameMode = 'story', options: FreeRoamOptions = DEFAULT_FREE_ROAM): void {
     if (this.running) return;
@@ -723,7 +723,7 @@ export class Game {
    * Apply the Free Roam setup to a fresh run.
    *
    * Age goes through `LifeClock.restore` rather than a setter so it lands in
-   * the same validated path a save uses â€” one way in, one set of clamps.
+   * the same validated path a save uses — one way in, one set of clamps.
    */
   private applyFreeRoamOptions(o: FreeRoamOptions): void {
     this.life.restore({
@@ -736,7 +736,7 @@ export class Game {
     this.economy.wallet.restore({ cash: o.startMoney, bank: 0 });
 
     // A fresh run starts from a known inventory, not whatever the last one
-    // left behind â€” this path is also reached when restarting from the menu.
+    // left behind — this path is also reached when restarting from the menu.
     this.inventory.clear();
     if (o.startVehicle !== 'none') this.inventory.add(`keys_${o.startVehicle}`, 1);
 
@@ -810,12 +810,12 @@ export class Game {
       vehicles: this.garage.toJSON() as SaveData['vehicles'],
       needs: this.needs.toJSON(),
       relationships: this.relationships.toJSON(),
-      // Live ages when a population is loaded, the lifted copy when it is not â€”
+      // Live ages when a population is loaded, the lifted copy when it is not —
       // between zones, or before the chunk has landed.
       npcs: this.population?.ageSnapshot() ?? this.npcAges,
       collectibles: this.village?.collectibles.foundIds ?? [],
       unlockedZones: [...this.unlockedZones],
-      // Phase 7. The door and the way back out, never the room's contents â€”
+      // Phase 7. The door and the way back out, never the room's contents —
       // the room is rebuilt from the catalogue, like the world from the
       // manifest.
       inside: inside
@@ -1049,7 +1049,7 @@ export class Game {
     await wait(60);
 
     // Acknowledge *before* saving. Saving first records the pre-birthday
-    // state â€” age N, sitting on the boundary â€” so a reload re-arms and
+    // state — age N, sitting on the boundary — so a reload re-arms and
     // re-fires the same birthday, which is the duplicate event the phase
     // rules forbid. Acknowledging first also fails in the safe direction: a
     // crash between the two re-fires the birthday rather than skipping it.
@@ -1402,7 +1402,7 @@ export class Game {
         const agent = this.population?.namedById(id);
         if (!agent) return false;
         // A quest override rather than a bare destination, so the next
-        // schedule tick does not immediately send them home again â€” which is
+        // schedule tick does not immediately send them home again — which is
         // exactly what a quest needs too.
         agent.questOverride = { kind: 'quest', place: { x, y: this.runtime.heightAt(x, z), z } };
         agent.setDestination(x, z);
@@ -1751,9 +1751,17 @@ export class Game {
     if (this.input.consumeMap()) this.hud.toggleMap();
     this.hud.updateMap();
 
+    // 5c. the journal. Rebuilt on opening rather than kept live: it is a
+    //     snapshot of what you are in the middle of, and nobody reads it
+    //     while it changes underneath them.
+    if (this.input.consumeJournal() && this.panels) {
+      const open = !this.panels.journalOpen;
+      this.panels.openJournal(open, open ? (this.director?.journal() ?? []) : []);
+    }
+
     this.hud.setWallet(this.economy.wallet.cash);
 
-    // 6. radar â€” hidden indoors, where it has nothing useful to show
+    // 6. radar — hidden indoors, where it has nothing useful to show
     this.minimap.setVisible(!this.indoors);
     if (!this.indoors) {
       this.minimap.update(dt, this.player.position, this.player.controller.facing);
@@ -1795,7 +1803,7 @@ export class Game {
     // The player's own vehicle is an obstacle to traffic, not a participant:
     // it is a Rapier body with a driver, and the lane graph has no opinion
     // about it beyond "do not drive into that".
-    // `id: 0` marks "not a traffic vehicle" â€” the field exists so a test can
+    // `id: 0` marks "not a traffic vehicle" — the field exists so a test can
     // follow one car across frames, and nothing here is one.
     const obstacles: Array<{ id: number; x: number; z: number; radius: number }> = [];
     for (const proxy of this.vehicleProxies.values()) {
@@ -1828,7 +1836,7 @@ export class Game {
    * honest about what the download costs and invisible in practice, because the
    * player is still reading the "Begin" button.
    *
-   * Called again on every zone change. The old population is disposed first â€”
+   * Called again on every zone change. The old population is disposed first —
    * it owns crowd agents inside WASM memory, which the JavaScript collector
    * cannot reach.
    */
@@ -2187,7 +2195,7 @@ export class Game {
    * The mesh that follows a vehicle body.
    *
    * Falls back to a plain box if the model is missing, so a failed asset load
-   * leaves something visible to drive rather than an invisible car â€” the
+   * leaves something visible to drive rather than an invisible car — the
    * physics would be working and nothing would look wrong except the screen.
    */
   private buildVehicleVisual(
@@ -2261,7 +2269,7 @@ export class Game {
   /**
    * Re-register what the player can interact with.
    *
-   * Called whenever the set changes â€” construction and zone travel. The system
+   * Called whenever the set changes — construction and zone travel. The system
    * holds no reference to the previous zone's content afterwards, which is what
    * stops a stale door from being offered in the city.
    */
@@ -2347,7 +2355,7 @@ export class Game {
   /**
    * One exchange with a named resident.
    *
-   * The dialogue *data* is fully exercised here â€” the tree is walked, choice
+   * The dialogue *data* is fully exercised here — the tree is walked, choice
    * conditions are evaluated against the live relationship and the player's
    * age, and the chosen branch's relationship effects are applied. What is
    * deliberately absent is the choice UI: a panel with portraits and history
@@ -2390,7 +2398,7 @@ export class Game {
     const line =
       pickBark(def.barkSet, this.env.dayFactor > 0.25 ? 'greet' : 'night', Math.floor(this.env.time * 24)) ??
       next?.text ??
-      'â€¦';
+      '…';
     this.hud.showToast(def.displayName, line);
   }
 
@@ -2398,7 +2406,7 @@ export class Game {
    * Draw one turn, and wire what the buttons do.
    *
    * `Game` owns the wiring rather than the HUD because taking a choice has
-   * consequences â€” relationship effects, recorded decisions, quest branches â€”
+   * consequences — relationship effects, recorded decisions, quest branches —
    * and those belong to the director. The HUD is handed strings and a
    * callback; it has never heard of a stage.
    */
@@ -2730,6 +2738,13 @@ export class Game {
     this.player.root.visible = true;
     this.player.motor.teleport(placed.position.x, placed.position.y + 0.05, placed.position.z);
 
+    // Leaving a vehicle somewhere *is* parking, and this is the only moment
+    // that means it. Measured from the vehicle rather than the player, because
+    // you can step away from a correctly parked van.
+    const parked = controller.position(this.seatPos);
+    this.director?.reportParked(parked.x, parked.z);
+    this.lastVehiclePos = null;
+
     // Hand the camera back its character tuning; it is one object shared by
     // both, so leaving it on the vehicle's settings follows the player out.
     Object.assign(this.camera.tuning, DEFAULT_CAMERA);
@@ -2786,8 +2801,8 @@ export class Game {
    * Offer whatever is in reach, and act on it if asked.
    *
    * Position is the player's chest rather than their feet, so a bed you are
-   * standing beside still counts. Everything past that â€” reach, facing,
-   * availability, holds, the prompt â€” belongs to `InteractionSystem`.
+   * standing beside still counts. Everything past that — reach, facing,
+   * availability, holds, the prompt — belongs to `InteractionSystem`.
    */
   private updateInteraction(dt: number): void {
     // Consumed unconditionally, so a press aimed at nothing cannot fire later.
@@ -2798,7 +2813,7 @@ export class Game {
     if (!this.riding && this.input.consumeFlip()) this.rightNearestVehicle();
     const ctx = this.interactionContext();
 
-    // Nothing may fire mid-transition, mid-nap or behind the wardrobe panel â€”
+    // Nothing may fire mid-transition, mid-nap or behind the wardrobe panel —
     // this guard has to come before standing up, or a stray WASD during the
     // fade teleports the player out of the chair.
     if (ctx.busy) {
@@ -2909,7 +2924,7 @@ export class Game {
 
     this.indoors = indoors;
     this.audio.setZone(indoors ? 'indoor' : 'outdoor');
-    // The kill plane and world bounds only make sense outdoors â€” the interior
+    // The kill plane and world bounds only make sense outdoors — the interior
     // cell sits 600 m up and outside the terrain footprint.
     this.player.controller.boundsEnabled = !indoors;
     this.player.motor.teleport(to.x, to.y, to.z);
@@ -2934,7 +2949,7 @@ export class Game {
    * The kit, fetched the first time somebody opens a door.
    *
    * 145 kB that only matters once you go inside, and this transition already
-   * fades to black â€” so the wait is hidden for the player who does and never
+   * fades to black — so the wait is hidden for the player who does and never
    * paid by the player who does not.
    */
   /** Buy a vehicle: register it owned, and put it outside the garage. */
@@ -3020,7 +3035,7 @@ export class Game {
       //
       // The whole argument for the interior subsystem and the kit being lazy
       // is that the download hides behind a transition the player is already
-      // waiting through. That is only true if the screen goes black first â€”
+      // waiting through. That is only true if the screen goes black first —
       // otherwise the first doorway of a session visibly stalls, and the
       // justification is a comment rather than a fact.
       const firstEntry = this.interiors?.hasKit !== true;
@@ -3106,7 +3121,7 @@ export class Game {
       case 'garage':
         return 'Smell of oil and warm metal.';
       case 'cafe':
-        return 'Coffee, and somebody elseâ€™s conversation.';
+        return 'Coffee, and somebody else’s conversation.';
       case 'clothing':
         return 'Racks, and a mirror at the back.';
       case 'airstrip':
@@ -3170,7 +3185,7 @@ export class Game {
 
   /**
    * Sleep. The character actually lies down and is held on screen for a beat
-   * before the fade â€” a straight cut to black reads as a bug, not a nap.
+   * before the fade — a straight cut to black reads as a bug, not a nap.
    */
   private async sleep(): Promise<void> {
     if (this.sleeping || this.transitioning) return;
@@ -3252,8 +3267,8 @@ export class Game {
   /**
    * The host `ServiceSystem` executes against.
    *
-   * Rebuilt per call rather than held, because half of it â€” the age, the
-   * clock, whether the shop is open â€” is only true for an instant.
+   * Rebuilt per call rather than held, because half of it — the age, the
+   * clock, whether the shop is open — is only true for an instant.
    */
   private serviceHost(): ServiceHost {
     const built = this.interiors?.active ?? null;
@@ -3298,7 +3313,7 @@ export class Game {
       shower: () => this.shower(),
       saveGame: () => void this.saveWithRollback('autosave'),
       placeDecor: (itemId) => this.placeDecor(itemId),
-      talk: (topic) => this.hud.showToast('Talk', TOPIC_LINES[topic] ?? 'â€¦'),
+      talk: (topic) => this.hud.showToast('Talk', TOPIC_LINES[topic] ?? '…'),
       startTask: (taskId) => this.startTask(taskId),
       treat: () => this.hud.showToast('Clinic', 'Patched up and sent on your way.'),
     };
@@ -3406,6 +3421,15 @@ export class Game {
         // would place every room at the origin.
         const point = this.interiors?.active?.points.find((p) => p.id === name);
         return point ? { x: point.world.x, y: point.world.y, z: point.world.z } : null;
+      },
+      holds: (itemId) => this.inventory.count(itemId),
+      // `Inventory.remove` is all-or-nothing and says so with a boolean, which
+      // is the behaviour a delivery wants: handing over two of three parcels
+      // is not a partial delivery, it is a mistake.
+      take: (itemId, count) => {
+        const ok = this.inventory.remove(itemId, count);
+        if (ok) this.syncTaskProgress();
+        return ok;
       },
 
       // -- cutscene host ----------------------------------------------------
@@ -3562,7 +3586,7 @@ export class Game {
     this.lastServiceId = null;
     if (result.ok) {
       const money =
-        result.spent > 0 ? ` âˆ’$${result.spent}` : result.gained > 0 ? ` +$${result.gained}` : '';
+        result.spent > 0 ? ` −$${result.spent}` : result.gained > 0 ? ` +$${result.gained}` : '';
       this.hud.showToast(menu.title, `${result.label}${money}`);
       // A purchase can satisfy a "collect" objective.
       this.syncTaskProgress();
@@ -3637,7 +3661,7 @@ export class Game {
    * Re-read every `collect` objective off the bag.
    *
    * Absolute rather than incremental, because the truth of "carry three
-   * boxes" is how many you are holding â€” and selling one has to move the bar
+   * boxes" is how many you are holding — and selling one has to move the bar
    * back down.
    */
   private syncTaskProgress(): void {
@@ -3661,7 +3685,7 @@ export class Game {
       Date.now(),
     );
     if (paid.ok) {
-      this.hud.showToast('Paid', `${taskLabel(outcome.taskId)} â€” $${outcome.pay}`);
+      this.hud.showToast('Paid', `${taskLabel(outcome.taskId)} — $${outcome.pay}`);
     }
     // A finished shift is what a `work_shift` objective is waiting for. Sent
     // after the award so a quest that also pays cannot land first and make the
@@ -3691,7 +3715,7 @@ export class Game {
   private updateAudio(dt: number): void {
     const p = this.player.position;
     // The road field is a 2D lookup with no notion of the interior cell, and
-    // the room sits directly above the main road in x/z â€” so indoors it would
+    // the room sits directly above the main road in x/z — so indoors it would
     // report tarmac. Floorboards are closer to grass than asphalt.
     const surface = this.indoors ? 0.3 : this.runtime.surfaceHardness(p.x, p.z);
     const moving = this.player.motor.grounded && this.player.speed > 0.3;
@@ -3709,7 +3733,7 @@ export class Game {
    * Draw the outdoor world into the window texture.
    *
    * Only while indoors, and only for the interior windows. The interior
-   * itself, the player and their contact shadow are suppressed for the pass â€”
+   * itself, the player and their contact shadow are suppressed for the pass —
    * they live in the room, not out on the street.
    */
   private renderPortal(): void {
@@ -3747,23 +3771,23 @@ export class Game {
   private reportDebug(): void {
     const s = this.runtime.stats;
     const lines = [
-      `${this.fps.toFixed(0)} fps Â· ${this.renderer.info}`,
-      `veg ${s.vegetation} Â· grass ${s.grass} Â· collider ${(s.colliderTris / 1000).toFixed(0)}k`,
-      `state ${this.player.state} Â· ${this.player.speed.toFixed(2)} m/s Â· ${
+      `${this.fps.toFixed(0)} fps · ${this.renderer.info}`,
+      `veg ${s.vegetation} · grass ${s.grass} · collider ${(s.colliderTris / 1000).toFixed(0)}k`,
+      `state ${this.player.state} · ${this.player.speed.toFixed(2)} m/s · ${
         this.player.motor.grounded ? 'ground' : 'air'
       }`,
-      `time ${this.env.clockLabel} Â· day ${this.env.dayFactor.toFixed(2)}`,
+      `time ${this.env.clockLabel} · day ${this.env.dayFactor.toFixed(2)}`,
     ];
 
     const p = this.population?.stats;
     if (p) {
       lines.push(
-        `npc ${p.named}+${p.ambient} Â· near ${p.near} mid ${p.mid} far ${p.far} Â· bodies ${p.bodies}`,
-        `nav ${p.navState} ${p.navBuildMs}ms Â· agents ${p.navAgents} Â· links ${p.offMeshLinks} Â· far ${p.farTickMs}ms`,
-        `traffic ${p.traffic} (${p.trafficParked} parked, ${p.trafficBarges} barged) Â· seen ${p.witnessed} Â· unstuck ${p.stuckRecoveries}`,
+        `npc ${p.named}+${p.ambient} · near ${p.near} mid ${p.mid} far ${p.far} · bodies ${p.bodies}`,
+        `nav ${p.navState} ${p.navBuildMs}ms · agents ${p.navAgents} · links ${p.offMeshLinks} · far ${p.farTickMs}ms`,
+        `traffic ${p.traffic} (${p.trafficParked} parked, ${p.trafficBarges} barged) · seen ${p.witnessed} · unstuck ${p.stuckRecoveries}`,
       );
     } else {
-      lines.push('npc â€” population not loaded');
+      lines.push('npc — population not loaded');
     }
 
     this.hud.setDebug(lines.join('\n'));
@@ -3777,6 +3801,17 @@ export class Game {
     this.input.dispose();
     this.audio.dispose();
     this.player?.dispose();
+
+    // The story owns no GPU or WASM memory — it is arithmetic, DOM and a
+    // string table — so there is nothing to release. Dropping the handles
+    // stops a stray frame from driving a torn-down world, and the panels'
+    // listeners come off through `gameScope` below, where they were
+    // registered. `this.story` deliberately survives: it is save data, and a
+    // dispose is not a new game.
+    this.director = null;
+    this.panels = null;
+    this.storyApi = null;
+    this.storyLoading = null;
     // Ahead of the zone teardown, for the same reason as in `travelTo`:
     // crowd agents and the navmesh live in WASM memory and are not reachable
     // by the garbage collector.
@@ -3790,7 +3825,7 @@ export class Game {
     });
 
     // Everything renderer-lifetime. Listed once, at creation, rather than
-    // duplicated here â€” a hand-maintained teardown list is exactly how a
+    // duplicated here — a hand-maintained teardown list is exactly how a
     // resource ends up released twice or not at all.
     const report = this.gameScope.dispose();
     if (report.errors.length) {

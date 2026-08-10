@@ -34,6 +34,10 @@ export interface StoryDirectorHost extends StoryHost, CutsceneHost {
   activeZone(): ZoneId | null;
   /** Interior point positions, when a room is open. */
   interiorPoint(name: string): { x: number; y: number; z: number } | null;
+  /** How many of an item the player is holding. */
+  holds(itemId: string): number;
+  /** Hand some over. False when there were not that many. */
+  take(itemId: string, count: number): boolean;
 }
 
 export class StoryDirector {
@@ -77,6 +81,13 @@ export class StoryDirector {
   update(dt: number): void {
     if (this.scenes.playing) {
       this.scenes.advance(dt);
+      // Events still drain. A browser run found out why: a quest that
+      // completed while its own scene was playing left the `completed` event
+      // in the queue forever, so the chapter-7 ending was never resolved and
+      // the run finished with a blank card. Stage timers and travel checks are
+      // right to pause — the player has no controls — but an event that has
+      // already happened is not waiting on anything.
+      this.drainEvents();
       return;
     }
 
@@ -109,14 +120,72 @@ export class StoryDirector {
           if (o.zone === zone) this.quests.report(view.id, { objectiveId: o.id }, 1);
           continue;
         }
-        if (o.kind !== 'travel' && o.kind !== 'park') continue;
-        if (!o.place) continue;
+        // `park` is deliberately absent. Walking into the bay on foot would
+        // complete "park in the bay", which it plainly is not — parking is the
+        // act of *leaving a vehicle* somewhere, and the host reports it from
+        // `exitVehicle`.
+        if (o.kind === 'travel' && o.place) {
+          if (this.within(o.place, p)) this.quests.report(view.id, { objectiveId: o.id }, 1);
+          continue;
+        }
 
+        // A delivery is "be there, holding it" — and the item is actually
+        // handed over, because a parcel you keep is a parcel you did not
+        // deliver. Doing it here rather than at a counter is what lets a drop
+        // be somewhere with no counter at all, which most of them are.
+        if (o.kind === 'deliver' && o.place && o.itemId) {
+          if (!this.within(o.place, p)) continue;
+          const want = Math.min(o.target - o.done, this.host.holds(o.itemId));
+          if (want > 0 && this.host.take(o.itemId, want)) {
+            this.quests.report(view.id, { objectiveId: o.id }, want);
+          }
+          continue;
+        }
+
+        // Getting clear: distance from wherever the stage began. Recorded on
+        // the first check rather than on stage entry, because the stage may
+        // have been entered in another zone.
+        if (o.kind === 'escape') {
+          const from = this.escapeOrigin.get(`${view.id}/${o.id}`);
+          if (!from) {
+            this.escapeOrigin.set(`${view.id}/${o.id}`, { x: p.x, z: p.z });
+            continue;
+          }
+          const away = Math.hypot(p.x - from.x, p.z - from.z);
+          this.quests.setProgress(view.id, o.id, Math.floor(away));
+        }
+      }
+    }
+  }
+
+  /** Where an `escape` objective started measuring from. */
+  private readonly escapeOrigin = new Map<string, { x: number; z: number }>();
+
+  private within(place: string, p: { x: number; z: number }): boolean {
+    const target = this.resolvePlace(place);
+    if (!target) return false;
+    const radius = storyPlace(place)?.radius ?? 4;
+    const dx = target.x - p.x;
+    const dz = target.z - p.z;
+    return dx * dx + dz * dz <= radius * radius;
+  }
+
+  /**
+   * A vehicle was left somewhere. Does anywhere named claim it?
+   *
+   * Called by the host on a successful exit, because *that* is what parking
+   * is. Reports against the place the vehicle is standing in, not the player —
+   * you can step away from a correctly parked van.
+   */
+  reportParked(x: number, z: number): void {
+    for (const view of this.quests.activeQuests()) {
+      for (const o of view.objectives) {
+        if (o.kind !== 'park' || o.complete || !o.place) continue;
         const target = this.resolvePlace(o.place);
         if (!target) continue;
-        const dx = target.x - p.x;
-        const dz = target.z - p.z;
-        const radius = storyPlace(o.place)?.radius ?? 4;
+        const radius = storyPlace(o.place)?.radius ?? 6;
+        const dx = target.x - x;
+        const dz = target.z - z;
         if (dx * dx + dz * dz <= radius * radius) {
           this.quests.report(view.id, { objectiveId: o.id }, 1);
         }

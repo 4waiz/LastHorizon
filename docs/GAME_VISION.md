@@ -92,9 +92,31 @@ consequences, completes a meaningful story, flies a small plane, sees a
 personal Life Reel, and continues in Free Roam — with no launcher and no
 broken state.
 
-## Where Phase 1 leaves this
+## Where Phase 8 leaves this
 
-The village prologue exists and is intact. Phase 1 built none of the above; it
-established the foundation the rest depends on — modernized toolchain, a
-renderer seam, typed feature flags, a deterministic test bridge, measured
-performance budgets and enforced CI gates. See `docs/PHASE_01_REPORT.md`.
+Eight of the twelve phases are done, and the promise at the top of this
+document is now a thing you can play from one end to the other.
+
+| Phase | What it added | Report |
+| --- | --- | --- |
+| 1 | Toolchain, renderer seam, feature flags, test bridge, budgets, CI | [01](PHASE_01_REPORT.md) |
+| 2 | Zone architecture, the city prototype, engine boundaries | [02](PHASE_02_REPORT.md) |
+| 3 | Three clocks, ageing, modes, versioned saves | [03](PHASE_03_REPORT.md) |
+| 4 | Age stages, animation layers, interaction, inventory, needs | [04](PHASE_04_REPORT.md) |
+| 5 | Five ground vehicles on Rapier, ownership, garages | [05](PHASE_05_REPORT.md) |
+| 6 | Twenty residents, schedules, navmesh, traffic, relationships | [06](PHASE_06_REPORT.md) |
+| 7 | Nine enterable buildings, the economy, five job loops | [07](PHASE_07_REPORT.md) |
+| 8 | **The authored story, ages 15–25, and the Life Reel** | [08](PHASE_08_REPORT.md) |
+
+A player can now start at fifteen in the village, find the five keepsakes, work
+for money, earn a bicycle and then a licence, leave for the city at eighteen,
+rent a room, take a job, build a name honestly or otherwise, answer what the
+road costs, and be handed a card at twenty-five that says what they became.
+
+**Still to come:** police and optional combat (9), aircraft and activities
+(10), the full interface, audio and accessibility pass (11), and production
+hardening (12).
+
+The pillar most at risk is still **"every building has a purpose"** — nine
+building types exist and the city districts have none of them yet. That is
+recorded at the end of both the Phase 7 and Phase 8 reports.
