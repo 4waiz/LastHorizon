@@ -94,6 +94,22 @@ export class AssetManager {
 
   private weaponsPromise: Promise<Map<string, THREE.Object3D>> | null = null;
 
+  /**
+   * Fetch the aeroplane and the boat.
+   *
+   * Lazy on the same argument again, and it is getting to be a pattern worth
+   * naming: **art for an optional system loads when the system does.** A
+   * player who never walks out to the airstrip never pays the 58.5 kB, and
+   * `initial load` has under 12 kB of headroom, so this could not be eager
+   * even if we wanted it.
+   */
+  loadAircraft(): Promise<Map<string, THREE.Object3D>> {
+    this.aircraftPromise ??= this.fetchPack('aircraft.glb');
+    return this.aircraftPromise;
+  }
+
+  private aircraftPromise: Promise<Map<string, THREE.Object3D>> | null = null;
+
   private async fetchPack(file: string): Promise<Map<string, THREE.Object3D>> {
     const out = new Map<string, THREE.Object3D>();
     try {

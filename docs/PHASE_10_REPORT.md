@@ -188,7 +188,12 @@ time trial run in a van is not a bicycle time trial.
 ## 6. Against the acceptance criteria, one at a time
 
 **1. The plane can complete a stable takeoff, circuit, and landing.**
-**Met in simulation, not yet in the running game.** `tests/flight.test.ts`
+**Met, in the running game.** Verified in Chromium against real terrain:
+takeoff roll, climb to 133 m, a 26-second banked turn to 223 m, wings level,
+throttle closed, and a landing — **zero recoveries, no crash, never left the
+corridor**. Then braked to a stop and stepped out. Wheel clearance on the
+ground measures 1.25 m, which is exactly `gearHeight`, so it sits on the
+terrain rather than floating. Also proved in simulation: `tests/flight.test.ts`
 flies a full circuit — roll, rotate, climb, a turn through more than 360°,
 wings level, descend, land — and asserts it arrives in one piece inside two
 minutes. It is flown with fixed attitude inputs rather than a controller,
@@ -203,7 +208,9 @@ was done and nothing has been measured from the air. This is the largest
 unfinished item and §7 treats it as such.
 
 **3. Every failure state has a safe recovery path.**
-**Met at the model level.** Crash, out-of-bounds, ceiling, falling through the
+**Met, and exercised.** The in-game runs triggered real recoveries twice
+before the corridor was resized, and both faded, moved the player and the
+aeroplane to the airstrip, and handed control back with the recovery counted. Crash, out-of-bounds, ceiling, falling through the
 floor and sinking all resolve to a checkpoint that accepts the vehicle kind,
 and `nearestCheckpoint` provably never returns nothing for any kind from any
 position. `FlightModel.placeAt` is the single entry point for spawning, reset

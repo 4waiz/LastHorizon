@@ -110,6 +110,16 @@ const LAZY_CHUNK_PREFIXES = [
   'VehicleControls-',
   'VehicleAccess-',
   'VehicleDynamics-',
+  // Phase 10. The flight model, the boundary and the director. Reached the
+  // first time somebody walks out to the aeroplane, alongside the 58.5 kB of
+  // `aircraft.glb` — the same moment, so the code rides in a gap the art was
+  // already paying for.
+  //
+  // Third phase running that this list needed a line adding at the moment the
+  // gate failed. Worth saying plainly: **a new lazy subsystem is not lazy to
+  // this script until it is named here**, and the failure looks exactly like
+  // the feature being too big.
+  'FlightSubsystem-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));

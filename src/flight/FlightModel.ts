@@ -95,12 +95,28 @@ export interface FlightTuning {
   readonly crashAttitude: number;
 }
 
+/*
+ * Speeds are sized to the *world*, not to a real aeroplane.
+ *
+ * The five zones span roughly 512 x 432 m of actual content. At the first
+ * tuning's 46 m/s cruise the aeroplane crossed all of it in eleven seconds and
+ * left the flight corridor during its initial climb — the first in-game flight
+ * was recovered at 52 m before it had finished taking off. That is not a
+ * boundary bug; it is an aeroplane that does not fit its world.
+ *
+ * 34 m/s cruise gives about forty seconds corner to corner, which is a scenic
+ * flight rather than a dash. The stall/cruise ratio is held at 2.0, so the
+ * lift-curve arithmetic below still lands: 34 / sqrt(1 + 8.9 * 0.30) = 17.7,
+ * just above the 17 m/s stall.
+ */
 export const PLANE_TUNING: FlightTuning = {
+  // Unchanged when the speeds came down: thrust also has to overcome rolling
+  // drag on the runway, and cutting it made the aeroplane too weak to taxi.
   maxThrust: 4200,
   mass: 780,
-  stallSpeed: 22,
-  cruiseSpeed: 46,
-  maxSpeed: 78,
+  stallSpeed: 17,
+  cruiseSpeed: 34,
+  maxSpeed: 56,
   pitchRate: 0.85,
   rollRate: 1.9,
   yawRate: 0.55,
@@ -175,8 +191,8 @@ const STALL_WARNING_MARGIN = 1.15;
  *
  * `AOA_GAIN` and `MAX_AOA` then set the slowest speed the wing can hold the
  * aeroplane up at: solving `(v / cruise)^2 * (1 + gain * maxAoa) = 1` for
- * `cruiseSpeed = 46` gives about 24 m/s, which is deliberately just above
- * `stallSpeed = 22`. Change any of the four and re-do that arithmetic, or the
+ * `cruiseSpeed = 34` gives 17.7 m/s, which is deliberately just above
+ * `stallSpeed = 17`. Change any of the four and re-do that arithmetic, or the
  * aeroplane will either refuse to leave the runway or fly at a walking pace.
  */
 const CL_AT_LEVEL = 1;
@@ -201,13 +217,22 @@ const MAX_LOAD_G = 3.5;
  */
 const ASSISTED_MAX_PITCH = 0.45;
 
+/**
+ * Nose-up held in a fully banked turn, radians.
+ *
+ * Scaled by `sin(roll)`, so wings level holds level. This is the back pressure
+ * a pilot applies without noticing, and without it an assisted turn is a slow
+ * descent that ends in the ground.
+ */
+const ASSIST_TURN_PITCH = 0.32;
+
 /** Height above the wheels at which the assisted flare begins, metres. */
-const FLARE_HEIGHT = 14;
+const FLARE_HEIGHT = 22;
 /** Sink rate allowed entering the flare, and at the wheels. Both m/s. */
-const FLARE_ENTRY_SINK = 5.0;
+const FLARE_ENTRY_SINK = 6.0;
 const FLARE_TOUCH_SINK = 1.4;
 /** How briskly the flare takes hold. Higher is more obviously the game flying. */
-const FLARE_AUTHORITY = 3.2;
+const FLARE_AUTHORITY = 4.5;
 
 export class FlightModel {
   private px = 0;
@@ -379,13 +404,20 @@ export class FlightModel {
     {
       const ratio = speed / t.cruiseSpeed;
 
-      // Angle of attack, as the arcade substitution for the real thing: pitch
-      // attitude, clamped. `CL_AT_LEVEL` is 1 so that level flight at cruise
-      // speed exactly cancels weight, and `AOA_GAIN` is chosen so that the
-      // maximum usable angle brings the minimum flying speed down to roughly
-      // `stallSpeed` — the two numbers are not independent, and a change to
-      // either wants the other checked.
-      const aoa = clamp(this.pitchValue, -0.15, MAX_AOA);
+      // Angle of attack — the *real* definition, pitch attitude minus flight
+      // path angle, not pitch against the horizon.
+      //
+      // This is the one place the model refuses to simplify, because the
+      // simplification does not work. Measuring angle of attack against the
+      // horizon means a level aeroplane at 77 m/s still generates 2.8 g of
+      // lift and balloons; the first in-game flight climbed 560 m in ten
+      // seconds and hit the ceiling. Against the *flight path* it trims
+      // itself: as the aeroplane climbs its path angle rises toward its pitch
+      // attitude, the angle of attack falls, lift drops, and it settles into a
+      // steady climb — which is what a real wing does and costs one `atan2`.
+      const horizontal = Math.hypot(this.vx, this.vz);
+      const pathAngle = speed > 1 ? Math.atan2(this.vy, Math.max(horizontal, 0.01)) : 0;
+      const aoa = clamp(this.pitchValue - pathAngle, -0.15, MAX_AOA);
       const cl = CL_AT_LEVEL + AOA_GAIN * aoa;
 
       // Below the stall the wing stops working decisively rather than fading,
@@ -552,8 +584,18 @@ export class FlightModel {
       if (Math.abs(input.roll) < 0.05) {
         this.rollValue *= Math.max(0, 1 - 1.8 * dt);
       }
+      // Hands off pitch, the aeroplane trims itself — but to a *turn
+      // compensating* attitude, not to level.
+      //
+      // Banking tilts lift sideways, so a level-pitch turn loses height: that
+      // is real, and it is why the first circuit test flew a beautiful climb
+      // and then descended 116 m into the ground during a twenty-six second
+      // turn, stalling on the way. A pilot answers a bank with back pressure
+      // without thinking about it. Assisted mode does it for you, in
+      // proportion to how far over the aeroplane is.
       if (Math.abs(input.pitch) < 0.05) {
-        this.pitchValue *= Math.max(0, 1 - 1.4 * dt);
+        const hold = ASSIST_TURN_PITCH * Math.abs(Math.sin(this.rollValue));
+        this.pitchValue += (hold - this.pitchValue) * Math.min(1, 1.4 * dt);
       }
       // Stall protection: below the warning speed the nose is pushed down
       // rather than the player being punished for holding back pressure.

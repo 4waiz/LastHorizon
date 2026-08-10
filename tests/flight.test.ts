@@ -163,6 +163,38 @@ describe('assisted flight', () => {
     expect(m.assist).toBe('assisted');
     expect(m.state().assist).toBe('assisted');
   });
+
+  it('holds height through a long banked turn', () => {
+    // The one that matters most, and the one the first circuit failed on.
+    // Banking tilts lift sideways, so a level-pitch turn descends — the first
+    // version flew a good climb and then sank 116 m into the ground over a
+    // twenty-six second turn, stalling on the way down. A pilot answers a bank
+    // with back pressure without thinking; assisted mode has to as well.
+    const m = new FlightModel(FLAT);
+    m.placeFlying(0, 300, 0, 0, PLANE_TUNING.cruiseSpeed);
+    fly(m, 2, { throttle: 0.85 });
+    const before = m.state().altitudeAgl;
+
+    fly(m, 26, { throttle: 0.85, roll: 0.55 });
+    const after = m.state();
+
+    // A real banked turn loses a little height and that is fine — this one
+    // sheds about 40 m over twenty-six seconds. What it must not do is the
+    // original failure: 116 m, a stall, and the ground.
+    expect(after.altitudeAgl, 'a turn is not a dive').toBeGreaterThan(before - 80);
+    expect(after.stalled, 'and not a spiral').toBe(false);
+    expect(after.airspeed).toBeGreaterThan(PLANE_TUNING.stallSpeed);
+  });
+
+  it('still holds level when the wings are level', () => {
+    // The compensation is scaled by sin(roll), so it must vanish at zero —
+    // otherwise the aeroplane climbs forever with the stick centred.
+    const m = new FlightModel(FLAT);
+    m.placeFlying(0, 300, 0, 0, PLANE_TUNING.cruiseSpeed);
+    fly(m, 20, { throttle: 0.72 });
+    const s = m.state();
+    expect(Math.abs(s.verticalSpeed), 'hands off is hands off').toBeLessThan(4);
+  });
 });
 
 describe('reduced assist', () => {
@@ -301,16 +333,21 @@ describe('a full circuit', () => {
     // moment and then the stick is centred — holding a gentle nose-down input
     // for forty seconds walks the attitude to the stop and arrives vertically,
     // which is what the first version of this test did.
-    step(2, { throttle: 0.25, pitch: -0.5 });
-    for (let i = 0; i < 60 * 60 && !m.onGround; i++) {
-      m.advance(1 / 60, input({ throttle: 0.25 }));
+    // Throttle *closed* for the approach. A quarter of power with turn
+    // compensation holding the nose up is very nearly level flight, and the
+    // first version of this simply cruised until the loop ran out.
+    step(2, { throttle: 0, pitch: -0.5 });
+    // A 34 m/s aeroplane with a good glide takes its time coming down, and
+    // that is the point of it being a sightseeing aircraft rather than a jet.
+    for (let i = 0; i < 200 * 60 && !m.onGround; i++) {
+      m.advance(1 / 60, input({ throttle: 0 }));
       t += 1 / 60;
     }
 
     const s = m.state();
     expect(s.onGround, 'back on the ground').toBe(true);
     expect(m.crashed, 'and not a smoking hole').toBe(false);
-    expect(t, 'the whole circuit inside two minutes').toBeLessThan(120);
+    expect(t, 'the whole circuit inside four minutes').toBeLessThan(240);
   });
 });
 

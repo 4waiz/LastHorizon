@@ -186,6 +186,52 @@ export interface TestSurface {
   /** Composure of a named NPC, 0..1. Never called health. */
   composureOf(npcId: string): number;
   setCombatOption(key: string, value: number | boolean): void;
+
+  // ---- Phase 10 -------------------------------------------------------------
+  awaitFlight(): Promise<FlightSnapshotData>;
+  flightState(): FlightSnapshotData;
+  boardPlane(): boolean;
+  leavePlane(): boolean;
+  setThrottle(v: number): void;
+  setFlightAssist(level: string): void;
+  flyFor(seconds: number, stick: FlightStick): void;
+  placePlane(x: number, z: number, facing: number, aboveGround?: number): void;
+}
+
+/** A fixed stick position, for scripted flight. Every field optional. */
+export interface FlightStick {
+  pitch?: number;
+  roll?: number;
+  yaw?: number;
+  throttle?: number;
+  brake?: boolean;
+}
+
+export interface FlightSnapshotData {
+  loaded: boolean;
+  riding: boolean;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  roll: number;
+  airspeed: number;
+  verticalSpeed: number;
+  /** Height above the terrain below, not above sea level. */
+  altitudeAgl: number;
+  throttle: number;
+  onGround: boolean;
+  stalled: boolean;
+  stallWarning: boolean;
+  assist: string;
+  /** inside | advisory | turning | recovery. */
+  boundaryZone: string;
+  boundaryReason: string | null;
+  boundaryPressure: number;
+  /** Never empty outside `inside` — the invisible-wall rule made checkable. */
+  boundaryCaption: string;
+  recoveries: number;
 }
 
 export interface CombatSnapshot {
@@ -767,6 +813,19 @@ export interface LHTestBridge {
   surrender(): boolean;
   getComposure(npcId: string): number;
   setCombatOption(key: string, value: number | boolean): void;
+
+  // ---- Phase 10 -------------------------------------------------------------
+  /** Pull the flight chunk and the aircraft model in. */
+  awaitFlight(): Promise<FlightSnapshotData>;
+  getFlight(): FlightSnapshotData;
+  /** Only from a stop, on the ground. */
+  boardPlane(): boolean;
+  leavePlane(): boolean;
+  setThrottle(v: number): void;
+  setFlightAssist(level: 'assisted' | 'reduced'): void;
+  /** Fly with a fixed stick for `seconds`, through the director. */
+  flyFor(seconds: number, stick: FlightStick): void;
+  placePlane(x: number, z: number, facing: number, aboveGround?: number): void;
 }
 
 declare global {
@@ -1283,6 +1342,32 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
     },
     setCombatOption(key: string, value: number | boolean): void {
       surface.setCombatOption(key, value);
+    },
+
+    // ---- Phase 10 -----------------------------------------------------------
+    awaitFlight(): Promise<FlightSnapshotData> {
+      return surface.awaitFlight();
+    },
+    getFlight(): FlightSnapshotData {
+      return surface.flightState();
+    },
+    boardPlane(): boolean {
+      return surface.boardPlane();
+    },
+    leavePlane(): boolean {
+      return surface.leavePlane();
+    },
+    setThrottle(v: number): void {
+      surface.setThrottle(v);
+    },
+    setFlightAssist(level: 'assisted' | 'reduced'): void {
+      surface.setFlightAssist(level);
+    },
+    flyFor(seconds: number, stick: FlightStick): void {
+      surface.flyFor(seconds, stick);
+    },
+    placePlane(x: number, z: number, facing: number, aboveGround?: number): void {
+      surface.placePlane(x, z, facing, aboveGround);
     },
   };
 

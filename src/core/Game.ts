@@ -91,6 +91,9 @@ type StoryDirector = import('../story/StoryDirector').StoryDirector;
 import { CombatState } from '../combat/CombatState';
 type CombatApi = typeof import('../combat/CombatSubsystem');
 type CombatDirector = import('../combat/CombatDirector').CombatDirector;
+// Phase 10, same split again: where the aeroplane is parked is in every save.
+import { FlightState } from '../flight/FlightState';
+type FlightDirector = import('../flight/FlightDirector').FlightDirector;
 import { setToonPlayer, toonFromImported, updateToonTime } from '../graphics/ToonMaterial';
 import { HUD } from '../ui/HUD';
 import { LoadingScreen } from '../ui/LoadingScreen';
@@ -398,6 +401,14 @@ export class Game {
   /** Set while a scene or a conversation owns the screen. */
   private storyBlocking = false;
   private lastVehiclePos: THREE.Vector3 | null = null;
+
+  // -- Phase 10: the aeroplane ----------------------------------------------
+  private readonly flightState = new FlightState();
+  private flight: FlightDirector | null = null;
+  private flightLoading: Promise<void> | null = null;
+  /** Body, and the propeller as its own node so the runtime can spin it. */
+  private planeMesh: THREE.Object3D | null = null;
+  private planeProp: THREE.Object3D | null = null;
 
   // -- Phase 9: weapons and the police -------------------------------------
   private readonly combatState = new CombatState();
@@ -1776,6 +1787,74 @@ export class Game {
         );
         this.applyCombatSettings();
       },
+
+      // ---- Phase 10 ---------------------------------------------------------
+      awaitFlight: async () => {
+        await this.ensureFlight();
+        return this.flightSnapshot();
+      },
+      flightState: () => this.flightSnapshot(),
+      boardPlane: () => this.flight?.board() ?? false,
+      leavePlane: () => this.flight?.leave() ?? false,
+      setThrottle: (v) => {
+        this.flightThrottle = Math.max(0, Math.min(1, v));
+      },
+      setFlightAssist: (level) => {
+        this.flight?.setAssist(level === 'reduced' ? 'reduced' : 'assisted');
+      },
+      /**
+       * Fly for `seconds` with a fixed stick. Feeds the *director*, not the
+       * model, so the boundary, the captions and the recovery all run — the
+       * Phase 9 lesson about `setAiming` writing past the frame loop.
+       */
+      flyFor: (seconds, stick) => {
+        const flight = this.flight;
+        if (!flight) return;
+        const steps = Math.max(1, Math.round(seconds * 60));
+        for (let i = 0; i < steps; i++) {
+          flight.update(1 / 60, {
+            pitch: stick.pitch ?? 0,
+            roll: stick.roll ?? 0,
+            yaw: stick.yaw ?? 0,
+            throttle: stick.throttle ?? 0,
+            brake: stick.brake ?? false,
+          });
+        }
+        this.updateFlight(0);
+      },
+      placePlane: (x, z, facing, aboveGround) => {
+        this.flight?.model.placeAt(x, z, facing, aboveGround ?? 0);
+      },
+    };
+  }
+
+  /** Flying, flattened for the bridge. Never a handle on the director. */
+  private flightSnapshot(): import('./TestMode').FlightSnapshotData {
+    const f = this.flight;
+    const s = f?.snapshot() ?? null;
+    const v = f?.verdict ?? null;
+    return {
+      loaded: f !== null,
+      riding: f?.riding ?? false,
+      x: s?.position.x ?? 0,
+      y: s?.position.y ?? 0,
+      z: s?.position.z ?? 0,
+      yaw: s?.yaw ?? 0,
+      pitch: s?.pitch ?? 0,
+      roll: s?.roll ?? 0,
+      airspeed: s?.airspeed ?? 0,
+      verticalSpeed: s?.verticalSpeed ?? 0,
+      altitudeAgl: s?.altitudeAgl ?? 0,
+      throttle: s?.throttle ?? 0,
+      onGround: s?.onGround ?? true,
+      stalled: s?.stalled ?? false,
+      stallWarning: s?.stallWarning ?? false,
+      assist: s?.assist ?? 'assisted',
+      boundaryZone: v?.zone ?? 'inside',
+      boundaryReason: v?.reason ?? null,
+      boundaryPressure: v?.pressure ?? 0,
+      boundaryCaption: v?.caption ?? '',
+      recoveries: this.flightState.recoveries,
     };
   }
 
@@ -1966,6 +2045,7 @@ export class Game {
     //     fired; before physics, so an officer's position this frame is the
     //     one the pursuit was computed against.
     this.updateCombat(dt);
+    this.updateFlight(dt);
 
     // 8. physics, on its own fixed step
     this.stepPhysics(dt);
@@ -3764,6 +3844,120 @@ export class Game {
    * draw anything. The 65 kB of weapon models are fetched alongside, on the
    * same first draw.
    */
+  /**
+   * Bring flying in, once.
+   *
+   * The code and the art in parallel, the way `ensureKit` does it: neither
+   * depends on the other and this is the one moment that pays for both. A
+   * player who never walks out to the airstrip never reaches this at all.
+   */
+  private ensureFlight(): Promise<void> {
+    if (this.flight) return Promise.resolve();
+    if (this.flightLoading) return this.flightLoading;
+
+    this.flightLoading = Promise.all([
+      import('../flight/FlightSubsystem'),
+      this.assetManager?.loadAircraft() ?? Promise.resolve(new Map<string, THREE.Object3D>()),
+    ]).then(([api, models]) => {
+      this.flight = new api.FlightDirector(this.flightState, {
+        groundAt: (x, z) => this.runtime.heightAt(x, z),
+        recover: (to) => this.recoverAircraft(to),
+        say: (title, body) => this.hud.showToast(title, body),
+        // Getter over an arrow function for the same reason the combat host
+        // does it: a getter's `this` is the object literal, not the class.
+        get blocked() {
+          return blocked();
+        },
+      });
+      this.buildPlaneVisual(models);
+    });
+
+    const blocked = () => this.storyBlocking || this.transitioning || this.sleeping;
+    return this.flightLoading;
+  }
+
+  /** Put the aeroplane and its propeller in the scene, once. */
+  private buildPlaneVisual(models: Map<string, THREE.Object3D>): void {
+    const proto = models.get('Plane');
+    if (!proto) return;
+    const body = proto.clone(true);
+    body.name = 'aircraft:plane';
+    this.scene.add(body);
+    this.planeMesh = body;
+    this.gameScope.addTeardown(() => {
+      body.removeFromParent();
+    });
+
+    const prop = models.get('Plane_Prop');
+    if (prop) {
+      const spinner = prop.clone(true);
+      spinner.name = 'aircraft:prop';
+      // Parented to the body, so it inherits the aeroplane's attitude and only
+      // has to spin about its own axis.
+      body.add(spinner);
+      spinner.position.set(0, 0.02, 2.9);
+      this.planeProp = spinner;
+    }
+  }
+
+  /**
+   * Put the aeroplane and the player back somewhere safe.
+   *
+   * The order is `performArrest`'s, for the same reason: fade first so nothing
+   * is seen teleporting, move everything, then save. A recovery that saved
+   * first would persist the state it was recovering from.
+   */
+  private async recoverAircraft(to: { x: number; y: number; z: number; facing: number }): Promise<void> {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    await this.hud.setFade(true, 0.4);
+
+    const ground = this.runtime.heightAt(to.x, to.z);
+    this.player.motor.teleport(to.x, ground, to.z);
+    this.player.controller.facing = to.facing;
+    this.camera.resetBehind(this.player.position, to.facing);
+
+    await this.hud.setFade(false, 0.4);
+    this.transitioning = false;
+  }
+
+  /**
+   * The flight frame.
+   *
+   * Nothing here loads the flight chunk on its own — it arrives when the
+   * player asks to fly, and until then this is one null check.
+   */
+  private updateFlight(dt: number): void {
+    const flight = this.flight;
+    if (!flight) return;
+
+    flight.update(dt, {
+      pitch: flight.riding ? -this.input.move.y : 0,
+      roll: flight.riding ? this.input.move.x : 0,
+      yaw: 0,
+      throttle: flight.riding ? this.flightThrottle : 0,
+      brake: flight.riding && this.input.interactHeld,
+    });
+
+    const s = flight.snapshot();
+    if (this.planeMesh) {
+      this.planeMesh.position.set(s.position.x, s.position.y, s.position.z);
+      // Yaw about up, then pitch, then roll about the nose. YXZ is the order
+      // that reads as an aeroplane rather than as a gimbal.
+      this.planeMesh.rotation.set(s.pitch, s.yaw, -s.roll, 'YXZ');
+    }
+    if (this.planeProp) this.planeProp.rotation.z = s.propRadians;
+
+    // The player rides in the aeroplane rather than beside it.
+    if (flight.riding) {
+      this.player.motor.teleport(s.position.x, s.position.y - 0.6, s.position.z);
+      this.player.controller.facing = s.yaw;
+    }
+  }
+
+  /** Throttle is a held axis rather than a rate, so it lives on the game. */
+  private flightThrottle = 0;
+
   private ensureCombat(): Promise<void> {
     if (this.combat) return Promise.resolve();
     if (this.combatLoading) return this.combatLoading;

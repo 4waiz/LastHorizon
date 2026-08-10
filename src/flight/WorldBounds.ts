@@ -93,15 +93,32 @@ export interface BoundsConfig {
  * the player in a warning band the moment they are recovered — which is what
  * `worldBounds.test.ts` caught on the downtown kerb.
  */
+/*
+ * Sized from how far an aeroplane actually gets, not from the zone bounds.
+ *
+ * The first version enclosed the world plus a margin and came out about a
+ * kilometre across. That is seventeen seconds of straight flight at 34 m/s
+ * before the first warning, and the first in-game circuit was recovered
+ * during its initial climb — twice, from two different headings.
+ *
+ * A turn is not the problem: at cruise with the assisted bank limit the radius
+ * is about 72 m, so a circuit round the airfield is 150 m across and fits
+ * anywhere. It is *straight* flight that needs room, and a player who points
+ * the nose at the horizon deserves more than a quarter of a minute.
+ *
+ * 2.1 km square gives roughly a minute corner to corner. It is still very much
+ * a corridor — the brief asks for one — but it is one you have to mean to
+ * leave. Everything the player can actually land on stays near the middle.
+ */
 export const FLIGHT_CORRIDOR: BoundsConfig = {
-  minX: -400,
-  maxX: 640,
-  minZ: -450,
-  maxZ: 500,
+  minX: -900,
+  maxX: 1200,
+  minZ: -1000,
+  maxZ: 1100,
   ceiling: 620,
   floor: -40,
-  advisoryMargin: 130,
-  turningMargin: 60,
+  advisoryMargin: 200,
+  turningMargin: 90,
 };
 
 /** On foot and on wheels the world is the streamed zones, which are smaller. */
