@@ -67,7 +67,16 @@ export interface TaskDef {
   readonly startPoint: string;
   /** Blocks the task below this age. Nothing here is combat. */
   readonly minAge?: number;
-  readonly requiresVehicle?: boolean;
+  /**
+   * What the player has to be sitting in.
+   *
+   * `true` means "any vehicle", which is what the taxi and recovery jobs have
+   * always meant. Phase 10 adds the named form: a bicycle time trial run in a
+   * van is not a bicycle time trial, and a scenic flight on foot is a walk.
+   * The host resolves the id against the vehicle it is actually driving, so
+   * this file still knows nothing about vehicles.
+   */
+  readonly requiresVehicle?: boolean | string;
 }
 
 export const MIN_DIFFICULTY = 1;

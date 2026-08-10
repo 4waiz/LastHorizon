@@ -80,6 +80,15 @@ export interface StartOptions {
   readonly difficulty?: number;
   readonly age?: number;
   readonly hasVehicle?: boolean;
+  /**
+   * What the player is actually sitting in, if anything.
+   *
+   * Only consulted when the task names a specific vehicle. Left undefined the
+   * named check cannot pass, which is the safe direction: refusing to start a
+   * time trial is a message, starting one that can never be completed is a
+   * bug.
+   */
+  readonly vehicleId?: string;
 }
 
 export interface TaskSystemData {
@@ -144,7 +153,12 @@ export class TaskSystem {
     if (def.minAge !== undefined && (opts.age ?? Infinity) < def.minAge) {
       return { ok: false, reason: 'too-young' };
     }
-    if (def.requiresVehicle && opts.hasVehicle === false) {
+    if (def.requiresVehicle === true && opts.hasVehicle === false) {
+      return { ok: false, reason: 'needs-vehicle' };
+    }
+    // A named vehicle has to match. `hasVehicle: false` is not enough to
+    // refuse on its own here, because the id is the stricter statement.
+    if (typeof def.requiresVehicle === 'string' && opts.vehicleId !== def.requiresVehicle) {
       return { ok: false, reason: 'needs-vehicle' };
     }
 

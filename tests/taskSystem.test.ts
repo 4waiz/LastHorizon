@@ -34,17 +34,36 @@ describe('task definitions', () => {
     }
   });
 
-  it('has five jobs and one calm activity', () => {
+  it('has five jobs, and activities on top of them', () => {
+    // The five jobs are the Phase 7 economy and are deliberately unchanged:
+    // Phase 10 added *activities*, which pay less and are optional, rather
+    // than more work with a wage attached.
     expect(JOB_IDS).toHaveLength(5);
-    expect(TASKS.filter((t) => t.kind === 'activity').map((t) => t.id)).toEqual([
+    expect(TASKS.filter((t) => t.kind === 'activity').map((t) => t.id).sort()).toEqual([
+      'activity_air_delivery',
       'activity_fishing',
+      'activity_photography',
+      'activity_police_escape',
+      'activity_road_race',
+      'activity_scenic_flight',
+      'activity_time_trial',
     ]);
   });
 
   it('does not make every task a race', () => {
-    // The brief is explicit about this. Four of six have no timer.
+    // The Phase 7 brief was explicit and it still holds: most work has no
+    // clock. Phase 10 added three timed activities — two of which are
+    // literally races, where the clock *is* the activity — and three without,
+    // so the majority of the catalogue is still untimed.
     const timed = TASKS.filter((t) => t.timeLimit !== null).map((t) => t.id);
-    expect(timed.sort()).toEqual(['job_city_courier', 'job_taxi_driving']);
+    expect(timed.sort()).toEqual([
+      'activity_air_delivery',
+      'activity_road_race',
+      'activity_time_trial',
+      'job_city_courier',
+      'job_taxi_driving',
+    ]);
+    expect(timed.length, 'still a minority').toBeLessThan(TASKS.length / 2);
   });
 
   it('pays exactly base at difficulty 1', () => {
@@ -332,5 +351,148 @@ describe('tasks and the economy together', () => {
     const won = ts.outcome!;
     expect(eco.award(won.awardKey, won.pay, 'Courier', AT).ok).toBe(true);
     expect(eco.wallet.cash).toBe(won.pay);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 10 — the five new activities, and the promise about rewards
+// ---------------------------------------------------------------------------
+
+describe('the Phase 10 activities', () => {
+  const NEW_IDS = [
+    'activity_time_trial',
+    'activity_road_race',
+    'activity_photography',
+    'activity_scenic_flight',
+    'activity_air_delivery',
+    'activity_police_escape',
+  ];
+
+  it('are all in the catalogue and all valid', () => {
+    for (const id of NEW_IDS) {
+      const def = taskDef(id);
+      expect(def, id).not.toBeNull();
+      expect(validateTask(def!).ok, id).toBe(true);
+    }
+  });
+
+  it('covers every activity the brief names', () => {
+    // Taxi, courier, recovery and fishing were already here; the brief asked
+    // for those to be *expanded using existing systems* rather than rebuilt,
+    // so this asserts the whole set exists rather than that Phase 10 wrote it.
+    const wanted = [
+      'activity_time_trial',      // bicycle time trial
+      'activity_road_race',       // legal closed-course event
+      'job_taxi_driving',         // taxi fares
+      'job_city_courier',         // courier chains
+      'activity_photography',     // photography locations and NPC requests
+      'activity_fishing',         // fishing
+      'job_garage_recovery',      // vehicle recovery jobs
+      'activity_air_delivery',    // air delivery
+      'activity_scenic_flight',   // scenic flight
+      'activity_police_escape',   // optional police escape challenge
+    ];
+    for (const id of wanted) expect(taskDef(id), id).not.toBeNull();
+  });
+
+  it('every one of them can be started, cancelled and started again', () => {
+    for (const id of NEW_IDS) {
+      const ts = new TaskSystem();
+      const def = taskDef(id)!;
+      const opts = {
+        age: 21,
+        hasVehicle: true,
+        vehicleId: typeof def.requiresVehicle === 'string' ? def.requiresVehicle : undefined,
+      };
+      expect(ts.start(id, opts).ok, `${id} start`).toBe(true);
+      ts.cancel();
+      expect(ts.active, `${id} cancelled`).toBeNull();
+      expect(ts.start(id, opts).ok, `${id} restart`).toBe(true);
+    }
+  });
+
+  it('every one of them can be completed, and pays exactly once', () => {
+    for (const id of NEW_IDS) {
+      const ts = new TaskSystem();
+      const def = taskDef(id)!;
+      ts.start(id, {
+        age: 21,
+        hasVehicle: true,
+        vehicleId: typeof def.requiresVehicle === 'string' ? def.requiresVehicle : undefined,
+      });
+      finish(ts);
+      // Completion settles itself the moment the last objective is met; the
+      // outcome is then readable, once, from `outcome`.
+      const done = ts.outcome;
+      expect(done, `${id} completes`).not.toBeNull();
+      expect(done!.state, id).toBe('completed');
+      expect(done!.taskId, id).toBe(id);
+    }
+  });
+});
+
+describe('a named vehicle is a real gate', () => {
+  it('refuses a bicycle time trial in a van, and allows it on a bicycle', () => {
+    const ts = new TaskSystem();
+    expect(ts.start('activity_time_trial', { age: 21, hasVehicle: true, vehicleId: 'van' }).ok)
+      .toBe(false);
+    expect(ts.start('activity_time_trial', { age: 21, hasVehicle: true, vehicleId: 'bicycle' }).ok)
+      .toBe(true);
+  });
+
+  it('refuses a scenic flight on foot', () => {
+    const ts = new TaskSystem();
+    const r = ts.start('activity_scenic_flight', { age: 21, hasVehicle: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('needs-vehicle');
+  });
+
+  it('still lets an any-vehicle task run in anything', () => {
+    const ts = new TaskSystem();
+    expect(ts.start('activity_road_race', { age: 21, hasVehicle: true, vehicleId: 'hatchback' }).ok)
+      .toBe(true);
+  });
+});
+
+describe('rewards are idempotent across the whole new set', () => {
+  it('gives every run a distinct award key, and repeats none', () => {
+    const seen = new Set<string>();
+    for (const id of ['activity_time_trial', 'activity_photography', 'activity_air_delivery']) {
+      const ts = new TaskSystem();
+      const def = taskDef(id)!;
+      const opts = {
+        age: 21,
+        hasVehicle: true,
+        vehicleId: typeof def.requiresVehicle === 'string' ? def.requiresVehicle : undefined,
+      };
+      // Three runs of the same task must not collide with each other.
+      for (let run = 0; run < 3; run++) {
+        ts.start(id, opts);
+        finish(ts);
+        const done = ts.outcome!;
+        expect(seen.has(done.awardKey), `${done.awardKey} repeated`).toBe(false);
+        seen.add(done.awardKey);
+      }
+    }
+    expect(seen.size).toBe(9);
+  });
+
+  it('a run reloaded from a save cannot re-pay its own key', () => {
+    const ts = new TaskSystem();
+    ts.start('activity_photography', { age: 21 });
+    finish(ts);
+    const first = ts.outcome!;
+
+    // A restore puts the attempt counts back; the next run must be numbered
+    // after them, not on top of them. This is the case Phase 8 got wrong with
+    // quest rewards and Phase 7 got wrong with the economy.
+    const other = new TaskSystem();
+    other.restore(ts.toJSON());
+    other.start('activity_photography', { age: 21 });
+    finish(other);
+    const second = other.outcome!;
+
+    expect(second.awardKey).not.toBe(first.awardKey);
+    expect(second.runNumber).toBeGreaterThan(first.runNumber);
   });
 });
