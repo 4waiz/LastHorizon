@@ -12,6 +12,23 @@ entry here.
 All assets are **first-party**. No third-party art, audio, model, font or
 texture is bundled. No asset is derived from any commercial game.
 
+**Code is a different question, and this document used to be silent on it.**
+Five third-party libraries ship in the bundle. Four are permissively licensed;
+GSAP is not open source at all — it is free to use under GreenSock's standard
+licence, which is a different claim and one worth stating in the credits
+rather than rounding to "open source". The in-game credits list all five.
+
+| Library | Version | Licence |
+| --- | --- | --- |
+| three.js | 0.185.1 | MIT |
+| three-mesh-bvh | 0.9.14 | MIT |
+| recast-navigation | 0.43.1 | MIT |
+| `@dimforge/rapier3d-compat` | 0.19.3 | Apache-2.0 |
+| GSAP | ^3.12.5 | GreenSock standard “no charge” licence — **not** open source |
+
+Build and test tooling (Vite, TypeScript, Vitest, Playwright, ESLint, jsdom)
+does not ship in the bundle and is not listed in the credits.
+
 ## 3D models — `public/assets/models/`
 
 Generated procedurally by Python scripts driving Blender. The scripts in
