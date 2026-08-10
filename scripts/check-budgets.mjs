@@ -130,6 +130,9 @@ const LAZY_CHUNK_PREFIXES = [
   // which is a click away, and the third panel moved out of `HUD` for this
   // reason after `MapPanel` and `StoryPanels`.
   'SettingsPanel-',
+  // Phase 11. The phone: shell, app grid, jobs, contacts and garage. Opened
+  // with P, and the fourth panel to follow the pattern.
+  'Phone-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));

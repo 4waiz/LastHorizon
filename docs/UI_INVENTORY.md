@@ -89,6 +89,7 @@ the convention Phases 1–10 established and this keeps.
 | Journal | `.journal`, `.journal__quest`, `.journal__quest--side`, `.journal__stage`, `.journal__objs` | Story progress |
 | Map panel | `.mapp` + `__head/body/foot/legend/scale/tools/hint/card` | Full-screen map on **M** |
 | Life Reel | `.modal__card--reel`, `.reel__note`, `.reel__tools` | End-of-life summary, local export |
+| Phone | `.phone` + `__card/head/title/money/back/close/body/grid/app/glyph/label/soon/list/row/rowMain/rowSide/rowName/rowNote/pay/act/empty/foot` | Hub on **P**: Work, People, Garage, Map, Journal |
 
 ### Boot and platform
 
@@ -130,6 +131,12 @@ the convention Phases 1–10 established and this keeps.
 Listed plainly, because a component inventory that omits the gaps is a
 marketing document.
 
+**Partly built:** the phone — five of seven apps are live (Work, People,
+Garage, and Map/Journal by delegation). **Messages and Camera are present but
+disabled and labelled "not yet"**: Messages needs a conversation store nothing
+writes to yet, and Camera is photo mode, which is its own piece of work. A tile
+that lies is worse than one that waits.
+
 **Screens not built:** Story Mode / Free Roam selection · three save slots and
 autosave status · character name and appearance setup · pause menu · dedicated
 accessibility panel · controls **remapping** · inventory and equipment ·
@@ -137,7 +144,7 @@ jobs and tasks · relationships and contacts · vehicle garage · apartment and
 property · dedicated credits *screen* (credits currently live inside the info
 modal).
 
-**Systems not built:** the in-game phone · minimap upgrade (streamed zones,
+**Systems not built:** minimap upgrade (streamed zones,
 filters, police search area, owned vehicles) · photo mode · birthday postcard
 export · UI sound set · audio buses, ducking and gain staging · story stingers.
 

@@ -566,6 +566,22 @@
       </div>
     </div>
 
+    <!-- ============================= phone ============================ -->
+    <!-- Static markup, like every other panel: it is here for an
+         accessibility snapshot whether or not the chunk has been fetched. -->
+    <div id="phone" class="phone" role="dialog" aria-modal="true"
+         aria-labelledby="phoneTitle" hidden>
+      <div class="phone__card">
+        <div class="phone__head">
+          <button id="phoneBack" class="phone__back" type="button" aria-label="Back" hidden>‹</button>
+          <h2 id="phoneTitle" class="phone__title">Phone</h2>
+          <span id="phoneMoney" class="phone__money">$0</span>
+          <button id="phoneClose" class="phone__close" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="phoneBody" class="phone__body"></div>
+      </div>
+    </div>
+
     <!-- ============================= icons ============================= -->
     <svg style="display: none" aria-hidden="true">
       <symbol id="i-sound-on" viewBox="0 0 24 24">

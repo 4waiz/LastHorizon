@@ -50,6 +50,7 @@ export class InputManager {
   /** True once per press of the map key. */
   private mapQueued = false;
   private journalQueued = false;
+  private phoneQueued = false;
   private interactQueued = false;
   /** Touch or gamepad interact, which have no entry in `keys`. */
   private pointerInteractHeld = false;
@@ -173,6 +174,10 @@ export class InputManager {
       }
       if (code === 'KeyJ') {
         this.journalQueued = true;
+        e.preventDefault();
+      }
+      if (code === 'KeyP') {
+        this.phoneQueued = true;
         e.preventDefault();
       }
       if (code === 'KeyQ') {
@@ -347,6 +352,7 @@ export class InputManager {
   consumeJournal(): boolean {
     if (!this.journalQueued) return false;
     this.journalQueued = false;
+    this.phoneQueued = false;
     return true;
   }
 
@@ -413,6 +419,13 @@ export class InputManager {
     const n = this.slotQueued;
     this.slotQueued = -1;
     return n;
+  }
+
+  /** True once per press of P. Opens or closes the phone. */
+  consumePhone(): boolean {
+    if (!this.phoneQueued) return false;
+    this.phoneQueued = false;
+    return true;
   }
 
   queueMap(): void {

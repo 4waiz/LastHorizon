@@ -261,6 +261,10 @@ export class HUD {
    * work whether or not the panel has ever been opened.
    */
   private wireInfoChrome(): void {
+    $('phoneClose').addEventListener('click', () => this.openPhone(false));
+    this.phone.addEventListener('pointerdown', (e) => {
+      if (e.target === this.phone) this.openPhone(false);
+    });
     $('infoClose').addEventListener('click', () => this.openInfo(false));
     this.info.addEventListener('pointerdown', (e) => {
       if (e.target === this.info) this.openInfo(false);
@@ -269,10 +273,67 @@ export class HUD {
       if (e.key === 'Escape') {
         // Innermost panel first: Esc should close what is actually on top.
         if (!this.mapPanel.hidden) this.openMap(false);
+        else if (!this.phone.hidden) this.openPhone(false);
         else if (!this.info.hidden) this.openInfo(false);
         else if (document.pointerLockElement) document.exitPointerLock();
       }
     });
+  }
+
+  // -- the phone ------------------------------------------------------------
+  private phone = $('phone');
+  private phonePanel: import('./Phone').Phone | null = null;
+  private phoneLoading: Promise<void> | null = null;
+  private phoneWanted = false;
+  /** Supplied by `Game` once, before the phone can be opened. */
+  private phoneDeps: import('./Phone').PhoneDeps | null = null;
+
+  /** Hand the phone its data sources. Called by `Game` during setup. */
+  setPhoneDeps(deps: import('./Phone').PhoneDeps): void {
+    this.phoneDeps = deps;
+  }
+
+  get phoneOpen(): boolean {
+    return this.phone.hidden === false;
+  }
+
+  togglePhone(): void {
+    this.openPhone(!this.phoneWanted);
+  }
+
+  /**
+   * Show or hide the phone.
+   *
+   * Revealed only once its chunk has landed, the fourth panel to follow that
+   * rule. Without the deps it refuses rather than opening an empty handset —
+   * `Game` supplies them during setup, so this only bites if the order changes.
+   */
+  openPhone(open: boolean): void {
+    if (!open) {
+      this.phoneWanted = false;
+      this.phone.classList.remove('is-on');
+      window.setTimeout(() => {
+        this.phone.hidden = true;
+      }, 220);
+      return;
+    }
+    if (!this.phoneDeps) return;
+
+    this.phoneWanted = true;
+    void this.loadPhone().then(() => {
+      if (!this.phoneWanted) return;
+      this.phonePanel?.refresh();
+      this.phone.hidden = false;
+      requestAnimationFrame(() => this.phone.classList.add('is-on'));
+      this.input.releaseAll();
+    });
+  }
+
+  private loadPhone(): Promise<void> {
+    this.phoneLoading ??= import('./Phone').then((api) => {
+      this.phonePanel = new api.Phone(this.phoneDeps!);
+    });
+    return this.phoneLoading;
   }
 
   /** Resolved on the first opening; null until then. */

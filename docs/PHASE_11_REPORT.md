@@ -198,13 +198,45 @@ controls confirmed live after the lazy load by clicking Aim help and watching
 
 ---
 
+## 3d. The phone
+
+A hub rather than a second interface, and the thing that makes it coherent is
+that **the phone owns almost nothing**. Work comes from `TaskSystem`, People
+from `Relationships`, Garage from `VehicleRegistry`, and Map and Journal open
+the panels that already exist. All of it arrives through a `PhoneDeps`
+interface it cannot reach past — the shape `SettingsPanel` and
+`CombatDirector` already use.
+
+Opened with **P**. Five of seven apps are live; **Messages and Camera are
+present, disabled, and labelled "not yet"** because Messages needs a
+conversation store nothing writes to and Camera is photo mode. A tile that
+lies is worse than one that waits.
+
+Fourth panel to follow the lazy pattern: 4.15 kB of JS and 3.08 kB of CSS in
+their own chunk, markup static in `index.html`, revealed only once the chunk
+lands. Verified in Chromium with a real vehicle spawned and an NPC met: the
+phone opens on **0 unstyled frames**, all seven tiles render, and Garage lists
+the actual hatchback rather than a placeholder.
+
+**A bug worth recording**, because the symptom pointed nowhere near the cause:
+the phone would not open at all and its chunk was never even requested. The
+deps hand-over had been inserted into the *first* textual match of
+`this.hud.syncOutfit(...)` — which is inside the outfit callback, not after the
+constructor. So `setPhoneDeps` only ran when the player changed clothes, and
+`openPhone` bailed silently on the missing deps every other time. Found by
+checking whether the chunk was requested at all rather than by reading the
+phone code, which was correct throughout.
+
+---
+
 ## 4. Against the acceptance criteria
 
 **1. Every system added in prior phases is reachable through a coherent UI.**
-**Not met.** Weapons, Heat and arrest have HUD readouts but no inventory or
-record screen. Flight has no interface at all beyond the test bridge. The six
-Phase 10 activities have no jobs board. `docs/UI_INVENTORY.md` §4 lists this
-explicitly rather than leaving it to be discovered.
+**Partly met, and better than it was.** The phone reaches jobs, contacts and
+garage recovery, and flight assist is in the accessibility panel. Still
+unreachable: weapons and the criminal record have HUD readouts but no inventory
+or record screen, and there is still no save-slot, pause or character screen.
+`docs/UI_INVENTORY.md` §4 lists it rather than leaving it to be discovered.
 
 **2. The HUD remains readable without covering the environment.**
 **Held, not improved.** The existing HUD is already contextual — dash only when

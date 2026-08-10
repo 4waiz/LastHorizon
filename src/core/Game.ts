@@ -596,6 +596,9 @@ export class Game {
         this.hud.syncOutfit(this.player.outfit);
       },
     });
+    // The phone's data sources, handed over once the HUD exists. Without this
+    // `openPhone` refuses rather than showing an empty handset.
+    this.hud.setPhoneDeps(this.phoneDeps());
     this.hud.syncOutfit(this.player.outfit);
     this.hud.setCounter(this.village!.collectibles.count, this.village!.collectibles.total);
     // Runs every frame, including while a district is active — a district has
@@ -1836,6 +1839,79 @@ export class Game {
     };
   }
 
+  /** One line on how somebody feels about you, from the trust axis. */
+  private static describeTrust(trust: number): string {
+    if (trust >= 0.75) return 'knows you well';
+    if (trust >= 0.45) return 'friendly';
+    if (trust >= 0.15) return 'getting to know you';
+    if (trust > -0.15) return 'an acquaintance';
+    return 'wary of you';
+  }
+
+  /**
+   * What the phone reads.
+   *
+   * A narrow interface rather than a handle on the game, the same shape
+   * `SettingsPanel` and `CombatDirector` take. The phone owns none of this
+   * data — it is `TaskSystem`, `Relationships` and `VehicleRegistry` with the
+   * wording done here, where the vocabulary already lives.
+   */
+  private phoneDeps(): import('../ui/Phone').PhoneDeps {
+    return {
+      jobs: () => {
+        const active = this.tasks.active;
+        return JOB_IDS.map((id) => {
+          const def = taskDef(id);
+          return {
+            id,
+            name: def?.name ?? id,
+            summary: def?.summary ?? '',
+            pay: def?.basePay ?? 0,
+            done: this.tasks.completionsOf(id),
+            active: active?.def.id === id,
+          };
+        });
+      },
+      contacts: () => {
+        // Only people actually met. An address book pre-filled with strangers
+        // is a list, not a relationship.
+        const out: Array<{ id: string; name: string; note: string }> = [];
+        for (const npc of this.population?.namedList() ?? []) {
+          const id = npc.definition?.id ?? npc.id;
+          if (!this.relationships.has(id)) continue;
+          const r = this.relationships.get(id);
+          out.push({
+            id,
+            name: npc.definition?.displayName ?? id,
+            note: Game.describeTrust(r.trust ?? 0),
+          });
+        }
+        return out;
+      },
+      vehicles: () =>
+        this.garage.owned().map((v) => ({
+          id: v.id,
+          name: v.kind,
+          // The registry knows one thing about where a vehicle is that the
+          // player cares about from a phone: whether it is in the pound.
+          // Flipped and submerged are recovered by walking up to it.
+          status: v.impounded ? 'in the pound' : `parked · ${v.zone.replace(/_/g, ' ')}`,
+          recoverable: v.impounded,
+        })),
+      recoverVehicle: (id) => this.recoverVehicle(id),
+      openMap: () => {
+        this.hud.openPhone(false);
+        this.hud.openMap(true);
+      },
+      openJournal: () => {
+        this.hud.openPhone(false);
+        this.panels?.openJournal(true, this.director?.journal() ?? []);
+      },
+      money: () => this.economy.wallet.cash,
+      toast: (title, body) => this.hud.showToast(title, body),
+    };
+  }
+
   /** Flying, flattened for the bridge. Never a handle on the director. */
   private flightSnapshot(): import('./TestMode').FlightSnapshotData {
     const f = this.flight;
@@ -2021,6 +2097,7 @@ export class Game {
       const open = !this.panels.journalOpen;
       this.panels.openJournal(open, open ? (this.director?.journal() ?? []) : []);
     }
+    if (this.input.consumePhone()) this.hud.togglePhone();
 
     this.hud.setWallet(this.economy.wallet.cash);
 
