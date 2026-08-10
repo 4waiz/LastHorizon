@@ -218,7 +218,7 @@ describe('migration', () => {
    * `StoryState.restore` reads as "nothing has happened yet" — while
    * everything the player actually earned in Free Roam comes through intact.
    */
-  it('brings a v3 save up to v4 without inventing a story', () => {
+  it('brings a v3 save forward without inventing a story or a record', () => {
     const v3 = {
       ...migrateSave(v1).data!,
       version: 3,
@@ -235,8 +235,12 @@ describe('migration', () => {
     const r = migrateSave(v3);
     expect(r.ok).toBe(true);
     expect(r.from).toBe(3);
-    expect(r.data?.version).toBe(4);
+    // Migrations chain, so a v3 save arrives at the *current* version rather
+    // than stopping at v4. What the step itself is responsible for is not
+    // inventing a story, and that is the assertion below.
+    expect(r.data?.version).toBe(CURRENT_SAVE_VERSION);
     expect(r.data?.story.progress, 'a v3 save had no story to restore').toBeUndefined();
+    expect(r.data?.combat, 'nor a criminal record').toBeUndefined();
 
     // Everything it *did* have survives.
     expect(r.data?.money).toBe(900);

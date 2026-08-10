@@ -57,6 +57,21 @@ export class InputManager {
   private pointerId = -1;
   private lastPointer = { x: 0, y: 0 };
 
+  // -- Phase 9: combat -----------------------------------------------------
+  //
+  // Mouse buttons rather than keys, because the camera is drag-to-look and
+  // aiming while looking is one gesture. Right holds the aim, left pulls the
+  // trigger, and both still drag — which is what you want. `R` was already
+  // taken by vehicle righting since Phase 5, so reload is `G`.
+  private mouseAim = false;
+  private syntheticAim = false;
+  private mouseFire = false;
+  private drawQueued = false;
+  private reloadQueued = false;
+  private shoulderQueued = false;
+  /** 0-based weapon slot from the number row, or -1. */
+  private slotQueued = -1;
+
   /** Virtual joystick state, driven by the on-screen pad. */
   private stick: MoveAxis = { x: 0, y: 0 };
   private stickRunning = false;
@@ -159,6 +174,25 @@ export class InputManager {
       if (code === 'KeyJ') {
         this.journalQueued = true;
         e.preventDefault();
+      }
+      if (code === 'KeyQ') {
+        this.drawQueued = true;
+        e.preventDefault();
+      }
+      if (code === 'KeyG') {
+        this.reloadQueued = true;
+        e.preventDefault();
+      }
+      if (code === 'KeyV') {
+        this.shoulderQueued = true;
+        e.preventDefault();
+      }
+      if (code.startsWith('Digit')) {
+        const n = Number(code.slice(5));
+        if (n >= 1 && n <= 4) {
+          this.slotQueued = n - 1;
+          e.preventDefault();
+        }
       }
       if (code in MOVE_KEYS || code === 'Space') e.preventDefault();
       this.keys.add(code);
@@ -316,6 +350,71 @@ export class InputManager {
     return true;
   }
 
+  // -- Phase 9: combat -----------------------------------------------------
+
+  /**
+   * Aim, held.
+   *
+   * Right mouse or the pad's left trigger. The trigger is free on foot — it is
+   * the brake, and there is nothing to brake — so the standard console mapping
+   * costs nothing.
+   */
+  get aimHeld(): boolean {
+    return this.mouseAim || this.syntheticAim || this.gamepadState.brake > 0.5;
+  }
+
+  /**
+   * Hold or release aim from something that is not a mouse.
+   *
+   * Aiming is a *held* state, and the frame loop rebuilds it from input every
+   * tick — so a test that set it on the weapon system directly had it wiped one
+   * frame later and could never see the camera move. This is the same shape as
+   * `setInteractHeld`: the synthetic source joins the real ones rather than
+   * writing past them.
+   */
+  setAimHeld(down: boolean): void {
+    this.syntheticAim = down;
+  }
+
+  /** Trigger, held. Left mouse or the pad's right trigger. */
+  get fireHeld(): boolean {
+    return this.mouseFire || this.gamepadState.throttle > 0.5;
+  }
+
+  /** True once per press of Q. Draws or puts away. */
+  consumeDraw(): boolean {
+    if (!this.drawQueued) return false;
+    this.drawQueued = false;
+    return true;
+  }
+
+  /** True once per press of G. */
+  consumeReload(): boolean {
+    if (!this.reloadQueued) return false;
+    this.reloadQueued = false;
+    return true;
+  }
+
+  /**
+   * True once per press of V, or of the pad's right stick.
+   *
+   * The stick click is the standard console mapping for this and, unlike the
+   * triggers, it is free on foot *and* while driving — so it does not need the
+   * `aimHeld` guard the rest of the combat bindings live behind.
+   */
+  consumeShoulderSwap(): boolean {
+    const pressed = this.shoulderQueued || this.gamepadState.pressed.has('shoulderSwap');
+    this.shoulderQueued = false;
+    return pressed;
+  }
+
+  /** 0-based weapon slot from the number row, or -1 if none was pressed. */
+  consumeWeaponSlot(): number {
+    const n = this.slotQueued;
+    this.slotQueued = -1;
+    return n;
+  }
+
   queueMap(): void {
     this.mapQueued = true;
   }
@@ -330,6 +429,8 @@ export class InputManager {
   private onPointerDown(e: PointerEvent): void {
     if ((e.target as HTMLElement)?.closest?.('[data-ui]')) return;
     if (e.pointerType === 'touch') return; // touch look is handled by the HUD pad
+    if (e.button === 2) this.mouseAim = true;
+    if (e.button === 0) this.mouseFire = true;
     this.pointerActive = true;
     this.pointerId = e.pointerId;
     this.lastPointer.x = e.clientX;
@@ -346,6 +447,10 @@ export class InputManager {
   }
 
   private onPointerUp(e: PointerEvent): void {
+    // Buttons are released whatever pointer they belong to. A drag that starts
+    // on the canvas and ends over a panel still has to let go of the trigger.
+    if (e.button === 2) this.mouseAim = false;
+    if (e.button === 0) this.mouseFire = false;
     if (e.pointerId !== this.pointerId) return;
     this.pointerActive = false;
     this.pointerId = -1;
@@ -388,6 +493,15 @@ export class InputManager {
     this.flipQueued = false;
     this.mapQueued = false;
     this.interactQueued = false;
+    // A held trigger that was released while the tab was hidden was never
+    // seen, so an unreleased mouse button would keep firing on return.
+    this.mouseAim = false;
+    this.syntheticAim = false;
+    this.mouseFire = false;
+    this.drawQueued = false;
+    this.reloadQueued = false;
+    this.shoulderQueued = false;
+    this.slotQueued = -1;
     this.pointerInteractHeld = false;
     this.gamepadInteractHeld = false;
     this.gamepadRunning = false;

@@ -8,6 +8,7 @@ import type { WalletData } from '../economy/Wallet';
 // that has been in the format since v2 — and the story's own state is a
 // different thing that lives inside it.
 import type { StoryStateData as StoryProgress } from '../story/StoryState';
+import type { CombatSaveData } from '../combat/CombatState';
 
 /**
  * The save format, versioned.
@@ -24,7 +25,7 @@ import type { StoryStateData as StoryProgress } from '../story/StoryState';
  */
 
 /** Bump when the shape changes, and add a migration for the step. */
-export const CURRENT_SAVE_VERSION = 4;
+export const CURRENT_SAVE_VERSION = 5;
 
 /** Bump when *content* changes in a way that invalidates positions or quests. */
 export const CONTENT_VERSION = 1;
@@ -195,6 +196,20 @@ export type DecorSaveData = Record<string, Record<string, string>>;
  * position, the flags and the reel all live inside the `story` block that has
  * been in the format since v2.
  */
+export interface SaveDataV5 extends Omit<SaveDataV4, 'version'> {
+  version: 5;
+  /**
+   * Added in Phase 9, optional like everything since v2.
+   *
+   * Two serialised blobs — what the player carries, and what the police know.
+   * Borrowed from `CombatState` rather than restated, for the reason the
+   * story block gives at length: a restated type drifts from the thing it
+   * describes, and this file has made that mistake twice already.
+   */
+  combat?: CombatSaveData;
+}
+
+/** The shape before weapons and the police. */
 export interface SaveDataV4 extends Omit<SaveDataV3, 'version'> {
   version: 4;
 }
@@ -286,8 +301,8 @@ export interface SaveDataV1 {
   collectibles: string[];
 }
 
-export type AnySaveData = SaveDataV1 | SaveDataV2 | SaveDataV3 | SaveDataV4;
-export type SaveData = SaveDataV4;
+export type AnySaveData = SaveDataV1 | SaveDataV2 | SaveDataV3 | SaveDataV4 | SaveDataV5;
+export type SaveData = SaveDataV5;
 
 export type SaveSlotId = 'slot1' | 'slot2' | 'slot3' | 'autosave';
 export const SAVE_SLOTS: readonly SaveSlotId[] = ['slot1', 'slot2', 'slot3', 'autosave'];
@@ -395,6 +410,7 @@ export function migrateSave(raw: unknown): MigrationResult {
   if (version === 1) data = v1ToV2(data as SaveDataV1);
   if (version <= 2) data = v2ToV3(data as SaveDataV2);
   if (version <= 3) data = v3ToV4(data as SaveDataV3);
+  if (version <= 4) data = v4ToV5(data as SaveDataV4);
 
   const check = validateSave(data);
   if (!check.ok) return { ok: false, from, error: check.errors.join('; ') };
@@ -476,6 +492,19 @@ function v3ToV4(old: SaveDataV3): SaveDataV4 {
   return { ...old, version: 4 };
 }
 
+/**
+ * v4 -> v5: weapons and the police.
+ *
+ * `combat` is left **absent**, not filled in. A v4 save predates firearms, so
+ * the honest reading is that the player owns none and has no record — which is
+ * what `CombatState.restore(undefined)` produces. Inventing an empty record
+ * would say the same thing in more bytes, and inventing anything else would be
+ * making up a criminal history.
+ */
+function v4ToV5(old: SaveDataV4): SaveDataV5 {
+  return { ...old, version: 5 };
+}
+
 /** A fresh save for a new run. `savedAt` is injected so this stays pure. */
 export function newSave(opts: {
   mode: GameMode;
@@ -487,7 +516,7 @@ export function newSave(opts: {
   unlockedZones?: ZoneId[];
 }): SaveData {
   return {
-    version: 4,
+    version: 5,
     contentVersion: CONTENT_VERSION,
     savedAt: opts.savedAt,
     mode: opts.mode,

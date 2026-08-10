@@ -58,6 +58,14 @@ export interface PopulationDeps {
   readonly rig: { scene: THREE.Object3D | null; clips: readonly THREE.AnimationClip[] };
   readonly vehicleModels: Map<string, THREE.Object3D>;
   heightAt(x: number, z: number): number;
+  /**
+   * Told about every resolved witness, if anybody is listening.
+   *
+   * Added in Phase 9 so the crime layer can turn a sighting into a report.
+   * Optional, so the population is still complete and correct without it —
+   * the village worked for three phases before anybody was watching.
+   */
+  onWitness?(w: Witness): void;
   /** Extra centrelines the zone knows about but the manifest does not. */
   readonly extraCentrelines?: readonly Centreline[];
 }
@@ -529,7 +537,15 @@ export class Population {
     }
 
     const witnesses = this.bus.resolve(observers, (from, to) => this.occluded(from, to));
-    for (const w of witnesses) this.applyWitness(w, byId, hour);
+    for (const w of witnesses) {
+      this.applyWitness(w, byId, hour);
+      // Phase 9 listens in. The population still decides what the *witness*
+      // does — flee, watch, call for help — and the listener decides what the
+      // police eventually learn. Keeping those separate is what stops a
+      // reaction and a report from being the same thing: somebody can be
+      // frightened by a gunshot without being able to say who fired it.
+      this.d.onWitness?.(w);
+    }
   }
 
   /**

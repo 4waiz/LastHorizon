@@ -18,7 +18,7 @@ import type { VehicleController } from '../vehicles/VehicleController';
 import type { VehicleId } from '../vehicles/VehicleDefinition';
 import type { VehicleInput } from '../vehicles/VehicleDynamics';
 import type { SeatSpec } from '../vehicles/VehicleDefinition';
-import { VehicleRegistry } from '../vehicles/VehicleRegistry';
+import { IMPOUND_FEE, VehicleRegistry } from '../vehicles/VehicleRegistry';
 // Type-only, so the population system and the ~900 kB of Recast WebAssembly
 // behind it stay out of the app chunk. The implementation arrives through the
 // dynamic import in `ensurePopulation`, once the world is already standing.
@@ -85,6 +85,12 @@ type InteriorApi = typeof import('../world/interiors/InteriorSubsystem');
 import { StoryState } from '../story/StoryState';
 type StoryApi = typeof import('../story/StorySubsystem');
 type StoryDirector = import('../story/StoryDirector').StoryDirector;
+// Eager for the same reason as `StoryState`: a criminal record is in every
+// save, and the HUD needs to know whether to show a Heat readout before the
+// combat chunk exists. Everything that *does* anything is behind the import.
+import { CombatState } from '../combat/CombatState';
+type CombatApi = typeof import('../combat/CombatSubsystem');
+type CombatDirector = import('../combat/CombatDirector').CombatDirector;
 import { setToonPlayer, toonFromImported, updateToonTime } from '../graphics/ToonMaterial';
 import { HUD } from '../ui/HUD';
 import { LoadingScreen } from '../ui/LoadingScreen';
@@ -104,6 +110,28 @@ import { featureFlags } from './FeatureFlags';
  */
 
 const MAX_FRAME_DT = 1 / 15;
+
+// Scratch vectors for the officer sight test. It runs per officer per tick, and
+// allocating a vector there is garbage the collector walks every frame of a
+// pursuit.
+const _officerEye = new THREE.Vector3();
+const _officerDir = new THREE.Vector3();
+
+/**
+ * What a witness would call each thing they notice.
+ *
+ * The join between Phase 6's `PerceptionKind` and Phase 9's `CrimeId`. Kinds
+ * with no entry — a greeting, a collision, somebody driving badly — are
+ * noticed and reacted to but never reported, which is why the table is a map
+ * rather than a cast.
+ */
+const CRIME_BY_PERCEPTION: Readonly<Record<string, import('../crime/CrimeDefinition').CrimeId | undefined>> = {
+  theft: 'theft',
+  weapon_display: 'weapon_display',
+  gunshot: 'weapon_discharge',
+  crime: 'assault',
+};
+
 const DEBUG = import.meta.env.DEV;
 
 /** What the test bridge reports when the population never arrived. */
@@ -370,6 +398,19 @@ export class Game {
   /** Set while a scene or a conversation owns the screen. */
   private storyBlocking = false;
   private lastVehiclePos: THREE.Vector3 | null = null;
+
+  // -- Phase 9: weapons and the police -------------------------------------
+  private readonly combatState = new CombatState();
+  private combatApi: CombatApi | null = null;
+  private combat: CombatDirector | null = null;
+  private combatLoading: Promise<void> | null = null;
+  private weaponModels = new Map<string, THREE.Object3D>();
+  /** The mesh currently in the player's hand, if any. */
+  private heldWeapon: THREE.Object3D | null = null;
+  /** Composure per NPC, 0..1. Full is untouched. Never called health. */
+  private readonly composure = new Map<string, number>();
+  /** The officers, as bodies. Lives in the lazy chunk; see OfficerCorps. */
+  private corps: import('../combat/OfficerCorps').OfficerCorps | null = null;
   /** The last service menu opened, so a second press runs the first offer. */
   private lastServiceId: string | null = null;
 
@@ -520,6 +561,10 @@ export class Game {
         this.hud.setCounter(0, this.village!.collectibles.total);
       },
       onInteract: (down) => this.input.setInteractHeld(down),
+      onCombatOption: (key, value) => {
+        this.settings.setCombatOption(key, value);
+        this.applyCombatSettings();
+      },
       onOutfit: (patch) => {
         // The panel still speaks in colours; Equipment resolves each one back
         // to its catalogue item so the two representations cannot drift.
@@ -776,7 +821,7 @@ export class Game {
     const story = this.storyClock.snapshot();
     const inside = this.interiors?.returnContext ?? null;
     return {
-      version: 4,
+      version: 5,
       contentVersion: CONTENT_VERSION,
       savedAt: 0, // stamped by SaveService
       mode: this.mode,
@@ -829,6 +874,10 @@ export class Game {
           }
         : null,
       economy: this.economy.toJSON(),
+      // Pushed from the live systems first, so a save taken mid-pursuit
+      // records the Heat that is actually on screen rather than the last one
+      // that happened to be mirrored.
+      combat: (this.combat?.capture(), this.combatState.toJSON()),
       tasks: this.tasks.toJSON(),
       decor: Object.fromEntries(
         [...this.decor].map(([id, slots]) => [id, Object.fromEntries(slots)]),
@@ -850,10 +899,15 @@ export class Game {
   private async saveWithRollback(slot: SaveSlotId): Promise<boolean> {
     const before = this.economy.snapshot();
     const storyBefore = this.story.snapshot();
+    const combatBefore = this.combatState.snapshot();
     const result = await this.saves.save(slot, this.captureSave(slot));
     if (!result.ok) {
       this.economy.restore(before);
       this.story.restore(storyBefore);
+      // A fine paid in memory against a write that failed would otherwise be
+      // a fine the next load still owes, with the money already gone.
+      this.combatState.restore(combatBefore);
+      this.combat?.afterRestore();
       this.hud.showToast('Not saved', 'Nothing was lost, but nothing was written.');
     }
     return result.ok;
@@ -890,6 +944,14 @@ export class Game {
     // what a save written before this phase means.
     this.story.restore(data.story.progress);
     this.director?.afterRestore();
+
+    // The same for weapons and the record. `afterRestore` also retires every
+    // officer: a save loaded mid-chase must not come back with a squad still
+    // standing in the street from the run before it.
+    this.combatState.restore(data.combat);
+    this.combat?.afterRestore();
+    this.corps?.clear();
+    this.composure.clear();
 
     // The economy before the inventory, because `Economy.restoreFrom` only
     // touches the wallet, the ledger and the award keys -- the stacks are the
@@ -1636,6 +1698,120 @@ export class Game {
       },
       objectiveLine: () => this.hud.objectiveLine,
       openJournal: (open) => this.panels?.openJournal(open, this.director?.journal() ?? []),
+
+      // ---- Phase 9 ----------------------------------------------------------
+      awaitCombat: async () => {
+        await this.ensureCombat();
+        return this.combatSnapshot();
+      },
+      combatState: () => this.combatSnapshot(),
+      // Refused below 18 by `WeaponSystem.acquire`, exactly as the game path
+      // is. A bridge that could arm a minor would make criterion 1 a property
+      // of the UI rather than of the system.
+      giveWeapon: (id, rounds) =>
+        this.combat?.acquire(id as import('../combat/WeaponDefinition').WeaponId, rounds) ?? false,
+      equipWeapon: (id) =>
+        this.combat?.equip(id as import('../combat/WeaponDefinition').WeaponId) ?? false,
+      holsterWeapon: () => this.combat?.holster(),
+      // Through the *input*, not the weapon. `updateCombat` rebuilds aim from
+      // `input.aimHeld` every frame, so a bridge op that wrote to the weapon
+      // system directly was undone one frame later and could never move the
+      // camera — which is what a browser run found. Holding the aim is what a
+      // player does; this does the same thing.
+      setAiming: (on) => {
+        this.input.setAimHeld(on);
+        // One frame so the caller sees the state it just asked for rather than
+        // the state from before, which is the whole reason this returns a bool.
+        this.update(1 / 60);
+        return this.combat?.weapons.aiming ?? false;
+      },
+      fireWeapon: () => this.combat?.fire().hits ?? [],
+      reloadWeapon: () => this.combat?.reload() ?? false,
+      forceHeat: (level, x, z) => {
+        this.combat?.heat.forceHeat(
+          level,
+          x !== undefined && z !== undefined ? { x, y: 0, z } : null,
+        );
+      },
+      commitCrime: (id, x, z) =>
+        this.combat?.commitCrime(id as import('../crime/CrimeDefinition').CrimeId, {
+          x,
+          y: this.runtime.heightAt(x, z),
+          z,
+        }) ?? 0,
+      reportCrime: (o) => {
+        this.combat?.witnessed({
+          eventId: o.eventId,
+          crime: o.crime as import('../crime/CrimeDefinition').CrimeId,
+          at: { x: o.x, y: 0, z: o.z },
+          observerId: 'test',
+          confidence: o.confidence,
+          identified: o.identified,
+          distanceToHelp: o.distanceToHelp,
+          canReachHelp: o.canReachHelp,
+        });
+      },
+      advanceCombat: (seconds) => {
+        this.combat?.update(seconds);
+        this.corps?.advance(seconds);
+      },
+      officers: () =>
+        this.combat?.police.all.map((u) => {
+          const at = this.corps?.positionOf(u.id) ?? { x: 0, z: 0 };
+          return {
+            id: u.id,
+            state: u.state as string,
+            x: at.x,
+            z: at.z,
+            goalX: u.goal?.x ?? null,
+            goalZ: u.goal?.z ?? null,
+          };
+        }) ?? [],
+      surrender: () => this.combat?.surrender() ?? false,
+      composureOf: (npcId) => this.composure.get(npcId) ?? 1,
+      setCombatOption: (key, value) => {
+        this.settings.setCombatOption(
+          key as 'aimAssist' | 'cameraShake' | 'flashes' | 'combatDifficulty',
+          value,
+        );
+        this.applyCombatSettings();
+      },
+    };
+  }
+
+  /** The combat systems, flattened for the bridge. Never a handle on them. */
+  private combatSnapshot(): import('./TestMode').CombatSnapshot {
+    const c = this.combat;
+    const belief = c?.heat.belief ?? null;
+    const stats = c?.police.stats;
+    return {
+      loaded: c !== null,
+      heat: c?.heat.heat ?? 0,
+      level: this.combatState.heatLevel,
+      wanted: this.combatState.wanted,
+      finesOwed: this.combatState.finesOwed,
+      arrests: c?.heat.arrests ?? 0,
+      belief: belief
+        ? { x: belief.at.x, z: belief.at.z, age: belief.age, source: belief.source }
+        : null,
+      weapon: c?.weapons.equipped.id ?? 'unarmed',
+      stance: c?.weapons.stance ?? 'holstered',
+      rounds: c?.weapons.rounds ?? 0,
+      reserve: c?.weapons.reserve ?? 0,
+      spread: c?.weapons.spread ?? 0,
+      owned: c?.carried ?? [],
+      officers: stats?.officers ?? 0,
+      pursuing: stats?.pursuing ?? 0,
+      searching: stats?.searching ?? 0,
+      reportsDelivered: c?.heat.reportsDelivered ?? 0,
+      duplicatesIgnored: c?.heat.duplicatesIgnored ?? 0,
+      inSafeZone: this.inSafeZone(),
+      options: {
+        aimAssist: this.settings.current.aimAssist,
+        cameraShake: this.settings.current.cameraShake,
+        flashes: this.settings.current.flashes,
+        combatDifficulty: this.settings.current.combatDifficulty,
+      },
     };
   }
 
@@ -1785,6 +1961,12 @@ export class Game {
     this.reportDriving();
     this.updateStory(dt);
 
+    // 7c. weapons and the police. After the story, because a cutscene is a
+    //     safe zone and the weapon has to be put away before anything can be
+    //     fired; before physics, so an officer's position this frame is the
+    //     one the pursuit was computed against.
+    this.updateCombat(dt);
+
     // 8. physics, on its own fixed step
     this.stepPhysics(dt);
 
@@ -1869,6 +2051,7 @@ export class Game {
             rig: { scene: this.playerRig, clips: this.playerClips },
             vehicleModels: this.vehicleModels,
             heightAt: (x, z) => this.runtime.heightAt(x, z),
+            onWitness: (w) => this.onWitness(w),
             extraCentrelines: this.villageCentrelines(),
           },
           this.populationBudget(),
@@ -2695,6 +2878,21 @@ export class Game {
     this.player.setSitting(false);
     this.camera.resetBehind(this.vehicleCameraTarget(), controller.headingYaw());
     this.hud.setPrompt(null);
+
+    // Taking something that is not yours. The one crime the game could already
+    // commit before this phase existed — `VehicleRegistry` has tracked
+    // ownership since Phase 5 and nothing was reading it.
+    //
+    // Loaded lazily and deliberately *after* the player is in the seat: the
+    // import must not delay getting into a car, and a crime that is recorded a
+    // frame late is still recorded.
+    const record = this.garage.get(id);
+    if (record && !record.owned) {
+      const at = controller.position(new THREE.Vector3());
+      void this.ensureCombat().then(() => {
+        this.combat?.commitCrime('vehicle_theft', { x: at.x, y: at.y, z: at.z });
+      });
+    }
     return true;
   }
 
@@ -3313,7 +3511,10 @@ export class Game {
       shower: () => this.shower(),
       saveGame: () => void this.saveWithRollback('autosave'),
       placeDecor: (itemId) => this.placeDecor(itemId),
-      talk: (topic) => this.hud.showToast('Talk', TOPIC_LINES[topic] ?? '…'),
+      talk: (topic) => {
+        const live = this.policeDeskTopic(topic);
+        this.hud.showToast('Talk', live ?? TOPIC_LINES[topic] ?? '…');
+      },
       startTask: (taskId) => this.startTask(taskId),
       treat: () => this.hud.showToast('Clinic', 'Patched up and sent on your way.'),
     };
@@ -3549,6 +3750,583 @@ export class Game {
       if (moved < 30) this.director.reportDriving(moved, controller.def.id);
     }
     this.lastVehiclePos = now;
+  }
+
+  // -------------------------------------------------------------------------
+  // Weapons and the police
+  // -------------------------------------------------------------------------
+
+  /**
+   * Bring the combat systems in, once.
+   *
+   * Lazy for the strongest reason in the project: **every player under
+   * eighteen has no use for any of it**, and most players over eighteen never
+   * draw anything. The 65 kB of weapon models are fetched alongside, on the
+   * same first draw.
+   */
+  private ensureCombat(): Promise<void> {
+    if (this.combat) return Promise.resolve();
+    if (this.combatLoading) return this.combatLoading;
+
+    // A getter's `this` is the object literal, so the corps host closes over
+    // this instead. Same shape as `storyDirectorHost`.
+    const indoors = () => this.indoors;
+
+    this.combatLoading = Promise.all([
+      import('../combat/CombatSubsystem'),
+      this.assetManager?.loadWeapons() ?? Promise.resolve(new Map<string, THREE.Object3D>()),
+    ]).then(([api, models]) => {
+      this.combatApi = api;
+      this.weaponModels = models;
+      // The corps before the director: the host reads `this.corps` and the
+      // director calls the host during construction.
+      this.corps = new api.OfficerCorps({
+        heightAt: (x, z) => this.runtime.heightAt(x, z),
+        occluded: (from, to) => {
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          const dz = to.z - from.z;
+          const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          if (d < 0.5) return false;
+          _officerEye.set(from.x, from.y, from.z);
+          _officerDir.set(dx / d, dy / d, dz / d);
+          // The same collision proxy the player bumps into, shortened so a
+          // wall an officer is leaning on does not blind them — exactly the
+          // `- 0.35` `Population.occluded` uses, for the same reason.
+          return this.runtime.collision.raycast(_officerEye, _officerDir, d - 0.4) !== null;
+        },
+        playerEye: () => {
+          const p = this.player.lookTarget;
+          return { x: p.x, y: p.y, z: p.z };
+        },
+        get playerIndoors() {
+          return indoors();
+        },
+      });
+      this.combat = new api.CombatDirector(this.combatState, this.combatHost());
+      this.applyCombatSettings();
+    });
+    return this.combatLoading;
+  }
+
+  /** Push the accessibility options onto the director. */
+  private applyCombatSettings(): void {
+    const s = this.settings.current;
+    this.combat?.configure({
+      aimAssist: s.aimAssist,
+      cameraShake: s.cameraShake,
+      flashes: s.flashes,
+      difficulty: s.combatDifficulty,
+    });
+  }
+
+  /**
+   * Everything the combat director cannot know on its own.
+   *
+   * The two methods worth reading are `targets` and `police.sees`. Between
+   * them they are the whole of acceptance criterion 2 and the child rule:
+   * nothing can be shot that is not in `targets`, and no officer learns a
+   * position except through `sees`, which asks the same `Perception` layer
+   * every shopkeeper uses.
+   */
+  private combatHost(): import('../combat/CombatDirector').CombatHost {
+    const eye = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+
+    // Live values through arrow functions rather than by aliasing `this`: a
+    // getter's `this` is the literal, not the class. Same shape as
+    // `storyDirectorHost`.
+    const age = () => this.life.ageYears;
+    const safe = () => this.inSafeZone();
+    const driving = () => this.riding !== null;
+
+    return {
+      // -- WeaponHost -------------------------------------------------------
+      get age() {
+        return age();
+      },
+      get inSafeZone() {
+        return safe();
+      },
+      reserveOf: (itemId) => this.inventory.count(itemId),
+      takeAmmo: (itemId, count) => {
+        const have = this.inventory.count(itemId);
+        const take = Math.min(have, count);
+        if (take > 0) this.inventory.remove(itemId, take);
+        return take;
+      },
+      giveAmmo: (itemId, count) => {
+        this.inventory.add(itemId, count);
+      },
+
+      // -- the player -------------------------------------------------------
+      playerEye: () => {
+        const p = this.player.lookTarget;
+        return { x: p.x, y: p.y, z: p.z };
+      },
+      aimDirection: () => {
+        this.camera.camera.getWorldDirection(dir);
+        return { x: dir.x, y: dir.y, z: dir.z };
+      },
+      aimBasis: () => {
+        this.camera.camera.getWorldDirection(dir);
+        up.set(0, 1, 0);
+        right.crossVectors(dir, up).normalize();
+        up.crossVectors(right, dir).normalize();
+        return {
+          right: { x: right.x, y: right.y, z: right.z },
+          up: { x: up.x, y: up.y, z: up.z },
+        };
+      },
+      get playerDriving() {
+        return driving();
+      },
+
+      // -- the world --------------------------------------------------------
+      targets: () => this.shotTargets(),
+      worldDistance: (from, direction, max) => {
+        eye.set(from.x, from.y, from.z);
+        dir.set(direction.x, direction.y, direction.z);
+        const hit = this.runtime.collision.raycast(eye, dir, max);
+        return hit ? hit.distance : Infinity;
+      },
+      applyImpact: (targetId, amount, from) => this.applyComposure(targetId, amount, from),
+      spawnImpact: (at, struckWorld) => this.spawnImpact(at, struckWorld),
+      emitPerception: (kind, at, loudness) => {
+        this.population?.emit(
+          kind as PerceptionKind,
+          new THREE.Vector3(at.x, at.y, at.z),
+          'player',
+          loudness > 0 ? { loudness } : undefined,
+        );
+      },
+
+      // -- police -----------------------------------------------------------
+      police: {
+        sees: (id) => this.corps?.sees(id) ?? null,
+        positionOf: (id) => this.corps?.positionOf(id) ?? { x: 0, y: 0, z: 0 },
+        moveTo: (id, to, speed) => this.corps?.moveTo(id, to, speed),
+        halt: (id) => this.corps?.halt(id),
+        hasVehicle: (id) => this.motorised(id),
+        say: () => {},
+        arrest: () => {},
+        pathFailed: () => false,
+      },
+      spawnOfficer: (near) => this.corps?.spawn(near) ?? null,
+      despawnOfficer: (id) => this.corps?.despawn(id),
+      officerPositions: () => this.corps?.positions() ?? [],
+
+      // -- presentation -----------------------------------------------------
+      toast: (title, body) => this.hud.showToast(title, body),
+      onArrest: () => void this.performArrest(),
+      onRefusal: (reason) => this.reportWeaponRefusal(reason),
+    };
+  }
+
+  /**
+   * The combat frame: input, then systems, then the officers.
+   *
+   * Nothing here loads the combat chunk on its own. It arrives on the first
+   * *deliberate* act — drawing a weapon or picking one up — so a player who
+   * never does either never pays for any of it. Until then this is four
+   * branches that all fall through.
+   */
+  private updateCombat(dt: number): void {
+    // Drawing is the one input that can bring the systems in. Everything else
+    // is ignored until they are here.
+    if (this.input.consumeDraw()) {
+      void this.ensureCombat().then(() => this.toggleDrawn());
+    }
+
+    // The one combat binding that works with nothing loaded, because it is a
+    // camera preference rather than a combat action: a player who has never
+    // held anything may still want the character on the other side of frame.
+    if (this.input.consumeShoulderSwap()) this.camera.swapShoulder();
+
+    const combat = this.combat;
+    if (!combat) {
+      this.camera.setAiming(false);
+      return;
+    }
+
+    const slot = this.input.consumeWeaponSlot();
+    if (slot >= 0) {
+      const id = combat.carried[slot];
+      if (id) combat.equip(id);
+    }
+    if (this.input.consumeReload()) combat.reload();
+
+    // Aiming and firing are ignored while driving, indoors in a safe zone, or
+    // while a panel owns the input — all of which `releaseAll` has already
+    // dealt with by the time this runs.
+    const canAct = this.riding === null && !this.storyBlocking;
+    if (canAct) {
+      combat.weapons.setAiming(this.input.aimHeld);
+      if (this.input.fireHeld && combat.weapons.stance !== 'holstered') combat.fire();
+    } else {
+      combat.weapons.setAiming(false);
+    }
+    // The camera follows the weapon rather than the button, so a request the
+    // system refused — indoors, holstered, mid-reload — does not pull the
+    // camera in anyway. `WeaponSystem.aiming` is the one that was honoured.
+    this.camera.setAiming(combat.weapons.aiming);
+
+    combat.update(dt);
+    this.corps?.advance(dt);
+    this.syncHeldWeapon();
+    this.player.controller.speedScale *= combat.weapons.moveScale;
+
+    this.hud.setHeat(this.combatState.heatLevel);
+    this.hud.setWeaponReadout({
+      rounds: combat.weapons.rounds,
+      reserve: combat.weapons.reserve,
+      drawn: combat.weapons.stance !== 'holstered' && combat.weapons.equipped.conspicuous,
+      aiming: combat.weapons.aiming,
+      spread: combat.weapons.spread,
+    });
+  }
+
+  /**
+   * Somebody noticed something. Decide whether the police ever hear about it.
+   *
+   * This is the join between Phase 6's perception and Phase 9's Heat, and the
+   * four judgements it makes are the whole of "police are not omniscient":
+   *
+   * - **Which crime is it?** Only events the crime table recognises count. A
+   *   greeting or a collision is noticed and forgotten.
+   * - **Could they identify anybody?** Sight above a confidence floor, yes.
+   *   Hearing, never — somebody who heard a bang and saw nothing raises Heat
+   *   but gives the police nowhere to look.
+   * - **Can they reach help?** Indoors at night with the shops shut, no.
+   * - **How far is help?** That is the call delay, and the player's chance to
+   *   leave.
+   */
+  private onWitness(w: import('../npc/Perception').Witness): void {
+    const combat = this.combat;
+    const api = this.combatApi;
+    if (!combat || !api) return;
+
+    const crime = CRIME_BY_PERCEPTION[w.event.kind];
+    if (!crime || !w.event.criminal) return;
+    if (w.event.actor !== 'player') return;
+
+    // The event id the crime was committed under. Without one this witness has
+    // nothing to report *about*, which happens when a perception was raised
+    // outside the crime path — a stray gunshot in a test, say.
+    const eventId = combat.lastEventFor(crime);
+    if (eventId === undefined) return;
+    void api;
+
+    const observer = this.population?.namedById(w.observerId);
+    const help = observer ? this.distanceToHelp(observer.position) : 40;
+
+    combat.witnessed({
+      eventId,
+      crime,
+      at: w.event.at,
+      observerId: w.observerId,
+      confidence: w.perception.confidence,
+      // Seeing it is what lets you say who. Hearing it is not.
+      identified: w.perception.via === 'sight' && w.perception.confidence >= 0.35,
+      distanceToHelp: help,
+      canReachHelp: !!observer,
+    });
+  }
+
+  /**
+   * How far this witness has to go to tell somebody.
+   *
+   * The nearest police station door, or a long way if there is not one in this
+   * zone. It is the only input to the call delay, and it is why a crime in a
+   * back field takes longer to reach anybody than one outside the station.
+   */
+  private distanceToHelp(from: THREE.Vector3): number {
+    const station = this.runtime.interactables.find((i) => i.service === 'police');
+    if (!station) return 60;
+    return Math.min(60, from.distanceTo(station.position));
+  }
+
+  /**
+   * The two desk topics that read live state.
+   *
+   * Handled here rather than in `TOPIC_LINES` for exactly that reason: a
+   * record with nothing on it and a record with four arrests on it are
+   * different sentences, and a canned line would be wrong for one of them.
+   * Returns null for anything else, so the canned lines still work.
+   */
+  private policeDeskTopic(topic: string): string | null {
+    if (topic === 'record') {
+      const owed = this.combatState.finesOwed;
+      const arrests = this.combat?.heat.arrests ?? 0;
+      const offences = this.combat?.heat.record.length ?? 0;
+      if (offences === 0 && owed === 0) return 'Nothing on it. Keep it that way.';
+      const parts: string[] = [];
+      if (offences > 0) parts.push(`${offences} on record`);
+      if (arrests > 0) parts.push(`${arrests} brought in`);
+      if (owed > 0) parts.push(`$${owed} outstanding`);
+      return parts.join(', ') + '.';
+    }
+
+    if (topic === 'impound') {
+      const held = this.garage.all().filter((v) => v.impounded);
+      if (held.length === 0) return 'Nothing of yours in the yard.';
+      if (this.economy.wallet.cash < IMPOUND_FEE) {
+        return `${held.length} in the yard. Release is $${IMPOUND_FEE}, and you are short.`;
+      }
+      const paid = this.economy.pay('fine', IMPOUND_FEE, 'Impound release', Date.now());
+      if (!paid.ok) return 'That did not go through.';
+      // `recover` is the release path: it clears `impounded` and puts the
+      // vehicle back in a garage bay, which is exactly what collecting it from
+      // the yard means. Phase 5 built it and nothing had reason to call it.
+      this.garage.recover(held[0].id, 'impounded');
+      return `Released. $${IMPOUND_FEE}.`;
+    }
+
+    return null;
+  }
+
+  /** Q: draw the last weapon, or put away what is drawn. */
+  private toggleDrawn(): void {
+    const combat = this.combat;
+    if (!combat) return;
+    if (combat.weapons.stance !== 'holstered') {
+      combat.holster();
+      return;
+    }
+    // Prefer the last firearm carried; fall back to hands, which is always
+    // owned and always allowed.
+    const firearm = combat.carried.find((id) => id !== 'unarmed');
+    combat.equip(firearm ?? 'unarmed');
+  }
+
+  /**
+   * Put the right model in the right hand, or none.
+   *
+   * Rebuilt only when the answer changes, not per frame: attaching to a socket
+   * walks the skeleton, and doing that sixty times a second for an object that
+   * has not moved is exactly the kind of cost Phase 6 found in the occlusion
+   * raycast.
+   */
+  private syncHeldWeapon(): void {
+    const combat = this.combat;
+    if (!combat) return;
+
+    const want =
+      combat.weapons.stance !== 'holstered' && combat.weapons.equipped.conspicuous
+        ? combat.weapons.equipped.id
+        : null;
+    const have = this.heldWeapon?.name ?? null;
+    const wantName = want ? want.charAt(0).toUpperCase() + want.slice(1) : null;
+    if (have === wantName) return;
+
+    if (this.heldWeapon) {
+      this.heldWeapon.removeFromParent();
+      this.heldWeapon = null;
+    }
+    if (!wantName) return;
+
+    const proto = this.weaponModels.get(wantName);
+    if (!proto) return;
+    const model = proto.clone(true);
+    model.name = wantName;
+    model.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.castShadow = true;
+        // Weapons can never be occluders: the fade only touches materials made
+        // `fadeable`, and Phase 6 took every character mesh out of that
+        // raycast for the same reason.
+        mesh.raycast = () => undefined;
+      }
+    });
+    if (this.player.attachToSocket('weapon', model)) this.heldWeapon = model;
+  }
+
+  /**
+   * Does this officer have a car?
+   *
+   * The Heat tiers have always declared how many cars each level allows; until
+   * now the host answered "none", so `pursue_vehicle` was a state the system
+   * could reach in a unit test and never in the game. This decides it by the
+   * officer's position in the corps against the current tier — deterministic,
+   * no extra state to keep in sync, and it shrinks as Heat falls.
+   *
+   * Only the speed differs. There is no patrol car in the world: `OfficerCorps`
+   * walks a body toward a goal and that is all it does. An officer chasing a
+   * car at driving speed while visibly on foot is the one place this phase
+   * asks the player to look away, and it is recorded in the Phase 9 report
+   * rather than hidden.
+   */
+  private motorised(officerId: string): boolean {
+    const cars = this.combat?.police.wanted(this.combat.heat.heat).vehicles ?? 0;
+    if (cars <= 0) return false;
+    const index = this.corps?.ids.indexOf(officerId) ?? -1;
+    return index >= 0 && index < cars;
+  }
+
+  /**
+   * Where weapons are refused.
+   *
+   * Every interior except the police station and the garage, plus any moment
+   * the story owns the screen. Deliberately generous: the brief asks for the
+   * family home and ordinary shops, and the honest reading of "ordinary shop"
+   * in a village where every building is a shop is *indoors*.
+   */
+  private inSafeZone(): boolean {
+    if (this.storyBlocking || this.sleeping || this.transitioning) return true;
+    if (!this.indoors) return false;
+    const service = this.interiors?.active?.def.service;
+    return service !== 'police' && service !== 'garage';
+  }
+
+  /**
+   * Everybody who could be hit.
+   *
+   * **Children are excluded here as well as in the NPC catalogue**, which is
+   * two independent refusals for one rule — a catalogue mistake cannot become
+   * a targetable child, because `Ballistics.traceShot` also refuses anything
+   * whose `targetable` is false. `docs/GAME_VISION.md` has said no child NPC
+   * is combat-capable since Phase 6; this is the second lock on that door.
+   */
+  private shotTargets(): import('../combat/Ballistics').ShotTarget[] {
+    const out: import('../combat/Ballistics').ShotTarget[] = [];
+    for (const agent of this.population?.namedList() ?? []) {
+      if (agent.indoors) continue;
+      const def = agent.definition;
+      const child = def?.ageBand === 'child';
+      out.push({
+        id: agent.id,
+        at: { x: agent.position.x, y: agent.position.y + 0.95, z: agent.position.z },
+        radius: 0.42,
+        height: 1.8,
+        targetable: !child,
+      });
+    }
+    for (const id of this.corps?.ids ?? []) {
+      const at = this.corps!.positionOf(id);
+      out.push({
+        id,
+        at: { x: at.x, y: at.y + 0.95, z: at.z },
+        radius: 0.42,
+        height: 1.8,
+        targetable: true,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Take composure off somebody.
+   *
+   * Not damage, and not health. At zero they sit down, stop being a target,
+   * and get back up after a while — or sooner, if somebody takes them to the
+   * clinic. There is no state below zero and nothing to render but a slump.
+   */
+  private applyComposure(targetId: string, amount: number, from: { x: number; y: number; z: number }): void {
+    const now = this.composure.get(targetId) ?? 1;
+    const next = Math.max(0, now - amount);
+    this.composure.set(targetId, next);
+
+    const agent = this.population?.namedById(targetId);
+    if (agent) {
+      agent.react(next <= 0 ? 'flee' : 'watch', new THREE.Vector3(from.x, from.y, from.z));
+    }
+
+    // Attacking an officer is its own offence, and the loudest one there is.
+    if (targetId.startsWith('officer_')) {
+      this.combat?.commitCrime('attack_police', { x: from.x, y: from.y, z: from.z });
+    } else if (next <= 0) {
+      this.combat?.commitCrime('assault', { x: from.x, y: from.y, z: from.z });
+    }
+  }
+
+  /**
+   * A puff where a projectile stopped.
+   *
+   * Deliberately the cheapest thing that reads: a few points on a shared
+   * geometry, faded out by the same `gsap` the collectibles use. No decals, no
+   * blood, no material lookup — the brief asks for "lightweight particles and
+   * decals" and the decals are the part that would have cost a render target.
+   */
+  private spawnImpact(at: { x: number; y: number; z: number }, struckWorld: boolean): void {
+    void struckWorld;
+    const hud = this.hud;
+    // Presentation only, and skipped entirely when the player has asked for no
+    // flashes. Nothing about the simulation depends on it.
+    if (!this.settings.current.flashes) return;
+    hud.pulseImpact(at.x, at.y, at.z);
+  }
+
+  private reportWeaponRefusal(reason: string): void {
+    const lines: Record<string, [string, string]> = {
+      'too-young': ['Not yet', 'That is not something you can carry.'],
+      'not-owned': ['Nothing there', 'You do not have one.'],
+      'safe-zone': ['Not in here', 'Put it away first.'],
+      empty: ['Click', 'Empty.'],
+      'no-reserve': ['Nothing left', 'No rounds to load.'],
+      'magazine-full': ['Full', 'It is already loaded.'],
+      holstered: ['Put away', 'Draw it first.'],
+    };
+    const line = lines[reason];
+    if (line) this.hud.showToast(line[0], line[1]);
+  }
+
+  /**
+   * Taken in.
+   *
+   * The order is deliberate and every step of it is a rule from the brief:
+   * fade first so nothing is seen teleporting, impound the vehicle *before*
+   * the player is moved so it is not left running in the street, advance the
+   * clock, charge the fine, put them outside the station, then save. Saving
+   * last is what makes "an arrest never corrupts a quest or a save" true —
+   * every other mutation has already settled by then.
+   */
+  private async performArrest(): Promise<void> {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    await this.hud.setFade(true, 0.5);
+
+    const riding = this.riding?.id ?? null;
+    if (riding) {
+      await this.exitVehicle();
+      this.garage.impound(riding);
+    }
+
+    // Four hours in a cell, and the day moves on.
+    await this.testAdvanceLife(60 * 4);
+
+    const owed = this.combatState.finesOwed;
+    const paid = Math.min(owed, this.economy.wallet.cash);
+    if (paid > 0) {
+      this.economy.pay('fine', paid, 'Fine', Date.now());
+      this.combat?.settleAtDesk(paid);
+    }
+
+    // Outside the police station, on foot, with nothing drawn.
+    this.combat?.clearEncounter();
+    const station = this.runtime.interactables.find((i) => i.service === 'police');
+    if (station) {
+      this.player.motor.teleport(station.position.x, station.position.y + 0.05, station.position.z + 2);
+      this.camera.resetBehind(this.player.lookTarget, this.player.controller.facing);
+    }
+
+    this.hud.showToast(
+      'Taken in',
+      paid > 0 ? `Four hours, and $${paid} of it settled.` : 'Four hours, and a fine still owing.',
+    );
+
+    await this.hud.setFade(false, 0.5);
+    this.transitioning = false;
+    await this.saveWithRollback('autosave');
+  }
+
+  /** Feed the life clock. Shared by the arrest and the test bridge. */
+  private async testAdvanceLife(seconds: number): Promise<void> {
+    const tick = this.life.advance(seconds);
+    this.needs.advance(tick.consumed);
+    if (tick.birthdayReached !== null) await this.handleBirthday(tick.birthdayReached);
   }
 
   /**

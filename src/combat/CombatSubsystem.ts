@@ -17,6 +17,7 @@
  * of weapon models is lazy for the same reason, in `AssetManager.loadWeapons`.
  */
 
+export { OfficerCorps, MAX_OFFICERS, OFFICER_SIGHT, type CorpsHost } from './OfficerCorps';
 export { CombatDirector, DEFAULT_ACCESSIBILITY, type CombatAccessibility, type CombatHost } from './CombatDirector';
 export { WeaponSystem, type WeaponHost, type WeaponRefusal, type WeaponStance } from './WeaponSystem';
 export { WEAPONS, weaponDef, FIREARM_IDS, AMMO_ITEM_IDS } from './weaponCatalog';

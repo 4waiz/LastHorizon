@@ -42,6 +42,7 @@ const reader = (...pads: Array<Gamepad | null>) => new GamepadReader(() => pads)
 const BUTTON_INDEX: Record<GamepadAction, number> = {
   jump: 0, exitVehicle: 1, interact: 2, horn: 3,
   handbrake: 4, run: 5, pause: 9, cameraReset: 11, lights: 12, flip: 13,
+  shoulderSwap: 14,
 };
 
 function withButton(action: GamepadAction, down = true): Gamepad {

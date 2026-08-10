@@ -3,6 +3,10 @@ import { WeaponSystem, type WeaponHost } from '../src/combat/WeaponSystem';
 import { WEAPONS, weaponDef, FIREARM_IDS, AMMO_ITEM_IDS } from '../src/combat/weaponCatalog';
 import { FIREARM_MIN_AGE, impactAt, validateWeapon } from '../src/combat/WeaponDefinition';
 import { assistDirection, coneDirection, traceShot, type ShotTarget } from '../src/combat/Ballistics';
+import { CombatDirector, type CombatHost } from '../src/combat/CombatDirector';
+import { CombatState } from '../src/combat/CombatState';
+import { CALL_DELAY_NEAR } from '../src/crime/Heat';
+import type { Vec3Like } from '../src/nav/NavTypes';
 import { ITEMS } from '../src/player/Inventory';
 
 /**
@@ -477,5 +481,112 @@ describe('aim assist', () => {
       range: 45,
     });
     expect(d.x).toBeCloseTo(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The director
+// ---------------------------------------------------------------------------
+
+/**
+ * A fake world for `CombatDirector`.
+ *
+ * Only what the director actually reaches for during an arrest. It records
+ * `onArrest` calls because that single callback is where every consequence of
+ * being taken in lives — the fade, the fine, the impound, the lost hours — and
+ * a path that clears Heat without firing it looks identical from the outside
+ * until somebody checks their wallet.
+ */
+class FakeCombatHost extends FakeHost implements CombatHost {
+  readonly arrests: string[] = [];
+  readonly toasts: string[] = [];
+  playerDriving = false;
+
+  playerEye(): Vec3Like {
+    return { x: 0, y: 1.6, z: 0 };
+  }
+  aimDirection(): Vec3Like {
+    return { x: 0, y: 0, z: 1 };
+  }
+  aimBasis() {
+    return { right: { x: 1, y: 0, z: 0 }, up: { x: 0, y: 1, z: 0 } };
+  }
+  targets(): readonly ShotTarget[] {
+    return [];
+  }
+  worldDistance(): number {
+    return Infinity;
+  }
+  applyImpact(): void {}
+  spawnImpact(): void {}
+  emitPerception(): void {}
+  officerPositions(): readonly Vec3Like[] {
+    return [];
+  }
+  spawnOfficer(): string | null {
+    return null;
+  }
+  despawnOfficer(): void {}
+  readonly police = {
+    sees: () => null,
+    positionOf: () => ({ x: 0, y: 0, z: 0 }),
+    moveTo: () => {},
+    halt: () => {},
+    hasVehicle: () => false,
+    say: () => {},
+    arrest: () => {},
+    pathFailed: () => false,
+    playerDriving: false,
+  };
+  toast(title: string): void {
+    this.toasts.push(title);
+  }
+  onArrest(officerId: string): void {
+    this.arrests.push(officerId);
+  }
+  onRefusal(): void {}
+}
+
+function directed(): { host: FakeCombatHost; dir: CombatDirector } {
+  const host = new FakeCombatHost();
+  host.ammo.set('ammo_pistol', 60);
+  const dir = new CombatDirector(new CombatState(), host);
+  return { host, dir };
+}
+
+describe('surrender', () => {
+  it('is refused when there is nothing to surrender to', () => {
+    const { host, dir } = directed();
+    expect(dir.surrender()).toBe(false);
+    expect(host.arrests).toEqual([]);
+  });
+
+  it('hands the player to the host, exactly as being caught does', () => {
+    const { host, dir } = directed();
+    const eventId = dir.commitCrime('theft', { x: 4, y: 0, z: 4 });
+    dir.heat.report({
+      eventId,
+      crime: 'theft',
+      at: { x: 4, y: 0, z: 4 },
+      observerId: 'v_ines',
+      confidence: 1,
+      identified: true,
+      distanceToHelp: 0,
+      canReachHelp: true,
+    });
+    // The report is queued, not applied: somebody has to reach help first.
+    dir.update(CALL_DELAY_NEAR + 1);
+    expect(dir.heat.wanted).toBe(true);
+
+    expect(dir.surrender()).toBe(true);
+
+    // The consequences are the host's, and it must be told. Clearing Heat
+    // without this call makes giving up free: no fine, no hours, and the
+    // getaway car left running in the street.
+    expect(host.arrests).toEqual(['surrender']);
+    expect(dir.heat.wanted).toBe(false);
+    expect(dir.heat.arrests).toBe(1);
+    // The debt is not cleared by giving up — it is settled at the desk.
+    expect(dir.heat.finesOwed).toBeGreaterThan(0);
   });
 });

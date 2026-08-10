@@ -29,7 +29,15 @@ const BUNDLE_BUDGETS = [
   // and the wiring in `Game` that reports world events into it. Two things
   // were moved out rather than absorbed -- the whole story catalogue, and the
   // three Story-Mode panels, which were in `HUD` until this budget said no.
-  { prefix: 'index-', ext: '.js', maxKB: 375, label: 'app chunk' },
+  //
+  // Phase 9: 375 -> 390. 13.8 kB eager against 27 kB of lazy systems and 65 kB
+  // of lazy models. What stayed is the wiring and nothing else — input polling,
+  // the save capture, the four HUD mirrors, the host the director reads, and
+  // the test-bridge operations. All of it is reached from the first frame by
+  // definition. `OfficerCorps` was moved out of `Game` into the lazy chunk when
+  // this budget first said no, and it recovered 0.5 kB, which is the honest
+  // measure of how little was left to move.
+  { prefix: 'index-', ext: '.js', maxKB: 390, label: 'app chunk' },
   { prefix: 'gsap-', ext: '.js', maxKB: 90, label: 'gsap chunk' },
   { prefix: 'bvh-', ext: '.js', maxKB: 75, label: 'bvh chunk' },
   { prefix: 'index-', ext: '.css', maxKB: 24, label: 'stylesheet' },
@@ -83,6 +91,25 @@ const LAZY_CHUNK_PREFIXES = [
   // quest positions -- is in `StoryState`, which is eager and stays in the app
   // chunk for exactly that reason.
   'StorySubsystem-',
+  // Phase 9. Weapons, ballistics, crimes, Heat and the police AI. Reached the
+  // first time a weapon is drawn or a vehicle is taken, which for every player
+  // under eighteen and most players over it is never.
+  'CombatSubsystem-',
+  // Four chunks this list should always have had.
+  //
+  // All four are `await import(...)` in `Game` and Vite emits them separately
+  // for exactly that reason, but only two of the five vehicle chunks were ever
+  // listed, so the other three plus the proving ground were counted as startup
+  // weight they are not. `TestRoad` is the plainest case: it is behind a
+  // feature flag, so a normal player cannot reach it at all.
+  //
+  // 7.5 kB, found when the JS total came within 0.1 kB of its limit. The rule
+  // here is to move something before raising a ceiling, and this is better
+  // than moving something — it is a measurement that was wrong.
+  'TestRoad-',
+  'VehicleControls-',
+  'VehicleAccess-',
+  'VehicleDynamics-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));
@@ -124,6 +151,19 @@ const LAZY_ASSET_FILES = [
  * What a player downloads before they can play: everything in dist/ except the
  * lazy chunks. This is the number that governs how long the loading screen
  * lasts, and it is the one that must not creep.
+ *
+ * Unchanged since Phase 8, and Phase 9 nearly missed that it could be.
+ *
+ * The first attempt raised it to 4,220 to carry the app chunk's own raise
+ * through. Then the four unlisted lazy chunks above were found — 7.5 kB that
+ * were never startup weight — and the real number came out at 4,198.7, under
+ * the limit that had just been declared too small. The raise was reverted.
+ *
+ * Worth stating plainly anyway: this is the *fourth* phase in a row to cost
+ * the loading screen about 15 kB while adding a whole system, and the reason
+ * is always the same — the system goes lazy and its wiring cannot. A phase
+ * that wants another 20 kB should be asked what it has moved first, and
+ * whether the gate is measuring what it thinks it is.
  */
 const INITIAL_LOAD_MAX_KB = 4200;
 

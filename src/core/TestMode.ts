@@ -149,6 +149,82 @@ export interface TestSurface {
   exportReel(): Promise<number>;
   objectiveLine(): string | null;
   openJournal(open: boolean): void;
+
+  // ---- Phase 9: weapons and the police -------------------------------------
+  //
+  // `?e2e=1` only, like everything else here. `forceHeat` and `giveWeapon` are
+  // the two that could skip content, and both are refused by the adult gate
+  // exactly as the game path is — a bridge that could arm a fifteen-year-old
+  // would make acceptance criterion 1 a property of the UI rather than of the
+  // system.
+  awaitCombat(): Promise<CombatSnapshot>;
+  combatState(): CombatSnapshot;
+  giveWeapon(id: string, rounds: number): boolean;
+  equipWeapon(id: string): boolean;
+  holsterWeapon(): void;
+  setAiming(on: boolean): boolean;
+  /** Pull the trigger once. Returns the ids of anybody hit. */
+  fireWeapon(): readonly string[];
+  reloadWeapon(): boolean;
+  /** Force a Heat level and, optionally, a belief. Debug only. */
+  forceHeat(level: number, x?: number, z?: number): void;
+  commitCrime(id: string, x: number, z: number): number;
+  /** Raise a witness report directly, bypassing perception. */
+  reportCrime(opts: {
+    eventId: number;
+    crime: string;
+    x: number;
+    z: number;
+    confidence: number;
+    identified: boolean;
+    distanceToHelp: number;
+    canReachHelp: boolean;
+  }): void;
+  advanceCombat(seconds: number): void;
+  officers(): readonly OfficerSnapshotData[];
+  surrender(): boolean;
+  /** Composure of a named NPC, 0..1. Never called health. */
+  composureOf(npcId: string): number;
+  setCombatOption(key: string, value: number | boolean): void;
+}
+
+export interface CombatSnapshot {
+  loaded: boolean;
+  heat: number;
+  level: number;
+  wanted: boolean;
+  finesOwed: number;
+  arrests: number;
+  /** Where the police think the player is, or null. Never where they are. */
+  belief: { x: number; z: number; age: number; source: string } | null;
+  weapon: string;
+  stance: string;
+  rounds: number;
+  reserve: number;
+  spread: number;
+  owned: readonly string[];
+  officers: number;
+  pursuing: number;
+  searching: number;
+  reportsDelivered: number;
+  duplicatesIgnored: number;
+  inSafeZone: boolean;
+  /** The four accessibility options, read back through `Settings`. */
+  options: {
+    aimAssist: number;
+    cameraShake: number;
+    flashes: boolean;
+    combatDifficulty: number;
+  };
+}
+
+export interface OfficerSnapshotData {
+  id: string;
+  state: string;
+  x: number;
+  z: number;
+  goalX: number | null;
+  goalZ: number | null;
 }
 
 export interface StorySnapshot {
@@ -657,6 +733,40 @@ export interface LHTestBridge {
   /** The HUD's one objective line, as rendered. */
   getObjectiveLine(): string | null;
   openJournal(open: boolean): void;
+
+  // ---- Phase 9 --------------------------------------------------------------
+  /** Pull the combat chunk in. Drawing a weapon does this itself in play. */
+  awaitCombat(): Promise<CombatSnapshot>;
+  getCombat(): CombatSnapshot;
+  /** Refused below 18, exactly as the game path is. */
+  giveWeapon(id: string, rounds?: number): boolean;
+  equipWeapon(id: string): boolean;
+  holsterWeapon(): void;
+  setAiming(on: boolean): boolean;
+  /** Pull the trigger once. Returns the ids of anybody hit. */
+  fireWeapon(): readonly string[];
+  reloadWeapon(): boolean;
+  /** Force a Heat level and, optionally, a belief. Debug only. */
+  forceHeat(level: number, x?: number, z?: number): void;
+  /** Commit a crime at a place. Returns its event id. */
+  commitCrime(id: string, x: number, z: number): number;
+  /** Raise a witness report directly, bypassing perception. */
+  reportCrime(opts: {
+    eventId: number;
+    crime: string;
+    x: number;
+    z: number;
+    confidence: number;
+    identified: boolean;
+    distanceToHelp: number;
+    canReachHelp: boolean;
+  }): void;
+  /** Feed the Heat and police clocks without waiting. */
+  advanceCombat(seconds: number): void;
+  getOfficers(): readonly OfficerSnapshotData[];
+  surrender(): boolean;
+  getComposure(npcId: string): number;
+  setCombatOption(key: string, value: number | boolean): void;
 }
 
 declare global {
@@ -1123,6 +1233,56 @@ export function installTestBridge(surface: TestSurface): LHTestBridge {
 
     openJournal(open: boolean): void {
       surface.openJournal(open);
+    },
+
+    // ---- Phase 9 ------------------------------------------------------------
+    awaitCombat(): Promise<CombatSnapshot> {
+      return surface.awaitCombat();
+    },
+    getCombat(): CombatSnapshot {
+      return surface.combatState();
+    },
+    giveWeapon(id: string, rounds = 0): boolean {
+      return surface.giveWeapon(id, rounds);
+    },
+    equipWeapon(id: string): boolean {
+      return surface.equipWeapon(id);
+    },
+    holsterWeapon(): void {
+      surface.holsterWeapon();
+    },
+    setAiming(on: boolean): boolean {
+      return surface.setAiming(on);
+    },
+    fireWeapon(): readonly string[] {
+      return surface.fireWeapon();
+    },
+    reloadWeapon(): boolean {
+      return surface.reloadWeapon();
+    },
+    forceHeat(level: number, x?: number, z?: number): void {
+      surface.forceHeat(level, x, z);
+    },
+    commitCrime(id: string, x: number, z: number): number {
+      return surface.commitCrime(id, x, z);
+    },
+    reportCrime(opts: Parameters<TestSurface['reportCrime']>[0]): void {
+      surface.reportCrime(opts);
+    },
+    advanceCombat(seconds: number): void {
+      surface.advanceCombat(seconds);
+    },
+    getOfficers(): readonly OfficerSnapshotData[] {
+      return surface.officers();
+    },
+    surrender(): boolean {
+      return surface.surrender();
+    },
+    getComposure(npcId: string): number {
+      return surface.composureOf(npcId);
+    },
+    setCombatOption(key: string, value: number | boolean): void {
+      surface.setCombatOption(key, value);
     },
   };
 

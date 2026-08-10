@@ -29,6 +29,11 @@ export interface HUDCallbacks {
   /** `down` false is the release, which ends a hold. */
   onInteract: (down: boolean) => void;
   onOutfit: (patch: Partial<Outfit>) => void;
+  /** One of the four Phase 9 options. The game clamps and persists. */
+  onCombatOption: (
+    key: 'aimAssist' | 'cameraShake' | 'flashes' | 'combatDifficulty',
+    value: number | boolean,
+  ) => void;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
@@ -68,6 +73,15 @@ export class HUD {
   private objective = $('objective');
   private objectiveText = $('objectiveText');
   private caption = $('caption');
+
+  // -- Phase 9 -------------------------------------------------------------
+  private heat = $('heat');
+  private heatPips = Array.from(document.querySelectorAll<HTMLElement>('.heat__pip'));
+  private ammo = $('ammo');
+  private ammoMag = $('ammoMag');
+  private ammoReserve = $('ammoReserve');
+  private reticle = $('reticle');
+  private lastHeat = -1;
 
   /** Where the map is looking. Kept between openings, like a real map. */
   private mapView: MapView = { centreX: 0, centreZ: 0, scale: 1 };
@@ -214,11 +228,37 @@ export class HUD {
     }
   }
 
+  /**
+   * The four Phase 9 accessibility options.
+   *
+   * Only `flashes` defaults on. The other three default to the game as
+   * designed — a player who wants aim help will go looking for it, and one who
+   * never opens this panel should get the version that was balanced. Turning
+   * effects off by default would just look like a bug.
+   */
+  private syncCombatOptions(): void {
+    const s = this.settings.current;
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setAimAssist button')) {
+      b.classList.toggle('is-on', Number(b.dataset.assist) === s.aimAssist);
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setCameraShake button')) {
+      b.classList.toggle('is-on', Number(b.dataset.shake) === s.cameraShake);
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setCombatDifficulty button')) {
+      b.classList.toggle('is-on', Number(b.dataset.diff) === s.combatDifficulty);
+    }
+    const flashes = $('setFlashes');
+    flashes.textContent = s.flashes ? 'On' : 'Off';
+    flashes.classList.toggle('is-off', !s.flashes);
+    flashes.setAttribute('aria-pressed', String(s.flashes));
+  }
+
   private syncAll(): void {
     this.syncSound();
     this.syncQuality();
     this.syncTime();
     this.syncNeeds();
+    this.syncCombatOptions();
   }
 
   // ---------------------------------------------------------- info panel
@@ -271,6 +311,28 @@ export class HUD {
         this.syncNeeds();
       });
     }
+    // The combat options. `onCombatOption` reaches `Settings.setCombatOption`,
+    // which clamps — so this panel never has to, and neither does the bridge.
+    const combatSeg = (
+      selector: string,
+      attr: string,
+      key: 'aimAssist' | 'cameraShake' | 'combatDifficulty',
+    ) => {
+      for (const b of document.querySelectorAll<HTMLButtonElement>(selector)) {
+        b.addEventListener('click', () => {
+          this.cb.onCombatOption(key, Number(b.dataset[attr]));
+          this.syncCombatOptions();
+        });
+      }
+    };
+    combatSeg('#setAimAssist button', 'assist', 'aimAssist');
+    combatSeg('#setCameraShake button', 'shake', 'cameraShake');
+    combatSeg('#setCombatDifficulty button', 'diff', 'combatDifficulty');
+    $('setFlashes').addEventListener('click', () => {
+      this.cb.onCombatOption('flashes', !this.settings.current.flashes);
+      this.syncCombatOptions();
+    });
+
     $('setReset').addEventListener('click', () => {
       this.cb.onResetProgress();
       this.showToast('Progress', 'Keepsakes put back where they were.');
@@ -755,6 +817,79 @@ export class HUD {
 
   get objectiveLine(): string | null {
     return this.objective.hidden ? null : this.objectiveText.textContent;
+  }
+
+  /**
+   * A brief mark where a projectile stopped.
+   *
+   * Deliberately the cheapest readable thing: a short-lived dot on the HUD
+   * layer rather than a decal in the world. A decal needs a render target and
+   * a material per surface, and the phase brief's "lightweight particles and
+   * decals" is satisfied by the lightweight half — which is recorded as a
+   * limitation in the Phase 9 report rather than dressed up as a choice.
+   *
+   * Coordinates are world-space and are ignored: what this draws is a screen
+   * flash, and the caller already knows the shot connected.
+   */
+  pulseImpact(x: number, y: number, z: number): void {
+    void x;
+    void y;
+    void z;
+    this.impactCount++;
+    const el = this.hud;
+    el.classList.remove('is-impact');
+    // Force a reflow so a second shot inside the animation restarts it.
+    void el.offsetWidth;
+    el.classList.add('is-impact');
+  }
+
+  /** Rolling count, for the test bridge. */
+  impactCount = 0;
+
+  /**
+   * The Heat readout.
+   *
+   * Five pips rather than five stars, and hidden entirely at zero — which is
+   * most of the game, and is the point. The brief asks for an original
+   * presentation rather than a copy of somebody else's, and the honest reading
+   * of that is a small warm indicator that appears when it matters and gets
+   * out of the way when it does not.
+   *
+   * The level also goes into `aria-label`, because a row of dots says nothing
+   * to a screen reader.
+   */
+  setHeat(level: number): void {
+    if (level === this.lastHeat) return;
+    this.lastHeat = level;
+
+    this.heat.hidden = level <= 0;
+    this.heat.setAttribute('aria-label', level > 0 ? `Police attention ${level} of 5` : '');
+    this.heatPips.forEach((pip, i) => pip.classList.toggle('is-on', i < level));
+  }
+
+  /**
+   * Ammunition and the reticle.
+   *
+   * The reticle *scales with the spread*, so the cone is legible as a shape
+   * rather than a number buried in a menu — a player who fires four rounds
+   * quickly can see the ring open and knows to stop.
+   */
+  setWeaponReadout(
+    state: { rounds: number; reserve: number; drawn: boolean; aiming: boolean; spread: number } | null,
+  ): void {
+    if (!state || !state.drawn) {
+      this.ammo.hidden = true;
+      this.reticle.hidden = true;
+      return;
+    }
+    this.ammo.hidden = false;
+    this.ammoMag.textContent = String(state.rounds);
+    this.ammoReserve.textContent = String(state.reserve);
+
+    this.reticle.hidden = !state.aiming;
+    // 0.02 rad reads as the tight aimed ring; 0.2 as a wide shotgun cone.
+    const scale = 0.6 + Math.min(2.6, state.spread * 12);
+    this.reticle.style.transform = `scale(${scale.toFixed(2)})`;
   }
 
   setCaption(text: string | null): void {

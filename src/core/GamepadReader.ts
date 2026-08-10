@@ -27,6 +27,7 @@ export type GamepadAction =
   | 'lights'
   | 'handbrake'
   | 'cameraReset'
+  | 'shoulderSwap'
   | 'flip'
   | 'pause';
 
@@ -47,6 +48,9 @@ const BUTTON: Record<GamepadAction, number> = {
   cameraReset: 11,  // right stick click
   lights: 12,       // d-pad up
   flip: 13,         // d-pad down
+  // Phase 9. D-pad left is free on foot and in a car; right-stick click is
+  // already camera reset and stealing it would break a Phase 2 binding.
+  shoulderSwap: 14, // d-pad left
   pause: 9,         // start
 };
 

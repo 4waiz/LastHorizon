@@ -68,6 +68,11 @@ export const ITEM_PRICES: readonly PriceEntry[] = [
 
   // Adult stage only. The gate lives in the service, not the price table.
   { id: 'ammo_pistol', buy: 2, sell: 1 },
+  // Shells cost more per shot and there are fewer of them; carbine rounds are
+  // cheap by the round and expensive by the magazine, which is what makes the
+  // carbine the weapon you think twice about emptying.
+  { id: 'ammo_shotgun', buy: 4, sell: 1 },
+  { id: 'ammo_carbine', buy: 3, sell: 1 },
 
   // Trade goods.
   { id: 'repair_kit', buy: 45, sell: 18 },
@@ -123,7 +128,7 @@ export const SHOP_STOCK: Readonly<Partial<Record<ServiceType, readonly string[]>
     'hat_pale',
   ],
   garage: ['repair_kit'],
-  police: ['ammo_pistol'],
+  police: ['ammo_pistol', 'ammo_shotgun', 'ammo_carbine'],
   apartment: ['decor_plant', 'decor_shelf', 'decor_table'],
 };
 

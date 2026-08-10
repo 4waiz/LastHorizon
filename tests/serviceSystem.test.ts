@@ -89,10 +89,13 @@ describe('service catalogue', () => {
   });
 
   it('age-gates ammunition and nothing else', () => {
+    // Three ammunition types since Phase 9, one per firearm. The assertion is
+    // still "and nothing else": if any other offer ever grows a `minAge`, this
+    // fails and somebody has to justify it.
     const gated = SERVICES.flatMap((s) =>
       s.offers.filter((o) => o.minAge !== undefined).map((o) => o.id),
     );
-    expect(gated).toEqual(['buy_ammo']);
+    expect(gated.sort()).toEqual(['buy_ammo', 'buy_ammo_carbine', 'buy_ammo_shotgun']);
   });
 });
 

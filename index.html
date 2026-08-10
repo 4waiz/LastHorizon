@@ -198,6 +198,20 @@
            with sound off and by a screen reader. -->
       <div id="caption" class="caption" role="status" aria-live="polite" hidden></div>
 
+      <!-- Heat: five pips, not five stars. Hidden at zero, which is most of
+           the game. `aria-label` carries the level for a screen reader, since
+           the pips themselves say nothing. -->
+      <div id="heat" class="heat" role="status" aria-live="polite" hidden>
+        <i class="heat__pip"></i><i class="heat__pip"></i><i class="heat__pip"></i>
+        <i class="heat__pip"></i><i class="heat__pip"></i>
+      </div>
+
+      <!-- Ammunition and the reticle, only while something is drawn. -->
+      <div id="ammo" class="ammo" hidden>
+        <span id="ammoMag">0</span><span class="ammo__reserve"> / <span id="ammoReserve">0</span></span>
+      </div>
+      <div id="reticle" class="reticle" aria-hidden="true" hidden></div>
+
       <!-- Vehicle dashboard. Hidden until the player is actually driving. -->
       <div id="dash" class="dash" hidden>
         <div class="dash__speed"><span id="dashSpeed">0 km/h</span><span id="dashGear" class="dash__gear">N</span></div>
@@ -347,6 +361,18 @@
             <dt>Scroll</dt><dd>Zoom</dd>
             <dt>Esc</dt><dd>Close this panel</dd>
           </dl>
+          <p class="settings__note">
+            The rest of these only do anything once you are grown and carrying something.
+            You never have to.
+          </p>
+          <dl class="keys">
+            <dt>Q</dt><dd>Take it out, or put it away</dd>
+            <dt>1 – 4</dt><dd>Choose what you are holding</dd>
+            <dt>Right mouse</dt><dd>Aim</dd>
+            <dt>Left mouse</dt><dd>Use it</dd>
+            <dt>G</dt><dd>Reload</dd>
+            <dt>V</dt><dd>Switch shoulder</dd>
+          </dl>
           <p class="keys__touch">The radar, bottom left, rotates with you: roads in grey, houses in clay, keepsakes still to find as pulsing gold.</p>
           <dl class="keys" hidden>
           </dl>
@@ -404,6 +430,42 @@
               <button type="button" data-decay="0">Off</button>
               <button type="button" data-decay="0.5">Half</button>
               <button type="button" data-decay="1">Normal</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings">
+          <h3>Action</h3>
+          <p class="settings__note">
+            None of this is needed to finish the story — you can play the whole thing without
+            ever picking anything up. These settings are here for when you do.
+          </p>
+          <div class="row">
+            <span>Aim help</span>
+            <div class="seg" id="setAimAssist">
+              <button type="button" data-assist="0">Off</button>
+              <button type="button" data-assist="0.5">Some</button>
+              <button type="button" data-assist="1">Full</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>Camera shake</span>
+            <div class="seg" id="setCameraShake">
+              <button type="button" data-shake="0">Off</button>
+              <button type="button" data-shake="0.5">Half</button>
+              <button type="button" data-shake="1">Normal</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>Flashes</span>
+            <button id="setFlashes" class="pill" type="button">On</button>
+          </div>
+          <div class="row">
+            <span>Difficulty</span>
+            <div class="seg" id="setCombatDifficulty">
+              <button type="button" data-diff="0.5">Gentle</button>
+              <button type="button" data-diff="1">Normal</button>
+              <button type="button" data-diff="1.5">Hard</button>
             </div>
           </div>
         </section>

@@ -231,10 +231,15 @@ Collapsing the two into one number would mean either failing the build over
 bytes nobody waits for, or raising the total until it stopped protecting load
 time at all. So there are now two:
 
-| Measure | Covers | Phase 4 | Phase 5 | Budget |
+| Measure | Covers | Phase 4 | Phase 5 | Budget *then* |
 | --- | --- | --- | --- | --- |
 | **initial load** | everything except lazy chunks | 3,913.6 kB | 3,917.1 kB | ≤ 4,200 kB |
 | **shipped total** | everything in `dist/` | 3,913.6 kB | 6,104.2 kB | ≤ 6,600 kB |
+
+*The budget column above is the limit as it stood in Phase 5, not today's —
+this table is the record of why the split exists. `check-budgets.mjs` is the
+only authority on the current numbers, and the per-phase sections below track
+each change.*
 
 **Adding a physics engine cost the loading screen 3.5 kB.** That is the whole
 point of the split, and it is the number to watch: if `initial load` starts
@@ -370,6 +375,57 @@ was: the next phase has to come back and argue here rather than absorb it.
 
 **The stylesheet moved 17.9 kB → 20.8 kB** against a 24 kB budget, for the
 objective line, captions, the dialogue bar, the journal and the reel panel.
+
+### Raised again in Phase 9 — and the gate turned out to be the problem
+
+| | Phase 8 | Phase 9 | Budget |
+| --- | --- | --- | --- |
+| app chunk | 363.2 kB | **379.7 kB** | ≤ 390 kB *(was 375)* |
+| `CombatSubsystem-*.js` *(lazy)* | — | **28.3 kB** | — |
+| `weapons.glb` *(lazy)* | — | **65.1 kB** | — |
+| JS total (startup) | 1,103.6 kB | **1,112.4 kB** | ≤ 1,120 kB |
+| **initial load** | **4,186.5 kB** | **4,199.4 kB** | **≤ 4,200 kB** |
+| shipped total | 7,473.8 kB | **7,588.2 kB** | ≤ 7,600 kB |
+
+The split is the one this document has drawn three times now. Eager: the two
+serialised blobs and four HUD mirrors in `CombatState`, because `SaveService`
+has to carry a criminal record whether or not anybody has drawn a weapon.
+Lazy: the weapon catalogue, the state machine, the ballistics, the crime table,
+the Heat model, the police AI and the director.
+
+`OfficerCorps` was extracted from `Game` mid-phase *because this gate said no*,
+which is the same story as `StoryPanels` in Phase 8 and `MapPanel` in Phase 6.
+It recovered 0.5 kB and left a better boundary: `Game` owns the frame loop and
+has no business holding a list of policemen.
+
+**Then `initial load` was raised to 4,220 kB, and then un-raised.** With that
+change in, `JS total` came within **0.1 kB** of its own limit — and rather than
+raise a third number, the question became what was being counted. Four chunks
+were counted as startup weight that never were:
+
+| Chunk | Why it is not startup |
+| --- | --- |
+| `TestRoad-` | Behind a feature flag; unreachable in normal play |
+| `VehicleControls-` | `await import(...)` from `Game`, alongside `VehicleController-` |
+| `VehicleAccess-` | Same |
+| `VehicleDynamics-` | Same |
+
+Only two of the five vehicle chunks had ever been listed in
+`LAZY_CHUNK_PREFIXES`. Adding the four recovered **7.5 kB**, which put
+`initial load` at 4,199.4 kB — under the limit that had just been declared too
+small. The raise was reverted, and **the app chunk is the only budget Phase 9
+moved.**
+
+**That leaves 0.6 kB of headroom on `initial load`, and it is a tripwire.** The
+next commit adding eager code fails this gate and will look like its own fault.
+Phase 9 already spent the easy answer — the 7.5 kB above was a measurement
+error, not slack, and there is no second one waiting. Phase 10's first budget
+question is *what moves out of the app chunk*, not what number goes up.
+
+That is now three phases running where the gate itself needed the fix
+(`StorySubsystem-` in Phase 8, `CombatSubsystem-` and these four in Phase 9).
+The lesson is worth keeping: a gate that under-reports headroom pushes you
+toward exactly the wrong decision, so check the measurement before the ceiling.
 
 ### GLB models, 1,200 kB to 1,360 kB, in Phase 7
 

@@ -6,6 +6,7 @@ import { PlayerAnimator } from './PlayerAnimator';
 import { PlayerController } from './PlayerController';
 import { PlayerState, PlayerStateMachine } from './PlayerStateMachine';
 import { AgeAppearance } from './AgeAppearance';
+import { findBone, socket, type SocketId } from './Sockets';
 import { makeToon, toonFromImported } from '../graphics/ToonMaterial';
 
 /** Wardrobe slots, keyed by the Blender material name they came from. */
@@ -37,6 +38,32 @@ const OUTFIT_KEY = 'lasthorizon.outfit.v1';
 /** The playable character: model, rig, motor, controller and state machine. */
 export class Player {
   readonly root = new THREE.Group();
+
+  /**
+   * Hang something off a named socket.
+   *
+   * Phase 4 declared the socket table and the two weapon entries with
+   * `availableFrom: 9`; this is Phase 9 spending them. Attaching to the *bone*
+   * rather than to the root is what makes a held object follow the animation
+   * without any per-frame work — the mixer already moves the bone, and the
+   * child comes with it.
+   *
+   * Returns false when the rig is the capsule fallback, which has no bones. A
+   * player with no model still plays; they just cannot be seen holding
+   * anything.
+   */
+  attachToSocket(id: SocketId, object: THREE.Object3D): boolean {
+    if (!this.model) return false;
+    const def = socket(id);
+    if (!def) return false;
+    const bone = findBone(this.model, def.bone);
+    if (!bone) return false;
+
+    object.position.set(def.position.x, def.position.y, def.position.z);
+    object.rotation.set(def.rotation.x, def.rotation.y, def.rotation.z);
+    bone.add(object);
+    return true;
+  }
   readonly motor: CharacterMotor;
   readonly controller: PlayerController;
   readonly states = new PlayerStateMachine();

@@ -119,6 +119,24 @@ export interface SettingsState {
    */
   needsEnabled: Record<NeedId, boolean>;
   needsDecay: number;
+
+  /**
+   * Combat accessibility, added in Phase 9.
+   *
+   * All four default to the *least* assistance and the most restraint, which
+   * is the right default for options that change how a game plays: a player
+   * who wants aim assist will find it, and a player who never opens settings
+   * gets the game as designed. `flashes` is the exception and defaults on,
+   * because turning effects off by default would look like a bug.
+   *
+   * `combatDifficulty` scales incoming composure loss. It is deliberately the
+   * only one of the four that touches the simulation rather than the
+   * presentation.
+   */
+  aimAssist: number;
+  cameraShake: number;
+  flashes: boolean;
+  combatDifficulty: number;
 }
 
 const STORAGE_KEY = 'lasthorizon.settings.v1';
@@ -140,6 +158,10 @@ export class Settings {
       timeMode: 'cycle',
       needsEnabled: { hunger: true, energy: true, cleanliness: true, mood: true },
       needsDecay: 1,
+      aimAssist: 0,
+      cameraShake: 1,
+      flashes: true,
+      combatDifficulty: 1,
       ...defaults,
       ...this.read(),
     };
@@ -172,6 +194,21 @@ export class Settings {
       if (typeof parsed.needsDecay === 'number' && Number.isFinite(parsed.needsDecay)) {
         out.needsDecay = Math.min(2, Math.max(0, parsed.needsDecay));
       }
+
+      // Combat accessibility, clamped on the way in for the same reason
+      // `needsDecay` is: storage is the least trustworthy input this class
+      // takes, and an aim assist of 40 would be a cheat rather than a setting.
+      const num = (v: unknown, lo: number, hi: number): number | null =>
+        typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : null;
+
+      const assist = num(parsed.aimAssist, 0, 1);
+      if (assist !== null) out.aimAssist = assist;
+      const shake = num(parsed.cameraShake, 0, 1);
+      if (shake !== null) out.cameraShake = shake;
+      const difficulty = num(parsed.combatDifficulty, 0.25, 2);
+      if (difficulty !== null) out.combatDifficulty = difficulty;
+      if (typeof parsed.flashes === 'boolean') out.flashes = parsed.flashes;
+
       return out;
     } catch {
       return {};
@@ -241,6 +278,28 @@ export class Settings {
     const v = Math.min(2, Math.max(0, scale));
     if (this.state.needsDecay === v) return;
     this.state.needsDecay = v;
+    this.emit();
+  }
+
+  /**
+   * The four combat options, in one setter.
+   *
+   * One method rather than four because they are set together — from a
+   * settings panel, and from the test bridge — and because each is clamped on
+   * the way in, which is the only behaviour worth having four copies of.
+   */
+  setCombatOption(key: 'aimAssist' | 'cameraShake' | 'flashes' | 'combatDifficulty', value: number | boolean): void {
+    if (key === 'flashes') {
+      if (typeof value !== 'boolean' || this.state.flashes === value) return;
+      this.state.flashes = value;
+    } else {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return;
+      const [lo, hi] = key === 'combatDifficulty' ? [0.25, 2] : [0, 1];
+      const next = Math.min(hi, Math.max(lo, value));
+      if (this.state[key] === next) return;
+      this.state[key] = next;
+    }
+    this.persist();
     this.emit();
   }
 

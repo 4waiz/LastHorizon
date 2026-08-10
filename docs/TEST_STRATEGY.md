@@ -33,9 +33,19 @@ would be backwards.
 
 ## Current state
 
-**1,251 tests across 49 files**, all passing. Measured 2026-08-10, after
-Phase 8. The Phase 7 figure was 1,169 across 46; the three files below marked
-*Phase 8* account for the difference, along with two save-migration tests.
+**1,363 tests across 53 files**, all passing. Measured 2026-08-10, after
+Phase 9. The Phase 8 figure was 1,355 across 52 — itself already ahead of the
+1,251 this section used to claim, which is why it is re-measured rather than
+incremented every time.
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `combat.test.ts` | 46 | *Phase 9.* The weapon catalogue and its validator, the adult gate on acquire *and* on restore, equipping and safe zones, firing, spread and bloom decay, interrupted reloads, save round trip, ballistics and aim assist, and `CombatDirector.surrender` handing the player to the host |
+| `heat.test.ts` | 35 | *Phase 9.* The 0–5 scale, one belief with three writers, queued witness reports and call delay, evidence lifetimes, decay on a cold trail, the arrest record and fines |
+| `police.test.ts` | 25 | *Phase 9.* The nine-state unit, tiers by Heat, warn-before-pursue, no arrest through a car window, stale beliefs, search and disengage |
+| `aimCamera.test.ts` | 6 | *Phase 9.* The aim boom in and out, shoulder swap both ways, slower look while aiming, pitch still clamped, and that entering aim is a blend rather than a cut |
+
+The Phase 8 additions:
 
 | File | Tests | Covers |
 | --- | --- | --- |
@@ -204,6 +214,36 @@ is actually on the live bones rather than the proportions that were requested.
 Reporting the input would have answered the wrong question and passed regardless
 of whether anything reached the skeleton.
 
+**Check the state again one frame later.** Phase 9's version of the rule above,
+and it found two bugs of the same shape.
+
+`CombatDirector.surrender()` cleared Heat, retired the officers and incremented
+the arrest count, but never called `host.onArrest` — so the fine, the four
+hours, the impound and the move to the station all silently did not happen.
+Read immediately, three of the four things you would assert were true.
+
+`setAiming(true)` set the flag on `WeaponSystem`, and the frame loop rebuilt
+aim from `input.aimHeld` on the next tick and wiped it:
+
+```
+setAiming(true)  -> "aiming"
+settle(1)        -> "drawn"
+```
+
+**A write that the frame loop owns is not a state change, it is a suggestion.**
+If the value is rebuilt every frame from something else, a test must either
+drive that something else — `setAimHeld` on the input, the way a player holds
+the button — or settle a frame and look again. Asserting on the return value of
+the call that set it proves only that the setter ran.
+
+**A synchronous loop cannot observe async work.** `performArrest` awaits a CSS
+fade backed by a real `setTimeout`. A tight `for` loop calling `settle()` inside
+one `page.evaluate` never unwinds the JS stack, so no timer fires, so none of
+the arrest happens — and the failure looks *exactly* like a missing feature: no
+money taken, no time passed, nobody moved. `settleThrough()` in
+`tests/e2e/combat.spec.ts` drives frames and yields between them. Anything
+waiting on a fade, a save or a zone load needs it.
+
 ## Determinism
 
 Reproducible browser capture requires pinning:
@@ -231,18 +271,32 @@ improvement to the bridge.
 
 ## Gaps — honest list
 
-- **No Playwright run on Firefox or WebKit yet.** The config exists; only
-  Chromium has been exercised.
+*Reviewed in Phase 9. Two entries below had gone stale — the gamepad one was
+claiming a whole subsystem did not exist — which is the exact failure mode
+`CLAUDE.md`'s prime rule is about. Re-read this list against the repository
+before trusting it.*
+
+- **Firefox and WebKit are run in CI only.** All three browsers are in the
+  matrix and CI exercises all three; the development machine has only Chromium
+  installed, so local runs prove one.
 - **No visual-diff assertion.** Baseline screenshots are captured and compared
   by eye plus renderer counters. A pixel-diff with tolerance is not yet wired.
+  Phase 9's aim camera was checked this way — the reticle sitting on the back
+  of the character's head was caught by looking at a screenshot, and nothing
+  else would have caught it.
 - **No mobile-hardware measurement.** The mobile frame budget is unverified.
-- **No touch or gamepad coverage.** The touch interact button now reports press
-  *and* release, so hold-to-act works there, but neither path is tested. There
-  is no gamepad code in the repository at all — the phase brief listed it, and
-  claiming coverage would be claiming a feature.
+- **No touch coverage.** The touch interact button reports press *and* release,
+  so hold-to-act works there, but the path is not tested.
+  *(Gamepad is covered: `GamepadReader` has unit tests and `gamepad.spec.ts`
+  runs 8 browser scenarios. The claim that "there is no gamepad code in the
+  repository at all" was true when written and has been wrong since Phase 5.)*
 - **Hold-to-act is unit-tested but unused in game.** `holdSeconds` works and has
   tests; every fixed interactable in the village is a press.
 - **No soak test in CI.** The 160 s memory soak was run by hand.
+- **The suite is sharded because it stopped fitting in one process.** At 111
+  scenarios a single serial run crashed the browser at the tail. CI runs
+  `--shard=n/2`. That is a mitigation, not a fix: the underlying cost is one
+  WebGL context per scenario and nothing reclaims them mid-run.
 
 ## Running
 

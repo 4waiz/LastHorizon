@@ -258,10 +258,26 @@ export class CombatDirector {
     if (!def) return 0;
 
     const eventId = this.heat.commit(id, at);
+    this.lastEvents.set(id, eventId);
     this.host.emitPerception(def.perceivedAs, at, 0);
     this.syncMirrors();
     return eventId;
   }
+
+  /**
+   * The most recent event of a kind, so a witness can report against it.
+   *
+   * Kept here rather than in the host because *every* crime goes through
+   * `commitCrime`, including the two this class raises itself when a shot is
+   * fired. A copy of this map in `Game` would miss those, and the witnesses to
+   * a gunshot would have nothing to report about — which is a silent failure
+   * that looks exactly like the police being fair.
+   */
+  lastEventFor(id: CrimeId): number | undefined {
+    return this.lastEvents.get(id);
+  }
+
+  private readonly lastEvents = new Map<CrimeId, number>();
 
   /** Somebody saw a crime and is going for help. */
   witnessed(opts: {
@@ -413,13 +429,25 @@ export class CombatDirector {
     this.host.onArrest(officerId);
   }
 
-  /** Give up voluntarily. Cheaper than being caught, and always available. */
+  /**
+   * Give up voluntarily. Always available, and the non-lethal way out of any
+   * encounter — including the one an officer on foot can never end himself,
+   * where the player is behind the wheel.
+   *
+   * It ends in the same place being caught does. An earlier version stopped at
+   * clearing Heat, which made surrendering strictly better than being taken in
+   * along every axis at once: no fine, no hours lost, and the getaway car left
+   * running in the street with nobody in it. A Playwright run through the
+   * impound yard is what found it. The player still gains by choosing it —
+   * they choose *when*, and they are not chased — but they are taken in.
+   */
   surrender(): boolean {
     if (!this.heat.wanted) return false;
     this.heat.settle({ clearFines: false, arrested: true });
     this.retireAll();
     this.syncMirrors();
     this.host.toast('You stopped', 'They take it from here.');
+    this.host.onArrest('surrender');
     return true;
   }
 

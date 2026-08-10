@@ -122,8 +122,16 @@ export const SERVICES: readonly ServiceDef[] = [
     offers: [
       { id: 'pay_fine', label: 'Pay your fine', effect: { kind: 'fee', fee: 'fine' } },
       { id: 'report', label: 'Speak to the sergeant', effect: { kind: 'talk', topic: 'police' } },
-      // The only age-gated offer in the game. Phase 9 owns what it is for.
+      // Phase 9. Viewing the record and releasing an impounded vehicle are both
+      // `talk` effects rather than new kinds: the host answers them by reading
+      // state it already has, and adding an effect kind for "tell me a number"
+      // would be a schema change for a sentence.
+      { id: 'view_record', label: 'Ask about your record', effect: { kind: 'talk', topic: 'record' } },
+      { id: 'release_vehicle', label: 'Release an impounded vehicle', effect: { kind: 'talk', topic: 'impound' } },
+      // Ammunition, age-gated. The three types match the three firearms.
       { id: 'buy_ammo', label: 'Range ammunition', effect: { kind: 'buy', itemId: 'ammo_pistol', count: 10 }, minAge: 18 },
+      { id: 'buy_ammo_shotgun', label: 'Shotgun shells', effect: { kind: 'buy', itemId: 'ammo_shotgun', count: 6 }, minAge: 18 },
+      { id: 'buy_ammo_carbine', label: 'Carbine rounds', effect: { kind: 'buy', itemId: 'ammo_carbine', count: 20 }, minAge: 18 },
     ],
   },
   {

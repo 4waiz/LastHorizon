@@ -20,8 +20,15 @@ export default defineConfig({
    *
    * A retry does not paper over a real defect — that fails twice — but it does
    * stop the suite reporting the machine's mood as a regression. The Phase 6
-   * report has the evidence, and the honest reading is that a run of this size
-   * needs splitting rather than tolerating; until then, retry.
+   * report has the evidence.
+   *
+   * **Phase 9 update: the split this comment kept postponing has happened.** At
+   * 111 scenarios the retry stopped being enough — the browser *process* died
+   * at the tail of a 24-minute run (`Target crashed`, exit 0xC0000409) and a
+   * retry cannot survive that, because there is nothing left to retry in. CI
+   * now runs `--shard=n/2` across two runners per browser; see the `e2e` job in
+   * `.github/workflows/ci.yml`. Locally, run the halves separately if the whole
+   * suite dies at the end — every one of those tests passes in isolation.
    */
   retries: 1,
   workers: 1,
