@@ -31,6 +31,7 @@ Sizes below were re-measured in Phase 7. Two rows were wrong before that:
 | `nature.glb` | 112.1 kB | `build_nature.py` | TreeBig/Med/Small, Palm, DeadTree, BushA/B, RockA/B/C, GrassTuft |
 | `props.glb` | 100.0 kB | `build_props.py` | Streetlight, UtilityPole, Barrier, Bench, Mailbox, FenceSection, RetainWall, Culvert, Bollard |
 | `collectibles.glb` | 38.3 kB | `build_collectibles.py` | PaperPlane, ToyBoat, WindChime, OldCamera, StarOrnament |
+| `weapons.glb` | 65.1 kB | `build_weapons.py` | Pistol, Shotgun, Carbine — 356 tris total. **Fetched on demand**, not at startup |
 
 - **Author:** Awaiz Ahmed / Kanban Studios
 - **License:** proprietary, all rights reserved
@@ -82,6 +83,25 @@ None bundled. The UI uses system font stacks, and so does the Life Reel card —
 it is drawn on a canvas with `system-ui`, which is why the exported PNG differs
 slightly between machines and why its test asserts layout anchors rather than a
 pixel hash.
+
+## Weapons: original, and deliberately not realistic
+
+`weapons.glb` is three silhouettes built from boxes and cylinders by
+`scripts/blender/build_weapons.py`. **No downloaded model, no brand, no
+marking, and no proportion traced from a real product.** They are chunky and
+toy-like on purpose — a photoreal weapon would be the one object in this game
+that breaks the tone the vision document spends six pillars establishing.
+
+Materials are three existing palette keys (`metal_grey`, `pole_dark`,
+`wood_plank`), so the pack adds no new shader programs.
+
+The phase rule this satisfies is explicit in the brief: *"Do not use downloaded
+real-brand weapon models or branding."* Regenerate them the same way as
+everything else:
+
+```bash
+blender --background --python scripts/blender/build_weapons.py
+```
 
 ## Phase 8 added no assets
 

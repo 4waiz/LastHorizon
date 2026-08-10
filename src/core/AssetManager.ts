@@ -79,6 +79,21 @@ export class AssetManager {
     return this.kitPromise;
   }
 
+  /**
+   * Fetch the three firearms.
+   *
+   * Lazy for the same reason as the kit, and more strongly: a player who never
+   * commits a crime, and every player under eighteen, has no use for it at all.
+   * 65 kB is small, but `initial load` had 13 kB of headroom after Phase 8 —
+   * putting this on the startup path would have failed the gate outright.
+   */
+  loadWeapons(): Promise<Map<string, THREE.Object3D>> {
+    this.weaponsPromise ??= this.fetchPack('weapons.glb');
+    return this.weaponsPromise;
+  }
+
+  private weaponsPromise: Promise<Map<string, THREE.Object3D>> | null = null;
+
   private async fetchPack(file: string): Promise<Map<string, THREE.Object3D>> {
     const out = new Map<string, THREE.Object3D>();
     try {

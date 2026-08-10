@@ -113,7 +113,12 @@ const ASSET_BUDGETS = [
  * These still count toward `GLB models` and `shipped total`. They are excluded
  * only from `initial load`.
  */
-const LAZY_ASSET_FILES = ['interior_kit.glb'];
+const LAZY_ASSET_FILES = [
+  'interior_kit.glb',
+  // Phase 9. Fetched the first time a weapon is drawn, which for most players
+  // and every player under eighteen is never.
+  'weapons.glb',
+];
 
 /**
  * What a player downloads before they can play: everything in dist/ except the
