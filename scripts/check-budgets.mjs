@@ -125,7 +125,10 @@ const ASSET_BUDGETS = [
   // Raised 1200 -> 1360 in Phase 7 for `interior_kit.glb` (138.6 kB). The
   // number that governs how long a player waits — `initial load` — did not
   // move, because the kit is in LAZY_ASSET_FILES below.
-  { path: 'assets/models', maxKB: 1360, label: 'GLB models' },
+  // Phase 10: 1360 -> 1420 for `aircraft.glb` (58.5 kB: a light aircraft and a
+  // motorboat, each with two LODs and a collision proxy, 852 triangles all in).
+  // It is in LAZY_ASSET_FILES, so `initial load` did not move.
+  { path: 'assets/models', maxKB: 1420, label: 'GLB models' },
   { path: 'assets/audio', maxKB: 2000, label: 'audio' },
 ];
 
@@ -145,6 +148,10 @@ const LAZY_ASSET_FILES = [
   // Phase 9. Fetched the first time a weapon is drawn, which for most players
   // and every player under eighteen is never.
   'weapons.glb',
+  // Phase 10. The aeroplane and the boat, fetched when the player first walks
+  // up to one at the airstrip or the dock. A player who never leaves the
+  // village never pays for either.
+  'aircraft.glb',
 ];
 
 /**
@@ -183,8 +190,18 @@ const INITIAL_LOAD_MAX_KB = 4200;
  * words — and it is the one thing this phase was for. `initial load` again did
  * not move by anything like as much: 4,168.7 kB to 4,186 kB, still 14 kB inside
  * its own limit, because a Free Roam player never fetches any of it.
+ *
+ * Raised 7,600 -> 7,700 in Phase 10 for `aircraft.glb` (58.5 kB). Same trade
+ * as the interior kit and the weapons: it is in LAZY_ASSET_FILES, so a player
+ * who never walks up to the aeroplane or the boat never fetches it, and
+ * `initial load` did not move at all.
+ *
+ * A note for whoever raises this next: `initial load` is now within a kilobyte
+ * of its own ceiling. Adding *art* is cheap here because art can be lazy.
+ * Adding eager *code* is not, and the flight systems are lazy for exactly that
+ * reason — see `LAZY_CHUNK_PREFIXES`.
  */
-const SHIPPED_TOTAL_MAX_KB = 7600;
+const SHIPPED_TOTAL_MAX_KB = 7700;
 
 /** Dev-only surfaces that must never reach production output. */
 const FORBIDDEN_IN_DIST = ['__shot', '__cap.js', 'lh-shot-sink'];

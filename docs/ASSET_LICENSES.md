@@ -32,6 +32,7 @@ Sizes below were re-measured in Phase 7. Two rows were wrong before that:
 | `props.glb` | 100.0 kB | `build_props.py` | Streetlight, UtilityPole, Barrier, Bench, Mailbox, FenceSection, RetainWall, Culvert, Bollard |
 | `collectibles.glb` | 38.3 kB | `build_collectibles.py` | PaperPlane, ToyBoat, WindChime, OldCamera, StarOrnament |
 | `weapons.glb` | 65.1 kB | `build_weapons.py` | Pistol, Shotgun, Carbine — 356 tris total. **Fetched on demand**, not at startup |
+| `aircraft.glb` | 58.5 kB | `build_aircraft.py` | Plane + Boat, each with LOD1/LOD2/Col, plus a detached Plane_Prop — 852 tris total. **Fetched on demand**, not at startup |
 
 - **Author:** Awaiz Ahmed / Kanban Studios
 - **License:** proprietary, all rights reserved
@@ -83,6 +84,33 @@ None bundled. The UI uses system font stacks, and so does the Life Reel card —
 it is drawn on a canvas with `system-ui`, which is why the exported PNG differs
 slightly between machines and why its test asserts layout anchors rather than a
 pixel hash.
+
+## The aeroplane and the boat: generic, and generic on purpose
+
+`aircraft.glb` is a high-wing single and a small open motorboat, both built
+from boxes, wedges and cylinders by `scripts/blender/build_aircraft.py`. **No
+downloaded model, no manufacturer, no type designation, no registration marks
+and no livery belonging to anybody.** The aeroplane is the shape a child draws
+when you say "small aeroplane", which is the correct amount of specificity for
+a toon village and also the correct amount of legal distance from any real
+airframe.
+
+Two details worth recording because they are conventions rather than art:
+
+- `Plane_Prop` is exported as its **own object**, not baked into an animation
+  clip. A propeller turns at a couple of thousand rpm; the runtime spins one
+  node and that reads correctly at any frame rate, for the price of a
+  quaternion.
+- `Plane_Col` is **two boxes**, a fuselage and a wing plank, rather than the
+  single hull every other vehicle gets. One hull around a 9.4 m span would
+  collide with hangars the aeroplane visibly clears; one hull around the
+  fuselage alone would let a wingtip pass through a tree.
+
+Regenerate the same way as the rest:
+
+```
+blender --background --python scripts/blender/build_aircraft.py
+```
 
 ## Weapons: original, and deliberately not realistic
 
