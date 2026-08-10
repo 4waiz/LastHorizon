@@ -166,27 +166,65 @@ list rather than a re-read:
 
 | Budget | Phase 10 | Phase 11 | Limit |
 | --- | --- | --- | --- |
-| stylesheet | 22.1 kB | **23.9 kB** | 24 kB |
-| initial load | 4,207.4 kB | **4,211.1 kB** | 4,215 kB |
-| app chunk | 387.2 kB | 387.2 kB | 390 kB |
+| stylesheet | 22.1 kB | **20.1 kB** | 24 kB |
+| initial load | 4,207.4 kB | **4,207.6 kB** | 4,215 kB |
+| app chunk | 387.2 kB | **387.4 kB** | 390 kB |
+| JS total | 1,116 kB | **1,120.1 kB** | 1,140 kB *(was 1,120)* |
 
-**The stylesheet has 0.1 kB left and this is a hard blocker for the rest of the
-phase.** The token block and the credits styling cost 1.8 kB. Eighteen screens
-will not fit in 100 bytes.
+**The stylesheet blocker is cleared: panel CSS now travels with its chunk.**
 
-Two options, and the next session has to pick one before writing any CSS:
+At the end of the first slice the eager sheet was at 23.9 / 24 kB with
+seventeen screens still to write, and the report put two options to the next
+session: raise the ceiling, or split. **Split was chosen**, because it is what
+Phases 6-10 did every other time and because the seam already existed —
+`MapPanel` has been a lazy *module* since Phase 6 and `StoryPanels` since Phase
+8, and both had left their stylesheets behind in the eager sheet.
 
-1. **Raise the budget** to ~40 kB. Defensible — a full interface is genuinely
-   more CSS than a HUD — but it is the fourth budget raise in three phases.
-2. **Split the stylesheet**, so panel CSS loads with the lazy chunk that owns
-   the panel. `MapPanel` and `StoryPanels` are already lazy *modules* whose CSS
-   is still eager, so the precedent and the seam both already exist.
+| | Before | After |
+| --- | --- | --- |
+| eager `index-*.css` | 23.9 kB | **20.1 kB** |
+| `MapPanel-*.css` (lazy) | — | 1.58 kB |
+| `StorySubsystem-*.css` (lazy) | — | 2.27 kB |
+| `initial load` | 4,211.1 kB | **4,207.6 kB** |
 
-Option 2 is the one consistent with everything Phases 6–10 did. It is also more
-work, which is exactly why it should be decided before the CSS is written and
-not after.
+Vite emits each as a sibling chunk and resolves the module's dynamic import
+only once its stylesheet has landed. The shared modal shell stays eager — the
+settings and wardrobe panels use it — so only the `--reel` variant travels.
 
-`initial load` sits at 4,211.1 / 4,215 kB — 3.9 kB. The Phase 10 note about
+### The split introduced a bug, and the split is what found it
+
+`HUD.openMap` unhid the panel and *then* started the download. That was free
+for five phases because the CSS was already there; the moment it was not, it
+became a flash of unstyled markup for as long as the fetch took — a raw white
+block over the world.
+
+Fixed by revealing the panel inside the `.then()`. That needed a second piece
+of state: `mapOpen` answers "is it on screen" (the Escape handler and the pause
+rules want that one) and `mapWanted` answers "has the player asked for it",
+which can now be true while the chunk is still in flight.
+
+Verified rather than assumed: a `requestAnimationFrame` sampler counted every
+frame between the keypress and the panel appearing — **0 unstyled frames out of
+37 visible**. The story panels needed no equivalent fix, because their open
+methods live *on* the lazily-loaded module, so the CSS is guaranteed present by
+construction.
+
+### One budget was raised, and only after checking
+
+`JS total` failed at 1,120.1 / 1,120 — the ~100 bytes the fix added. Raised to
+1,140, after two checks that came back empty:
+
+- **Is a lazy chunk unlisted again?** No. Every chunk in `dist/assets` is
+  correctly classified, which is a first after three phases of finding one.
+- **Can GSAP (68 kB) move?** No. It is imported by `LoadingScreen.ts`, which is
+  the first thing on screen.
+
+The eager JavaScript is three.js (609 kB), the app (387 kB), GSAP (68 kB) and
+three-mesh-bvh (55 kB) — 1,119 kB. This budget has been sitting *on* its
+ceiling since Phase 8 and would have failed on the next byte from any phase.
+Meanwhile the number that governs how long a player waits went **down**.
+
+`initial load` sits at 4,207.6 / 4,215 kB — 7.4 kB, up from 3.9. The Phase 10 note about
 moving the task catalogue behind a lookup is now blocking rather than advisory.
 
 ---

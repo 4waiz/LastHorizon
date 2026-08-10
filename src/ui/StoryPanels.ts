@@ -1,3 +1,8 @@
+// Dialogue, journal and Life Reel styling, loaded with the panels it
+// describes. Phase 8 moved this module out of `HUD` and left its CSS in the
+// eager sheet; this finishes the job.
+import './StoryPanels.css';
+
 /**
  * The three panels only Story Mode ever opens.
  *

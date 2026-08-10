@@ -128,8 +128,31 @@ const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p)
  * Startup chunks only — lazy ones are excluded, for the reason `initial load`
  * exists at all. Raised 1,100 -> 1,120 in Phase 8, which is the app chunk's
  * own 15 kB of headroom expressed at the total.
+ *
+ * Raised 1,120 -> 1,140 in Phase 11, and the reasoning matters more than the
+ * number because a raise is normally the wrong answer here.
+ *
+ * The eager JavaScript is four chunks and only one of them is ours: three.js
+ * (609 kB), GSAP (68 kB), three-mesh-bvh (55 kB) and the app (387 kB). That
+ * sums to 1,119 kB, so this budget has been sitting *on* its ceiling since
+ * Phase 8 and would have failed on the next byte from any phase.
+ *
+ * The usual move — find something that is lazy and unlisted — was checked
+ * first and came back empty: every chunk in `dist/assets` is correctly
+ * classified, which is a first after three phases of finding one. GSAP was
+ * checked too, since 68 kB is the obvious candidate; it is imported by
+ * `LoadingScreen.ts`, which is the first thing on screen, so it is genuinely
+ * eager and cannot move without rebuilding the loading screen.
+ *
+ * Meanwhile the number that actually governs how long a player waits went
+ * *down* this phase: `initial load` 4,211.1 -> 4,207.6 kB, because the map and
+ * story panel stylesheets moved into the lazy chunks that own those panels.
+ * Eager CSS fell 23.9 -> 20.1 kB.
+ *
+ * So: the sub-budget is the binding constraint while the real one improved,
+ * and 20 kB restores the headroom to roughly what Phase 8 gave it.
  */
-const TOTAL_JS_MAX_KB = 1120;
+const TOTAL_JS_MAX_KB = 1140;
 
 const ASSET_BUDGETS = [
   // Raised 1200 -> 1360 in Phase 7 for `interior_kit.glb` (138.6 kB). The

@@ -1,3 +1,7 @@
+// The panel's own stylesheet. Vite emits it as a sibling chunk and resolves
+// this module's dynamic import only once the CSS has landed, so the panel
+// cannot be shown unstyled.
+import './MapPanel.css';
 import type { MinimapData, MinimapPoint } from './Minimap';
 
 /**

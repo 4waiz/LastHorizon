@@ -163,6 +163,21 @@ test bridge; the six new activities have no jobs board.
 5. **Panels that are only reachable behind a keypress live in a lazy chunk** —
    `MapPanel` since Phase 6, `StoryPanels` since Phase 8, both moved out of
    `HUD` when the app-chunk budget refused them.
-6. **The stylesheet has a budget** (24 kB) and it is currently at 23.9 kB.
-   Anything substantial from §4 needs that raised with a reason, or something
-   moved.
+6. **A lazy panel's CSS travels with its code.** Phase 11 moved `.mapp*` into
+   `src/ui/MapPanel.css` and `.dlg*`/`.journal*`/`.reel*` into
+   `src/ui/StoryPanels.css`, each imported by the module that owns it. Vite
+   emits them as sibling chunks and resolves the dynamic import only once the
+   stylesheet has landed. Eager CSS fell 23.9 → 20.1 kB.
+
+   The shared shell — `.modal`, `.modal__card`, `.modal__close` — stays eager,
+   because the settings and wardrobe panels use it too. Only the `--reel`
+   variant travels.
+
+   **A panel whose CSS is lazy must not be revealed before its chunk lands.**
+   `HUD.openMap` used to unhide first and fetch afterwards, which was free
+   while the CSS was eager and became a flash of unstyled markup the moment it
+   was not. It now reveals in the `.then()`, and `mapWanted` tracks the
+   player's intent separately from `mapOpen`, which tracks what is on screen.
+7. **The stylesheet has a budget** (24 kB), currently at 20.1 kB after the
+   split. Anything substantial from §4 should follow the same pattern rather
+   than growing the eager sheet.

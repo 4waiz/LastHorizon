@@ -626,26 +626,59 @@ export class HUD {
     this.mapFitted = false;
   }
 
+  /**
+   * Whether the map is *on screen*.
+   *
+   * Distinct from `mapWanted` below, and the distinction only started to
+   * matter when the panel's stylesheet moved into its own chunk: between the
+   * player pressing M and the chunk landing, the map is wanted but not yet
+   * shown. Anything asking "is it visible" — the Escape handler, the pause
+   * rules — wants this one.
+   */
   get mapOpen(): boolean {
     // `hidden` is `boolean | 'until-found'` in the current DOM types, so it
     // needs coercing rather than passing straight through.
     return this.mapPanel.hidden === false;
   }
 
+  /** Whether the player has asked for it, which may be ahead of the download. */
+  private mapWanted = false;
+
   toggleMap(): void {
-    this.openMap(!this.mapOpen);
+    this.openMap(!this.mapWanted);
   }
 
+  /**
+   * Show or hide the map.
+   *
+   * **The panel is revealed only once its chunk has landed**, and that ordering
+   * is load-bearing since Phase 11 moved the map's stylesheet into the same
+   * chunk as its code. The previous version unhid the panel first and fetched
+   * afterwards, which was free when the CSS was eager and became a flash of
+   * unstyled markup the moment it was not — a raw white block for as long as
+   * the download took.
+   *
+   * Closing stays synchronous. Nobody has ever wanted a panel to take its time
+   * going away.
+   */
   openMap(open: boolean): void {
-    this.mapPanel.hidden = !open;
-    if (!open) return;
+    if (!open) {
+      this.mapWanted = false;
+      this.mapPanel.hidden = true;
+      return;
+    }
+
+    this.mapWanted = true;
     if (!this.mapApi) {
       void this.loadMapApi().then(() => {
-        // Still open? The player may have closed it while the chunk landed.
-        if (this.mapOpen) this.frameAndDraw();
+        // Still wanted? The player may have pressed M twice while it landed.
+        if (!this.mapWanted) return;
+        this.mapPanel.hidden = false;
+        this.frameAndDraw();
       });
       return;
     }
+    this.mapPanel.hidden = false;
     this.frameAndDraw();
   }
 
