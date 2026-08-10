@@ -115,7 +115,13 @@ export const ITEMS: readonly ItemDef[] = [
   { id: 'keys_hatchback', name: 'Car key', kind: 'vehicleKey', maxStack: 1 },
   { id: 'keys_van', name: 'Van key', kind: 'vehicleKey', maxStack: 1 },
   { id: 'keys_police', name: 'Patrol car key', kind: 'vehicleKey', maxStack: 1 },
+  // Ammunition. Stack sizes match each weapon's `reserveMax` in
+  // `src/combat/weaponCatalog.ts`, and `combat.test.ts` asserts the two
+  // catalogues agree — a weapon that eats an item nothing sells is a weapon
+  // that can never be reloaded.
   { id: 'ammo_pistol', name: 'Pistol rounds', kind: 'ammo', maxStack: 60 },
+  { id: 'ammo_shotgun', name: 'Shotgun shells', kind: 'ammo', maxStack: 24 },
+  { id: 'ammo_carbine', name: 'Carbine rounds', kind: 'ammo', maxStack: 96 },
 ];
 
 const BY_ID = new Map(ITEMS.map((i) => [i.id, i]));
