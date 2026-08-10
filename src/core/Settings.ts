@@ -137,6 +137,28 @@ export interface SettingsState {
   cameraShake: number;
   flashes: boolean;
   combatDifficulty: number;
+
+  /**
+   * Presentation accessibility, added in Phase 11.
+   *
+   * These four differ from the combat options above in one important way:
+   * they default to *the game as designed* rather than to the least
+   * assistance, because none of them changes how the game plays. Scaling the
+   * text or turning off motion costs a player nothing and is nobody's
+   * difficulty setting.
+   *
+   * `reducedMotion` is deliberately tri-state. `auto` follows the operating
+   * system, which is what most players want and what the CSS media query
+   * already does; `on` and `off` are for the player whose OS setting does not
+   * match what they want from a game specifically.
+   */
+  uiScale: number;
+  reducedMotion: 'auto' | 'on' | 'off';
+  highContrast: boolean;
+  /** Draw the Heat level as a numeral as well as pips, for colour blindness. */
+  heatNumerals: boolean;
+  /** Flying, exposed here because Phase 10 shipped it with no interface. */
+  flightAssist: 'assisted' | 'reduced';
 }
 
 const STORAGE_KEY = 'lasthorizon.settings.v1';
@@ -162,6 +184,11 @@ export class Settings {
       cameraShake: 1,
       flashes: true,
       combatDifficulty: 1,
+      uiScale: 1,
+      reducedMotion: 'auto',
+      highContrast: false,
+      heatNumerals: false,
+      flightAssist: 'assisted',
       ...defaults,
       ...this.read(),
     };
@@ -208,6 +235,20 @@ export class Settings {
       const difficulty = num(parsed.combatDifficulty, 0.25, 2);
       if (difficulty !== null) out.combatDifficulty = difficulty;
       if (typeof parsed.flashes === 'boolean') out.flashes = parsed.flashes;
+
+      // Phase 11. Same defensive read: storage is untrusted, and a bad
+      // `uiScale` is a interface nobody can read their way out of.
+      const scale = num(parsed.uiScale, 0.85, 1.6);
+      if (scale !== null) out.uiScale = scale;
+      if (parsed.reducedMotion === 'auto' || parsed.reducedMotion === 'on' ||
+          parsed.reducedMotion === 'off') {
+        out.reducedMotion = parsed.reducedMotion;
+      }
+      if (typeof parsed.highContrast === 'boolean') out.highContrast = parsed.highContrast;
+      if (typeof parsed.heatNumerals === 'boolean') out.heatNumerals = parsed.heatNumerals;
+      if (parsed.flightAssist === 'assisted' || parsed.flightAssist === 'reduced') {
+        out.flightAssist = parsed.flightAssist;
+      }
 
       return out;
     } catch {
@@ -298,6 +339,51 @@ export class Settings {
       const next = Math.min(hi, Math.max(lo, value));
       if (this.state[key] === next) return;
       this.state[key] = next;
+    }
+    this.persist();
+    this.emit();
+  }
+
+  /**
+   * The five presentation options, in one setter, for the same reason as
+   * above: they are set from one panel and each is validated on the way in.
+   *
+   * Every branch checks the *type* before the value. This is reached from the
+   * settings panel and from the test bridge, and the bridge is as untrusted as
+   * storage — Phase 9's combat options learned that when a clamped value
+   * arrived as a string.
+   */
+  setAccessOption(
+    key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
+    value: number | boolean | string,
+  ): void {
+    switch (key) {
+      case 'uiScale': {
+        if (typeof value !== 'number' || !Number.isFinite(value)) return;
+        // 0.85 to 1.6: below that the HUD stops being legible on a phone,
+        // above it the panels stop fitting one.
+        const next = Math.min(1.6, Math.max(0.85, value));
+        if (this.state.uiScale === next) return;
+        this.state.uiScale = next;
+        break;
+      }
+      case 'reducedMotion': {
+        if (value !== 'auto' && value !== 'on' && value !== 'off') return;
+        if (this.state.reducedMotion === value) return;
+        this.state.reducedMotion = value;
+        break;
+      }
+      case 'flightAssist': {
+        if (value !== 'assisted' && value !== 'reduced') return;
+        if (this.state.flightAssist === value) return;
+        this.state.flightAssist = value;
+        break;
+      }
+      default: {
+        if (typeof value !== 'boolean' || this.state[key] === value) return;
+        this.state[key] = value;
+        break;
+      }
     }
     this.persist();
     this.emit();

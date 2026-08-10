@@ -204,6 +204,10 @@
       <div id="heat" class="heat" role="status" aria-live="polite" hidden>
         <i class="heat__pip"></i><i class="heat__pip"></i><i class="heat__pip"></i>
         <i class="heat__pip"></i><i class="heat__pip"></i>
+        <!-- A third channel for the level, behind the accessibility option:
+             the pips carry it in position *and* colour, and both fail for the
+             same player. -->
+        <span id="heatNum" class="heat__num" aria-hidden="true"></span>
       </div>
 
       <!-- Ammunition and the reticle, only while something is drawn. -->
@@ -430,6 +434,46 @@
               <button type="button" data-decay="0">Off</button>
               <button type="button" data-decay="0.5">Half</button>
               <button type="button" data-decay="1">Normal</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="settings" aria-labelledby="accessHeading">
+          <h3 id="accessHeading">Accessibility</h3>
+          <p class="settings__note">
+            None of these change how the game plays. They are here because a setting that
+            costs nothing to offer should not be somebody's difficulty level.
+          </p>
+          <div class="row">
+            <span>Text size</span>
+            <div class="seg" id="setUiScale">
+              <button type="button" data-scale="0.85">Small</button>
+              <button type="button" data-scale="1">Normal</button>
+              <button type="button" data-scale="1.3">Large</button>
+              <button type="button" data-scale="1.6">Largest</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>Motion</span>
+            <div class="seg" id="setReducedMotion">
+              <button type="button" data-motion="auto">Match system</button>
+              <button type="button" data-motion="off">Full</button>
+              <button type="button" data-motion="on">Reduced</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>High-contrast prompts</span>
+            <button id="setHighContrast" class="pill" type="button">Off</button>
+          </div>
+          <div class="row">
+            <span>Show Heat as a number</span>
+            <button id="setHeatNumerals" class="pill" type="button">Off</button>
+          </div>
+          <div class="row">
+            <span>Flight assist</span>
+            <div class="seg" id="setFlightAssist">
+              <button type="button" data-flight="assisted">Assisted</button>
+              <button type="button" data-flight="reduced">Reduced</button>
             </div>
           </div>
         </section>

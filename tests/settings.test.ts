@@ -246,3 +246,90 @@ describe('needs accessibility options', () => {
     expect([...SETTINGS_NEED_IDS].sort()).toEqual([...NEED_IDS].sort());
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 11 — presentation accessibility
+// ---------------------------------------------------------------------------
+
+describe('the presentation options', () => {
+  // Injected storage, like the suite above. Without it these share the real
+  // localStorage and leak into each other — which is exactly what happened
+  // the first time this block was written.
+  let storage: MemoryStorage;
+  beforeEach(() => {
+    storage = new MemoryStorage();
+  });
+
+  it('default to the game as designed, not to the least assistance', () => {
+    // Deliberately unlike the Phase 9 combat options, which default to the
+    // *least* help. None of these five changes how the game plays, so there is
+    // nothing to preserve by leaving them off — but equally nothing to gain by
+    // turning them on for a player who did not ask.
+    const s = new Settings(storage);
+    expect(s.current.uiScale).toBe(1);
+    expect(s.current.reducedMotion, 'follow the operating system').toBe('auto');
+    expect(s.current.highContrast).toBe(false);
+    expect(s.current.heatNumerals).toBe(false);
+    expect(s.current.flightAssist, 'matches FlightModel').toBe('assisted');
+  });
+
+  it('clamps the text scale to something a panel can still hold', () => {
+    const s = new Settings(storage);
+    s.setAccessOption('uiScale', 99);
+    expect(s.current.uiScale).toBeLessThanOrEqual(1.6);
+    s.setAccessOption('uiScale', 0.1);
+    expect(s.current.uiScale).toBeGreaterThanOrEqual(0.85);
+  });
+
+  it('refuses a value of the wrong type rather than storing it', () => {
+    // Reached from the settings panel *and* the test bridge, and the bridge is
+    // as untrusted as storage — Phase 9 learned this when a clamped number
+    // arrived as a string.
+    const s = new Settings(storage);
+    s.setAccessOption('uiScale', 'huge' as unknown as number);
+    expect(s.current.uiScale).toBe(1);
+    s.setAccessOption('reducedMotion', 'sometimes');
+    expect(s.current.reducedMotion).toBe('auto');
+    s.setAccessOption('flightAssist', 'expert');
+    expect(s.current.flightAssist).toBe('assisted');
+    s.setAccessOption('highContrast', 1 as unknown as boolean);
+    expect(s.current.highContrast).toBe(false);
+  });
+
+  it('accepts every legitimate value', () => {
+    const s = new Settings(storage);
+    s.setAccessOption('uiScale', 1.3);
+    s.setAccessOption('reducedMotion', 'on');
+    s.setAccessOption('highContrast', true);
+    s.setAccessOption('heatNumerals', true);
+    s.setAccessOption('flightAssist', 'reduced');
+    expect(s.current.uiScale).toBe(1.3);
+    expect(s.current.reducedMotion).toBe('on');
+    expect(s.current.highContrast).toBe(true);
+    expect(s.current.heatNumerals).toBe(true);
+    expect(s.current.flightAssist).toBe('reduced');
+  });
+
+  it('survives a round trip through storage', () => {
+    const a = new Settings(storage);
+    a.setAccessOption('uiScale', 1.3);
+    a.setAccessOption('reducedMotion', 'off');
+    a.setAccessOption('heatNumerals', true);
+
+    const b = new Settings(storage);
+    expect(b.current.uiScale).toBe(1.3);
+    expect(b.current.reducedMotion).toBe('off');
+    expect(b.current.heatNumerals).toBe(true);
+  });
+
+  it('notifies listeners, so the document can be re-stamped', () => {
+    const s = new Settings(storage);
+    let calls = 0;
+    s.onChange(() => calls++);
+    s.setAccessOption('highContrast', true);
+    expect(calls).toBe(1);
+    // Setting the same value again is not a change and must not re-notify.
+    s.setAccessOption('highContrast', true);
+    expect(calls).toBe(1);
+  });
+});

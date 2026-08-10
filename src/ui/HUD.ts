@@ -34,6 +34,11 @@ export interface HUDCallbacks {
     key: 'aimAssist' | 'cameraShake' | 'flashes' | 'combatDifficulty',
     value: number | boolean,
   ) => void;
+  /** One of the five Phase 11 presentation options. */
+  onAccessOption: (
+    key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
+    value: number | boolean | string,
+  ) => void;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
@@ -81,6 +86,7 @@ export class HUD {
   private ammoMag = $('ammoMag');
   private ammoReserve = $('ammoReserve');
   private reticle = $('reticle');
+  private heatNum = $('heatNum');
   private lastHeat = -1;
 
   /** Where the map is looking. Kept between openings, like a real map. */
@@ -253,12 +259,66 @@ export class HUD {
     flashes.setAttribute('aria-pressed', String(s.flashes));
   }
 
+  /**
+   * The five accessibility options.
+   *
+   * `applyAccess` is the half that *does* something — it stamps the root
+   * element, which is what `--ui-scale` and `:root.is-reduced-motion` in the
+   * stylesheet read. Splitting it out means the game can apply a restored
+   * setting on boot without the panel having been opened.
+   */
+  private syncAccessOptions(): void {
+    const s = this.settings.current;
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setUiScale button')) {
+      b.classList.toggle('is-on', Number(b.dataset.scale) === s.uiScale);
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setReducedMotion button')) {
+      b.classList.toggle('is-on', b.dataset.motion === s.reducedMotion);
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setFlightAssist button')) {
+      b.classList.toggle('is-on', b.dataset.flight === s.flightAssist);
+    }
+    const pill = (id: string, on: boolean) => {
+      const el = $(id);
+      el.textContent = on ? 'On' : 'Off';
+      el.classList.toggle('is-off', !on);
+      el.setAttribute('aria-pressed', String(on));
+    };
+    pill('setHighContrast', s.highContrast);
+    pill('setHeatNumerals', s.heatNumerals);
+    this.applyAccess();
+  }
+
+  /**
+   * Push the presentation options onto the document.
+   *
+   * The stylesheet is the consumer: `--ui-scale` feeds the type scale and
+   * `.is-reduced-motion` collapses every duration token. Doing it here rather
+   * than in each rule is what makes one class turn off motion the stylesheet
+   * has not been told about yet.
+   */
+  applyAccess(): void {
+    const s = this.settings.current;
+    const root = document.documentElement;
+    root.style.setProperty('--ui-scale', String(s.uiScale));
+    root.classList.toggle('is-reduced-motion', s.reducedMotion === 'on');
+    // `off` is an explicit opt *out*, so it has to beat the OS media query.
+    root.classList.toggle('is-full-motion', s.reducedMotion === 'off');
+    root.classList.toggle('is-high-contrast', s.highContrast);
+    // The numeral's *visibility* is a class on the root; its text is written by
+    // `setHeat`. Calling `setHeat` from here would do nothing — it returns
+    // early when the level is unchanged, which is exactly the case when only
+    // the option has been toggled.
+    root.classList.toggle('is-heat-numerals', s.heatNumerals);
+  }
+
   private syncAll(): void {
     this.syncSound();
     this.syncQuality();
     this.syncTime();
     this.syncNeeds();
     this.syncCombatOptions();
+    this.syncAccessOptions();
   }
 
   // ---------------------------------------------------------- info panel
@@ -332,6 +392,35 @@ export class HUD {
       this.cb.onCombatOption('flashes', !this.settings.current.flashes);
       this.syncCombatOptions();
     });
+
+    // The accessibility options. Same shape as the combat ones above: the
+    // game clamps and persists, this only reflects.
+    const accessSeg = (
+      selector: string,
+      attr: string,
+      key: 'uiScale' | 'reducedMotion' | 'flightAssist',
+      asNumber = false,
+    ) => {
+      for (const b of document.querySelectorAll<HTMLButtonElement>(selector)) {
+        b.addEventListener('click', () => {
+          const raw = b.dataset[attr] ?? '';
+          this.cb.onAccessOption(key, asNumber ? Number(raw) : raw);
+          this.syncAccessOptions();
+        });
+      }
+    };
+    accessSeg('#setUiScale button', 'scale', 'uiScale', true);
+    accessSeg('#setReducedMotion button', 'motion', 'reducedMotion');
+    accessSeg('#setFlightAssist button', 'flight', 'flightAssist');
+    for (const [id, key] of [
+      ['setHighContrast', 'highContrast'],
+      ['setHeatNumerals', 'heatNumerals'],
+    ] as const) {
+      $(id).addEventListener('click', () => {
+        this.cb.onAccessOption(key, !this.settings.current[key]);
+        this.syncAccessOptions();
+      });
+    }
 
     $('setReset').addEventListener('click', () => {
       this.cb.onResetProgress();
@@ -898,6 +987,10 @@ export class HUD {
     this.heat.hidden = level <= 0;
     this.heat.setAttribute('aria-label', level > 0 ? `Police attention ${level} of 5` : '');
     this.heatPips.forEach((pip, i) => pip.classList.toggle('is-on', i < level));
+    // Always written, shown only when the accessibility option is on. The
+    // pips carry the level in position *and* colour, and both of those fail
+    // for the same player; a numeral is a third channel that does not.
+    this.heatNum.textContent = level > 0 ? String(level) : '';
   }
 
   /**

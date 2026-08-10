@@ -576,6 +576,14 @@ export class Game {
         this.settings.setCombatOption(key, value);
         this.applyCombatSettings();
       },
+      onAccessOption: (key, value) => {
+        this.settings.setAccessOption(key, value);
+        // Flight assist is the only one of the five that reaches a system
+        // rather than the document; the rest are `HUD.applyAccess`.
+        if (key === 'flightAssist') {
+          this.flight?.setAssist(this.settings.current.flightAssist);
+        }
+      },
       onOutfit: (patch) => {
         // The panel still speaks in colours; Equipment resolves each one back
         // to its catalogue item so the two representations cannot drift.

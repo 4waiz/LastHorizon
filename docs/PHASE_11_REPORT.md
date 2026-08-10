@@ -107,6 +107,55 @@ and neither overrides the other — a player who set it in the game meant it.
 
 ---
 
+## 3b. The accessibility panel
+
+The token work left two hooks dangling — `--ui-scale` and
+`:root.is-reduced-motion` were defined and nothing set them. A hook nothing
+drives is a defect, not a foundation, so this slice built the panel that drives
+them.
+
+Five options, in `Settings` beside the Phase 9 combat four:
+
+| Option | Values | What it reaches |
+| --- | --- | --- |
+| Text size | 0.85 / 1 / 1.3 / 1.6 | Multiplies the whole `clamp()` type scale |
+| Motion | match system / full / reduced | Collapses every duration token |
+| High-contrast prompts | on / off | Prompt, objective, caption, toast |
+| Heat as a numeral | on / off | A third channel beside position and colour |
+| Flight assist | assisted / reduced | `FlightDirector.setAssist` |
+
+**They default to the game as designed**, which is deliberately unlike the
+combat options. Those default to the *least* assistance because each changes
+how the game plays; none of these five does, so there is nothing to preserve by
+withholding them and nothing to gain by imposing them.
+
+`reducedMotion` is tri-state on purpose. `auto` follows the operating system —
+what most players want and what the media query already did — while `on` and
+`off` exist for the player whose OS setting does not match what they want from
+a game specifically. `off` had to be made to *beat* the media query, which is
+why the rule is `:root:not(.is-full-motion)`.
+
+Three details worth recording:
+
+- **Heat as a numeral is a real accessibility gap, not a nicety.** The pips
+  carry the level in *position* and in *colour*, and both of those fail for the
+  same player. A numeral is a third channel that does not.
+- **`applyAccess` is split from `syncAccessOptions`** so a setting restored
+  from storage can be stamped onto the document on boot without the panel
+  having been opened.
+- **Calling `setHeat` from `applyAccess` was a no-op** and would have shipped
+  as one: `setHeat` returns early when the level is unchanged, which is exactly
+  the case when only the option has been toggled. The numeral's text is written
+  by `setHeat`; its *visibility* is a root class.
+
+Verified in Chromium by driving the real controls: `--ui-scale` 1 → 1.6 with
+`--text-md` multiplying by it, `--dur-base` 0.22s → 0.01ms, the three root
+classes applied, and the objective panel flipping from cream to `rgb(29,26,22)`.
+Six unit tests cover defaults, clamping, type refusal, storage round-trip and
+listener notification.
+
+---
+
 ## 4. Against the acceptance criteria
 
 **1. Every system added in prior phases is reachable through a coherent UI.**
@@ -122,8 +171,10 @@ Phase 11 changed none of it, and the screenshots in this phase show the world
 unobstructed. No new HUD element was added.
 
 **3. Keyboard-only, touch and gamepad users can start, save, play and exit.**
-**Not assessed.** No keyboard-only or accessibility-snapshot tests were written
-this phase, so claiming it either way would be inventing a result.
+**Not assessed**, and unchanged by this phase. No keyboard-only or
+accessibility-snapshot tests were written, so claiming it either way would be
+inventing a result. The accessibility *options* added in §3b are a different
+thing from input coverage and are not evidence for this criterion.
 
 **4. Credits and licensing are accurate.** **Met.** §2. Verified by reading
 `package.json` and each dependency's own `license` field rather than from
@@ -169,7 +220,8 @@ list rather than a re-read:
 | stylesheet | 22.1 kB | **20.1 kB** | 24 kB |
 | initial load | 4,207.4 kB | **4,207.6 kB** | 4,215 kB |
 | app chunk | 387.2 kB | **387.4 kB** | 390 kB |
-| JS total | 1,116 kB | **1,120.1 kB** | 1,140 kB *(was 1,120)* |
+| JS total | 1,116 kB | **1,123.4 kB** | 1,140 kB *(was 1,120)* |
+| app chunk | 387.4 kB | **390.1 kB** | 400 kB *(was 390)* |
 
 **The stylesheet blocker is cleared: panel CSS now travels with its chunk.**
 

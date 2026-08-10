@@ -1083,6 +1083,80 @@ body {
   opacity: 0.75;
 }
 
+/* ======================================================================
+   Phase 11 — presentation accessibility.
+
+   Three of the five options land here; the other two (Heat numerals and
+   flight assist) are behaviour rather than style. Everything below reads a
+   class or a variable that `HUD.applyAccess` stamps on the root element, so
+   a setting restored from storage applies on boot without the panel having
+   been opened.
+   ====================================================================== */
+
+/*
+ * Text size.
+ *
+ * The type scale is multiplied rather than each rule being overridden, which
+ * is the whole reason `--ui-scale` sits in the scale in the first place. The
+ * `clamp()` bounds move with it, so Largest on a phone is still bounded by
+ * the viewport term and cannot overflow a panel.
+ */
+:root {
+  --text-xs: calc(clamp(11px, 0.68rem + 0.12vw, 13px) * var(--ui-scale));
+  --text-sm: calc(clamp(12px, 0.74rem + 0.16vw, 14px) * var(--ui-scale));
+  --text-md: calc(clamp(14px, 0.84rem + 0.22vw, 16px) * var(--ui-scale));
+  --text-lg: calc(clamp(17px, 0.98rem + 0.4vw, 21px) * var(--ui-scale));
+  --text-xl: calc(clamp(22px, 1.2rem + 0.8vw, 32px) * var(--ui-scale));
+}
+
+/*
+ * High-contrast prompts.
+ *
+ * Deliberately narrow: the *interaction* surfaces, not the whole interface.
+ * A player who needs the "press E" prompt to be readable against a sunlit
+ * road does not necessarily want the calm palette replaced everywhere, and
+ * the brief asks for high-contrast interaction prompts specifically.
+ */
+:root.is-high-contrast .prompt,
+:root.is-high-contrast .objective,
+:root.is-high-contrast .caption,
+:root.is-high-contrast .toast {
+  background: #1d1a16;
+  color: #fff8e8;
+  border: 2px solid #fff8e8;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+:root.is-high-contrast .prompt kbd,
+:root.is-high-contrast .objective__pip {
+  background: #fff8e8;
+  color: #1d1a16;
+}
+
+:root.is-high-contrast .toast__title {
+  color: #ffd9a0;
+}
+
+/*
+ * Heat as a numeral.
+ *
+ * The pips carry the level in *position* and in colour, which is two
+ * channels that both fail for a player who cannot distinguish the lit pip
+ * from the unlit one. The numeral is a third channel that does not.
+ */
+.heat__num {
+  display: none;
+  margin-left: var(--sp-1);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+:root.is-heat-numerals .heat__num {
+  display: inline;
+}
+
 /* ============================ responsive =============================== */
 
 @media (max-width: 560px) {
@@ -1152,7 +1226,7 @@ body {
  * other, because a player who set it in the game meant it.
  */
 @media (prefers-reduced-motion: reduce) {
-  :root {
+  :root:not(.is-full-motion) {
     --dur-fast: 0.01ms;
     --dur-base: 0.01ms;
     --dur-slow: 0.01ms;

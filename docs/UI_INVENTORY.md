@@ -112,7 +112,11 @@ the convention Phases 1–10 established and this keeps.
 | Camera shake (off / half / normal) | Settings → Action |
 | Flashes toggle (photosensitivity) | Settings → Action |
 | Combat difficulty (gentle / normal / hard) | Settings → Action |
-| Flight assist (assisted / reduced) | `FlightModel`; **no UI yet** |
+| Flight assist (assisted / reduced) | Settings → Accessibility |
+| Text size (0.85 / 1 / 1.3 / 1.6) | Settings → Accessibility; drives `--ui-scale` |
+| Motion (match system / full / reduced) | Settings → Accessibility; tri-state |
+| High-contrast prompts | Settings → Accessibility |
+| Heat as a numeral | Settings → Accessibility; a third channel beside position and colour |
 | Per-need toggles ×4, needs speed | Settings → Needs |
 | Reduced motion | OS media query **and** `:root.is-reduced-motion` |
 | Safe-area insets | Token-level, all panels |
@@ -138,8 +142,8 @@ filters, police search area, owned vehicles) · photo mode · birthday postcard
 export · UI sound set · audio buses, ducking and gain staging · story stingers.
 
 **Accessibility not built:** full remapping · touch layout editor · subtitles
-and text speed · font scaling wired to `--ui-scale` · high-contrast prompts ·
-colour-independent Heat and quest indicators · hold/toggle alternatives ·
+and text speed · colour-independent *quest* indicators (Heat is done) ·
+hold/toggle alternatives ·
 aging speed selection · driving assist · flight assist UI.
 
 **Reachability gap (criterion 1):** the systems added in Phases 9 and 10 are

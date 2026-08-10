@@ -37,7 +37,20 @@ const BUNDLE_BUDGETS = [
   // definition. `OfficerCorps` was moved out of `Game` into the lazy chunk when
   // this budget first said no, and it recovered 0.5 kB, which is the honest
   // measure of how little was left to move.
-  { prefix: 'index-', ext: '.js', maxKB: 390, label: 'app chunk' },
+  // Phase 11: 390 -> 400, for the accessibility panel's wiring in `HUD`.
+  //
+  // Small, and the *last* one that should be granted on these terms. The
+  // structural move is named and ready: `HUD.wireInfoPanel` and its five
+  // `sync*` methods are ~6 kB of eager code that only runs when the player
+  // opens the info modal — which is a click away, exactly like the map panel
+  // that has been lazy since Phase 6. Splitting a `SettingsPanel` module out
+  // of `HUD` on the `MapPanel` precedent would return more than this raise
+  // takes, and would take the remaining Phase 11 screens with it.
+  //
+  // It was not done here because `HUD` is reached from the first frame by
+  // several other paths and the split needs its own verification pass rather
+  // than being tacked onto a feature.
+  { prefix: 'index-', ext: '.js', maxKB: 400, label: 'app chunk' },
   { prefix: 'gsap-', ext: '.js', maxKB: 90, label: 'gsap chunk' },
   { prefix: 'bvh-', ext: '.js', maxKB: 75, label: 'bvh chunk' },
   { prefix: 'index-', ext: '.css', maxKB: 24, label: 'stylesheet' },
