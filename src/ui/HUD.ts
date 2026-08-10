@@ -1,4 +1,4 @@
-import { NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
+import { QualityLevel, Settings, TimeMode } from '../core/Settings';
 import type { Dashboard } from '../vehicles/VehicleControls';
 import type { MinimapData } from './Minimap';
 // Type-only: the map is a panel behind a keypress, so its drawing code arrives
@@ -131,11 +131,12 @@ export class HUD {
       navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
 
     this.wireTiles();
-    this.wireInfoPanel();
+    this.wireInfoChrome();
     this.wireMap();
     this.wireWardrobe();
     if (this.isTouch) this.wireTouch();
-    this.syncAll();
+    this.syncTiles();
+    this.applyAccess();
     this.checkOrientation();
     window.addEventListener('resize', () => this.checkOrientation());
     window.addEventListener('orientationchange', () => this.checkOrientation());
@@ -221,81 +222,14 @@ export class HUD {
    * than the mutually-exclusive ones above — turning hunger off must not turn
    * mood back on.
    */
-  private syncNeeds(): void {
-    const { needsEnabled, needsDecay } = this.settings.current;
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setNeeds button')) {
-      const id = b.dataset.need as NeedId;
-      const on = needsEnabled[id] === true;
-      b.classList.toggle('is-on', on);
-      b.setAttribute('aria-pressed', String(on));
-    }
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setNeedsDecay button')) {
-      b.classList.toggle('is-on', Number(b.dataset.decay) === needsDecay);
-    }
-  }
-
   /**
-   * The four Phase 9 accessibility options.
+   * Apply the presentation options to the document.
    *
-   * Only `flashes` defaults on. The other three default to the game as
-   * designed — a player who wants aim help will go looking for it, and one who
-   * never opens this panel should get the version that was balanced. Turning
-   * effects off by default would just look like a bug.
-   */
-  private syncCombatOptions(): void {
-    const s = this.settings.current;
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setAimAssist button')) {
-      b.classList.toggle('is-on', Number(b.dataset.assist) === s.aimAssist);
-    }
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setCameraShake button')) {
-      b.classList.toggle('is-on', Number(b.dataset.shake) === s.cameraShake);
-    }
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setCombatDifficulty button')) {
-      b.classList.toggle('is-on', Number(b.dataset.diff) === s.combatDifficulty);
-    }
-    const flashes = $('setFlashes');
-    flashes.textContent = s.flashes ? 'On' : 'Off';
-    flashes.classList.toggle('is-off', !s.flashes);
-    flashes.setAttribute('aria-pressed', String(s.flashes));
-  }
-
-  /**
-   * The five accessibility options.
-   *
-   * `applyAccess` is the half that *does* something — it stamps the root
-   * element, which is what `--ui-scale` and `:root.is-reduced-motion` in the
-   * stylesheet read. Splitting it out means the game can apply a restored
-   * setting on boot without the panel having been opened.
-   */
-  private syncAccessOptions(): void {
-    const s = this.settings.current;
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setUiScale button')) {
-      b.classList.toggle('is-on', Number(b.dataset.scale) === s.uiScale);
-    }
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setReducedMotion button')) {
-      b.classList.toggle('is-on', b.dataset.motion === s.reducedMotion);
-    }
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setFlightAssist button')) {
-      b.classList.toggle('is-on', b.dataset.flight === s.flightAssist);
-    }
-    const pill = (id: string, on: boolean) => {
-      const el = $(id);
-      el.textContent = on ? 'On' : 'Off';
-      el.classList.toggle('is-off', !on);
-      el.setAttribute('aria-pressed', String(on));
-    };
-    pill('setHighContrast', s.highContrast);
-    pill('setHeatNumerals', s.heatNumerals);
-    this.applyAccess();
-  }
-
-  /**
-   * Push the presentation options onto the document.
-   *
-   * The stylesheet is the consumer: `--ui-scale` feeds the type scale and
-   * `.is-reduced-motion` collapses every duration token. Doing it here rather
-   * than in each rule is what makes one class turn off motion the stylesheet
-   * has not been told about yet.
+   * Stays in `HUD` while the rest of the settings panel moved to
+   * `SettingsPanel`, because this has to run on **boot** to restore a saved
+   * setting — which is exactly when that module does not exist. The stylesheet
+   * is the consumer: `--ui-scale` feeds the type scale and the three classes
+   * gate motion, contrast and the Heat numeral.
    */
   applyAccess(): void {
     const s = this.settings.current;
@@ -305,25 +239,28 @@ export class HUD {
     // `off` is an explicit opt *out*, so it has to beat the OS media query.
     root.classList.toggle('is-full-motion', s.reducedMotion === 'off');
     root.classList.toggle('is-high-contrast', s.highContrast);
-    // The numeral's *visibility* is a class on the root; its text is written by
-    // `setHeat`. Calling `setHeat` from here would do nothing — it returns
-    // early when the level is unchanged, which is exactly the case when only
-    // the option has been toggled.
+    // The numeral's *visibility* is this class; its text is written by
+    // `setHeat`, which returns early when the level has not changed — so
+    // calling it from here would do nothing.
     root.classList.toggle('is-heat-numerals', s.heatNumerals);
   }
 
-  private syncAll(): void {
+  /** The three settings that also drive an always-on tile. */
+  private syncTiles(): void {
     this.syncSound();
     this.syncQuality();
     this.syncTime();
-    this.syncNeeds();
-    this.syncCombatOptions();
-    this.syncAccessOptions();
   }
 
-  // ---------------------------------------------------------- info panel
 
-  private wireInfoPanel(): void {
+  /**
+   * The info modal's *chrome* only: close, backdrop and Escape.
+   *
+   * The controls inside it moved to `SettingsPanel` in Phase 11 and arrive
+   * with that chunk. Escape stays here because it is a global key and has to
+   * work whether or not the panel has ever been opened.
+   */
+  private wireInfoChrome(): void {
     $('infoClose').addEventListener('click', () => this.openInfo(false));
     this.info.addEventListener('pointerdown', (e) => {
       if (e.target === this.info) this.openInfo(false);
@@ -336,97 +273,32 @@ export class HUD {
         else if (document.pointerLockElement) document.exitPointerLock();
       }
     });
-
-    $('setSound').addEventListener('click', () => {
-      const muted = this.settings.toggleMuted();
-      this.cb.onMuted(muted);
-      this.syncSound();
-    });
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setQuality button')) {
-      b.addEventListener('click', () => {
-        const q = b.dataset.q as QualityLevel;
-        this.settings.setQuality(q);
-        this.cb.onQuality(q);
-        this.syncQuality();
-      });
-    }
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setTime button')) {
-      b.addEventListener('click', () => {
-        const m = b.dataset.t as TimeMode;
-        this.settings.setTimeMode(m);
-        this.cb.onTimeMode(m);
-        this.syncTime();
-      });
-    }
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setNeeds button')) {
-      b.addEventListener('click', () => {
-        const id = b.dataset.need as NeedId;
-        this.settings.setNeedEnabled(id, !this.settings.current.needsEnabled[id]);
-        this.syncNeeds();
-      });
-    }
-    for (const b of document.querySelectorAll<HTMLButtonElement>('#setNeedsDecay button')) {
-      b.addEventListener('click', () => {
-        this.settings.setNeedsDecay(Number(b.dataset.decay));
-        this.syncNeeds();
-      });
-    }
-    // The combat options. `onCombatOption` reaches `Settings.setCombatOption`,
-    // which clamps — so this panel never has to, and neither does the bridge.
-    const combatSeg = (
-      selector: string,
-      attr: string,
-      key: 'aimAssist' | 'cameraShake' | 'combatDifficulty',
-    ) => {
-      for (const b of document.querySelectorAll<HTMLButtonElement>(selector)) {
-        b.addEventListener('click', () => {
-          this.cb.onCombatOption(key, Number(b.dataset[attr]));
-          this.syncCombatOptions();
-        });
-      }
-    };
-    combatSeg('#setAimAssist button', 'assist', 'aimAssist');
-    combatSeg('#setCameraShake button', 'shake', 'cameraShake');
-    combatSeg('#setCombatDifficulty button', 'diff', 'combatDifficulty');
-    $('setFlashes').addEventListener('click', () => {
-      this.cb.onCombatOption('flashes', !this.settings.current.flashes);
-      this.syncCombatOptions();
-    });
-
-    // The accessibility options. Same shape as the combat ones above: the
-    // game clamps and persists, this only reflects.
-    const accessSeg = (
-      selector: string,
-      attr: string,
-      key: 'uiScale' | 'reducedMotion' | 'flightAssist',
-      asNumber = false,
-    ) => {
-      for (const b of document.querySelectorAll<HTMLButtonElement>(selector)) {
-        b.addEventListener('click', () => {
-          const raw = b.dataset[attr] ?? '';
-          this.cb.onAccessOption(key, asNumber ? Number(raw) : raw);
-          this.syncAccessOptions();
-        });
-      }
-    };
-    accessSeg('#setUiScale button', 'scale', 'uiScale', true);
-    accessSeg('#setReducedMotion button', 'motion', 'reducedMotion');
-    accessSeg('#setFlightAssist button', 'flight', 'flightAssist');
-    for (const [id, key] of [
-      ['setHighContrast', 'highContrast'],
-      ['setHeatNumerals', 'heatNumerals'],
-    ] as const) {
-      $(id).addEventListener('click', () => {
-        this.cb.onAccessOption(key, !this.settings.current[key]);
-        this.syncAccessOptions();
-      });
-    }
-
-    $('setReset').addEventListener('click', () => {
-      this.cb.onResetProgress();
-      this.showToast('Progress', 'Keepsakes put back where they were.');
-    });
   }
+
+  /** Resolved on the first opening; null until then. */
+  private settingsPanel: import('./SettingsPanel').SettingsPanel | null = null;
+  private settingsLoading: Promise<void> | null = null;
+  /** Whether the player has asked for it, which may be ahead of the download. */
+  private infoWanted = false;
+
+  private loadSettingsPanel(): Promise<void> {
+    this.settingsLoading ??= import('./SettingsPanel').then((api) => {
+      this.settingsPanel = new api.SettingsPanel({
+        settings: this.settings,
+        syncTiles: () => this.syncTiles(),
+        applyAccess: () => this.applyAccess(),
+        toast: (t, b) => this.showToast(t, b),
+        onQuality: (q) => this.cb.onQuality(q),
+        onMuted: (m) => this.cb.onMuted(m),
+        onTimeMode: (m) => this.cb.onTimeMode(m),
+        onResetProgress: () => this.cb.onResetProgress(),
+        onCombatOption: (k, v) => this.cb.onCombatOption(k, v),
+        onAccessOption: (k, v) => this.cb.onAccessOption(k, v),
+      });
+    });
+    return this.settingsLoading;
+  }
+
 
   /** Build the swatch rows once and keep their selected state in sync. */
   private wireWardrobe(): void {
@@ -501,18 +373,37 @@ export class HUD {
     return !this.wardrobe.hidden;
   }
 
+  /**
+   * Show or hide the info modal.
+   *
+   * **Revealed only once its chunk has landed**, the same ordering `openMap`
+   * needs and for the same reason: since Phase 11 the panel's stylesheet and
+   * its control wiring both travel with `SettingsPanel`, so showing the markup
+   * first would give a flash of unstyled settings *and* a panel whose buttons
+   * do nothing yet. The second half of that is worse than the first.
+   */
   private openInfo(open: boolean): void {
-    if (open) {
-      this.info.hidden = false;
-      // next frame, so the transition has a starting state to animate from
-      requestAnimationFrame(() => this.info.classList.add('is-on'));
-      this.input.releaseAll();
-    } else {
+    if (!open) {
+      this.infoWanted = false;
       this.info.classList.remove('is-on');
       window.setTimeout(() => {
         this.info.hidden = true;
       }, 240);
+      return;
     }
+
+    this.infoWanted = true;
+    void this.loadSettingsPanel().then(() => {
+      // Still wanted? The player may have pressed Escape while it landed.
+      if (!this.infoWanted) return;
+      // Reflect anything that changed while the panel did not exist — the
+      // quality tile and the time tile are both reachable without it.
+      this.settingsPanel?.syncAll();
+      this.info.hidden = false;
+      // next frame, so the transition has a starting state to animate from
+      requestAnimationFrame(() => this.info.classList.add('is-on'));
+      this.input.releaseAll();
+    });
   }
 
   get infoOpen(): boolean {

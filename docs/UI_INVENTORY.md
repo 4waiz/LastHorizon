@@ -165,8 +165,14 @@ test bridge; the six new activities have no jobs board.
    set an explicit `display` that would otherwise beat the UA rule and leave an
    invisible modal swallowing clicks.
 5. **Panels that are only reachable behind a keypress live in a lazy chunk** —
-   `MapPanel` since Phase 6, `StoryPanels` since Phase 8, both moved out of
-   `HUD` when the app-chunk budget refused them.
+   `MapPanel` since Phase 6, `StoryPanels` since Phase 8, `SettingsPanel`
+   since Phase 11 — all three moved out of `HUD` when the app-chunk budget
+   refused them.
+
+   What cannot move with a panel is anything that has to run **on boot**:
+   `HUD.applyAccess` stamps the accessibility settings onto the document and
+   stayed behind for exactly that reason, because a text size that only
+   applies once you open settings is not a restored setting.
 6. **A lazy panel's CSS travels with its code.** Phase 11 moved `.mapp*` into
    `src/ui/MapPanel.css` and `.dlg*`/`.journal*`/`.reel*` into
    `src/ui/StoryPanels.css`, each imported by the module that owns it. Vite

@@ -156,6 +156,48 @@ listener notification.
 
 ---
 
+## 3c. `SettingsPanel`, split out of `HUD`
+
+The third panel moved out of the always-on chrome for the same reason, after
+`MapPanel` in Phase 6 and `StoryPanels` in Phase 8. The info modal's controls
+and stylesheet now travel together in a chunk fetched when the modal opens.
+
+| | Before | After |
+| --- | --- | --- |
+| app chunk | 390.1 kB | **387.4 kB** |
+| eager `index-*.css` | 20.1 kB | **18.1 kB** |
+| `SettingsPanel-*.js` | — | 3.65 kB (lazy) |
+| `SettingsPanel-*.css` | — | 2.96 kB (lazy) |
+
+**The app-chunk raise earlier in this phase was reverted.** 390 → 400 was
+granted for 0.1 kB of accessibility wiring, with a comment saying it should be
+the last on those terms; the split returned 2.7 kB, so the budget went back to
+390 in the same phase. That is the "move before you raise" rule paying out
+within one phase rather than across three.
+
+**What stayed in `HUD`, and why each had to:**
+
+- The modal *chrome* — close, backdrop, Escape. Escape is a global key and has
+  to work before the module exists.
+- `syncSound`, `syncQuality`, `syncTime`, because each also drives an always-on
+  tile. The panel reaches them through a `syncTiles` callback.
+- `applyAccess`, which stamps `--ui-scale` and the motion/contrast classes onto
+  the document. It has to run on **boot** to restore a saved setting — exactly
+  when the panel does not exist. Moving it would have meant a player's text
+  size only applied after they opened settings.
+
+`.pill` and the modal shell stayed in the eager stylesheet too: four pills live
+outside this modal and the shell is shared with the wardrobe. Checking whether
+a class appears outside the panel before moving it is what caught that, and
+getting it wrong would have shipped an unstyled wardrobe rather than a style
+bug.
+
+Verified the same way as the map: 0 unstyled frames out of 31 visible, and the
+controls confirmed live after the lazy load by clicking Aim help and watching
+`aimAssist` go 0 → 1.
+
+---
+
 ## 4. Against the acceptance criteria
 
 **1. Every system added in prior phases is reachable through a coherent UI.**
@@ -217,11 +259,11 @@ list rather than a re-read:
 
 | Budget | Phase 10 | Phase 11 | Limit |
 | --- | --- | --- | --- |
-| stylesheet | 22.1 kB | **20.1 kB** | 24 kB |
+| stylesheet | 22.1 kB | **18.1 kB** | 24 kB |
 | initial load | 4,207.4 kB | **4,207.6 kB** | 4,215 kB |
 | app chunk | 387.2 kB | **387.4 kB** | 390 kB |
 | JS total | 1,116 kB | **1,123.4 kB** | 1,140 kB *(was 1,120)* |
-| app chunk | 387.4 kB | **390.1 kB** | 400 kB *(was 390)* |
+| app chunk | 387.4 kB | **387.4 kB** | 390 kB *(raised to 400 mid-phase, then reverted)* |
 
 **The stylesheet blocker is cleared: panel CSS now travels with its chunk.**
 

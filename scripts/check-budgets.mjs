@@ -37,20 +37,12 @@ const BUNDLE_BUDGETS = [
   // definition. `OfficerCorps` was moved out of `Game` into the lazy chunk when
   // this budget first said no, and it recovered 0.5 kB, which is the honest
   // measure of how little was left to move.
-  // Phase 11: 390 -> 400, for the accessibility panel's wiring in `HUD`.
-  //
-  // Small, and the *last* one that should be granted on these terms. The
-  // structural move is named and ready: `HUD.wireInfoPanel` and its five
-  // `sync*` methods are ~6 kB of eager code that only runs when the player
-  // opens the info modal — which is a click away, exactly like the map panel
-  // that has been lazy since Phase 6. Splitting a `SettingsPanel` module out
-  // of `HUD` on the `MapPanel` precedent would return more than this raise
-  // takes, and would take the remaining Phase 11 screens with it.
-  //
-  // It was not done here because `HUD` is reached from the first frame by
-  // several other paths and the split needs its own verification pass rather
-  // than being tacked onto a feature.
-  { prefix: 'index-', ext: '.js', maxKB: 400, label: 'app chunk' },
+  // Phase 11: raised 390 -> 400 for the accessibility panel's wiring, then
+  // **put back to 390** in the same phase once `SettingsPanel` was split out of
+  // `HUD`. The split returned 2.7 kB against the 0.1 kB the raise was granted
+  // for, which is the whole argument for moving rather than raising, made in
+  // one phase instead of across three.
+  { prefix: 'index-', ext: '.js', maxKB: 390, label: 'app chunk' },
   { prefix: 'gsap-', ext: '.js', maxKB: 90, label: 'gsap chunk' },
   { prefix: 'bvh-', ext: '.js', maxKB: 75, label: 'bvh chunk' },
   { prefix: 'index-', ext: '.css', maxKB: 24, label: 'stylesheet' },
@@ -133,6 +125,11 @@ const LAZY_CHUNK_PREFIXES = [
   // this script until it is named here**, and the failure looks exactly like
   // the feature being too big.
   'FlightSubsystem-',
+  // Phase 11. The info modal's controls and its stylesheet — settings, needs,
+  // action, accessibility, controls and credits. Reached by opening a modal,
+  // which is a click away, and the third panel moved out of `HUD` for this
+  // reason after `MapPanel` and `StoryPanels`.
+  'SettingsPanel-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));
