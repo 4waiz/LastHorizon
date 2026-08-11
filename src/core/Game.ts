@@ -48,6 +48,7 @@ import {
 } from './Gates';
 import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
+import { Keybindings } from './Keybindings';
 import { AudioManager } from './AudioManager';
 import { AssetManager } from './AssetManager';
 // Type-only. The village itself arrives through `VillageSubsystem`, whose
@@ -62,7 +63,7 @@ import {
 } from '../interaction/WorldInteractables';
 import { Environment } from '../world/Environment';
 import { Player } from '../player/Player';
-import { Inventory, Equipment, type EquipSlot } from '../player/Inventory';
+import { Inventory, Equipment, itemDef, type EquipSlot } from '../player/Inventory';
 import { Needs } from '../player/Needs';
 import { DEFAULT_CAMERA, ThirdPersonCamera } from '../camera/ThirdPersonCamera';
 import { ContactShadow } from '../graphics/StylizedShadows';
@@ -643,6 +644,9 @@ export class Game {
       this.hud.popCounter();
       this.hud.showToast(count >= total ? 'All found' : 'Found', def.found);
       this.audio.playDiscovery();
+      // The last keepsake is a moment; the first four are a chime. A stinger
+      // on every one of them would stop meaning anything by the third.
+      if (count >= total) this.audio.stinger('discovery');
     };
 
     this.hud = new HUD(this.settings, this.input, {
@@ -654,6 +658,15 @@ export class Game {
         this.hud.setCounter(0, this.village!.collectibles.total);
       },
       onInteract: (down) => this.input.setInteractHeld(down),
+      onVolume: (bus, level) => this.settings.setVolume(bus, level),
+      // No-ops until audio has started, which is a user gesture away. The HUD
+      // asks by meaning and does not know or care.
+      onUiSound: (kind) => this.audio.ui(kind),
+      // The panel already moved the table — it holds the live object. This
+      // persists the result, which is the only part `Game` owns.
+      onRebind: () => this.settings.setBindings(this.input.keybindings.toJSON()),
+      onSubtitles: (on) => this.settings.setSubtitles(on),
+      onTextSpeed: (m) => this.settings.setTextSpeed(m),
       onCombatOption: (key, value) => {
         this.settings.setCombatOption(key, value);
         this.applyCombatSettings();
@@ -681,6 +694,8 @@ export class Game {
     // The phone's data sources, handed over once the HUD exists. Without this
     // `openPhone` refuses rather than showing an empty handset.
     this.hud.setPhoneDeps(this.phoneDeps());
+    this.hud.setLifeDeps(this.lifeDeps());
+    this.hud.setPhotoDeps(this.photoDeps());
     this.hud.setPauseDeps(this.pauseDeps());
     this.hud.syncOutfit(this.player.outfit);
     this.hud.setCounter(this.village!.collectibles.count, this.village!.collectibles.total);
@@ -783,12 +798,26 @@ export class Game {
       if (mode === 'freeRoam') this.applyFreeRoamOptions(options);
     }
 
+    // The saved layout, before the first key press can be read against the
+    // default one. `Keybindings.restore` drops anything reserved, duplicated
+    // or no longer an action, so a blob from an older build gains the new
+    // actions rather than losing every one it does not mention.
+    this.input.setBindings(new Keybindings(this.settings.current.bindings as never));
     this.input.attach(this.canvas);
     this.hud.show();
     this.audio.start();
     this.audio.setMuted(this.settings.current.muted);
+    this.audio.setLevels(this.settings.current.volumes);
     this.applyNeedsSettings();
-    this.gameScope.addTeardown(this.settings.onChange(() => this.applyNeedsSettings()));
+    this.gameScope.addTeardown(
+      this.settings.onChange((s) => {
+        this.applyNeedsSettings();
+        // Levels come from the same subscription rather than a bespoke
+        // callback: a slider, a restored save and a reset all reach the mixer
+        // by one path, so none of them can be the one that forgets.
+        this.audio.setLevels(s.volumes);
+      }),
+    );
 
     // The six job definitions, in both modes. Fire-and-forget for the same
     // reason as the population: nothing can start a task until an interior
@@ -852,7 +881,14 @@ export class Game {
     this.life.setBlocked('settings', settingsOpen);
     this.life.setBlocked('loading', this.transitioning);
     this.life.setBlocked('paused', this.paused);
-    this.storyClock.setPaused(this.paused || settingsOpen || this.transitioning);
+    // A photo is a still. The life clock, the story clock and the physics
+    // clock all stop; the camera does not, which is the whole feature.
+    // `photoMode` has been in `LifeBlockReason` since the clock was written
+    // and nothing ever set it. This is what it was reserved for.
+    this.life.setBlocked('photoMode', this.photoFrozen);
+    this.storyClock.setPaused(
+      this.paused || settingsOpen || this.transitioning || this.photoFrozen,
+    );
 
     this.storyClock.advance(dt);
 
@@ -2083,6 +2119,10 @@ export class Game {
         this.hud.openPhone(false);
         this.hud.openMap(true);
       },
+      openPhoto: () => {
+        this.hud.openPhone(false);
+        this.hud.openPhoto(true);
+      },
       openJournal: () => {
         this.hud.openPhone(false);
         this.panels?.openJournal(true, this.director?.journal() ?? []);
@@ -2092,6 +2132,162 @@ export class Game {
       ready: () => loadTasks(),
     };
   }
+
+  /**
+   * Carrying, record and property, for `LifePanel`.
+   *
+   * Closes the reachability gap §4 of `docs/UI_INVENTORY.md` names: weapons,
+   * Heat and arrest had HUD readouts and no screen, and the aeroplane had no
+   * interface at all outside the test bridge.
+   *
+   * Reads live state through a narrow interface, exactly like `phoneDeps`.
+   * The panel gets flattened data and no handle on `Inventory`, `Heat` or the
+   * registry — it can render a fine, not forgive one.
+   */
+  private lifeDeps(): import('../ui/LifePanel').LifeDeps {
+    return {
+      carrying: () =>
+        this.inventory.toJSON().map((stack) => {
+          const def = itemDef(stack.id);
+          const slot = def?.slot;
+          const worn = slot !== undefined && this.equipment.equippedId(slot) === stack.id;
+          return {
+            id: stack.id,
+            name: def?.name ?? stack.id,
+            count: stack.count,
+            kind: def?.kind ?? 'other',
+            ...(def?.colour !== undefined ? { colour: def.colour } : {}),
+            // A hat that is in the wardrobe but switched off is not being
+            // worn, whatever the slot says.
+            equipped: worn && (slot !== 'hat' || this.equipment.hatOn),
+            equippable: slot !== undefined,
+            removable: slot === 'hat',
+          };
+        }),
+      equip: (id) => {
+        if (!this.equipment.equip(id)) return false;
+        // Putting a hat on is what choosing one means. Otherwise picking a hat
+        // from the list would change a colour nobody can see.
+        if (itemDef(id)?.slot === 'hat') this.equipment.setHatOn(true);
+        this.player.setOutfit(this.equipment.toOutfit());
+        return true;
+      },
+      unequip: (id) => {
+        // Only the hat comes off; the other two slots are never empty. See
+        // `CarriedItem.removable`.
+        if (itemDef(id)?.slot !== 'hat') return false;
+        this.equipment.setHatOn(false);
+        this.player.setOutfit(this.equipment.toOutfit());
+        return true;
+      },
+      use: (id) => {
+        const def = itemDef(id);
+        if (!def?.restores || !this.inventory.has(id)) return false;
+        this.inventory.remove(id, 1);
+        this.needs.restoreMany(def.restores);
+        this.hud.showToast(def.name, 'That is better.');
+        return true;
+      },
+      record: () => {
+        const heat = this.combat?.heat ?? null;
+        return {
+          entries: heat?.record.map((r) => ({ crime: r.crime, heat: r.heat })) ?? [],
+          arrests: heat?.arrests ?? 0,
+          finesOwed: this.combatState.finesOwed,
+          heatLevel: heat?.level ?? 0,
+          impounded: this.garage
+            .owned()
+            .filter((v) => v.impounded)
+            .map((v) => v.kind),
+        };
+      },
+      owned: () => {
+        const out: Array<import('../ui/LifePanel').OwnedThing> = [];
+        for (const v of this.garage.owned()) {
+          out.push({
+            id: v.id,
+            name: v.kind,
+            status: v.impounded ? 'In the pound' : `Parked · ${v.zone.replace(/_/g, ' ')}`,
+            kind: 'vehicle',
+          });
+        }
+        // The aeroplane is not in the registry — it is one aircraft with its
+        // own state, and `FlightState` is the eager half that knows where it
+        // is parked without the flight chunk being present.
+        if (this.unlockedZones.has('hill_airstrip')) {
+          const p = this.flightState.parked;
+          out.push({
+            id: 'plane',
+            name: 'Light aircraft',
+            status: this.flightState.airborne
+              ? 'In the air'
+              : p
+                ? `On the ground · ${Math.round(p.x)}, ${Math.round(p.z)}`
+                : 'On the apron',
+            kind: 'aircraft',
+          });
+        }
+        return out;
+      },
+      money: () => this.economy.wallet.cash,
+      toast: (title, body) => this.hud.showToast(title, body),
+    };
+  }
+
+  /**
+   * Photo mode's narrow view of the game.
+   *
+   * `capture` is the load-bearing one and the reason it is *synchronous*.
+   * The renderer runs without `preserveDrawingBuffer`, so the drawing buffer
+   * is gone by the next task and a `toBlob` callback — or anything after an
+   * `await` — reads transparent black. Drawing and reading therefore happen
+   * in one statement, and `toDataURL` is used rather than `toBlob` precisely
+   * because it returns rather than calls back.
+   */
+  private photoDeps(): import('../ui/PhotoMode').PhotoDeps {
+    return {
+      capture: () => {
+        try {
+          // Draw, then read, with nothing between them.
+          this.render();
+          return this.canvas.toDataURL('image/png');
+        } catch (err) {
+          // A lost context and a tainted canvas both land here, and neither
+          // may throw out of a click handler.
+          console.warn('[LastHorizon] photo capture failed', err);
+          return null;
+        }
+      },
+      freeze: (on) => {
+        this.photoFrozen = on;
+      },
+      showPlayer: (on) => {
+        this.player.root.visible = on;
+      },
+      setRoll: (radians) => {
+        this.camera.camera.rotation.z = radians;
+      },
+      setFov: (degrees) => {
+        this.camera.camera.fov = degrees;
+        this.camera.camera.updateProjectionMatrix();
+      },
+      toast: (title, body) => this.hud.showToast(title, body),
+      placeName: () =>
+        (this.zones.activeZone?.displayName ?? 'somewhere')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-'),
+    };
+  }
+
+  /**
+   * True while photo mode holds the world still.
+   *
+   * Separate from `paused`, which is the tab-hidden and menu case. A photo is
+   * a still: the clocks stop, the camera does not, and `resize` must be able
+   * to put the field of view back afterwards — which is why leaving photo
+   * mode restores it explicitly rather than waiting for a resize.
+   */
+  private photoFrozen = false;
 
   /** Flying, flattened for the bridge. Never a handle on the director. */
   private flightSnapshot(): import('./TestMode').FlightSnapshotData {
@@ -2280,6 +2476,10 @@ export class Game {
       this.panels.openJournal(open, open ? (this.director?.journal() ?? []) : []);
     }
     if (this.input.consumePhone()) this.hud.togglePhone();
+    if (this.input.consumeLife()) this.hud.toggleLife();
+    // `openPhoto` rather than `togglePhoto`: entering hides the HUD and
+    // leaving puts it back, and only the former knows about the chrome.
+    if (this.input.consumePhoto()) this.hud.openPhoto(!this.hud.photoOpen);
 
     this.hud.setWallet(this.economy.wallet.cash);
 
@@ -2538,7 +2738,7 @@ export class Game {
 
   private stepPhysics(dt: number): void {
     if (!this.physics) return;
-    this.physicsClock.setPaused(this.paused || this.transitioning);
+    this.physicsClock.setPaused(this.paused || this.transitioning || this.photoFrozen);
     const tick = this.physicsClock.advance(dt);
     for (let i = 0; i < tick.steps; i++) {
       // Controllers first: the forces they set have to be the ones this step
@@ -4227,6 +4427,24 @@ export class Game {
       this.player.motor.teleport(s.position.x, s.position.y - 0.6, s.position.z);
       this.player.controller.facing = s.yaw;
     }
+
+    // The instruments. Contextual like the vehicle dash: present only while
+    // actually flying, and cleared the moment the player climbs out.
+    const verdict = flight.verdict;
+    this.hud.setFlightReadout(
+      flight.riding
+        ? {
+            airspeed: s.airspeed,
+            altitude: s.altitudeAgl,
+            throttle: this.flightThrottle,
+            stallWarning: s.stallWarning,
+            // Only once the boundary is actually pushing back. Inside the
+            // corridor there is nothing to say, and a permanent "you are fine"
+            // line is clutter.
+            boundary: verdict.zone === 'inside' ? null : verdict.caption,
+          }
+        : null,
+    );
   }
 
   /** Throttle is a held axis rather than a rate, so it lives on the game. */

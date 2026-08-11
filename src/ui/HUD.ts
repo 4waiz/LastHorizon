@@ -1,4 +1,5 @@
-import { QualityLevel, Settings, TimeMode } from '../core/Settings';
+import { QualityLevel, Settings, TimeMode, type AudioBus } from '../core/Settings';
+import type { UiSound } from '../core/AudioManager';
 import type { Dashboard } from '../vehicles/VehicleControls';
 import type { MinimapData } from './Minimap';
 // Type-only: the map is a panel behind a keypress, so its drawing code arrives
@@ -22,6 +23,21 @@ const HAT_COLOURS = ['#dcc177', '#c9584b', '#7f9ec4', '#8fae7a', '#e3ded0'];
  * All markup is static in index.html; this wires behaviour to it.
  */
 
+/**
+ * The five numbers you cannot fly without, flattened.
+ *
+ * Deliberately not the `FlightState` object: the HUD is handed values, never
+ * a handle on the director. `boundary` is null when there is nothing to say,
+ * so the line is absent rather than empty.
+ */
+export interface FlightReadout {
+  readonly airspeed: number;
+  readonly altitude: number;
+  readonly throttle: number;
+  readonly stallWarning: boolean;
+  readonly boundary: string | null;
+}
+
 export interface HUDCallbacks {
   onQuality: (q: QualityLevel) => void;
   onMuted: (muted: boolean) => void;
@@ -40,6 +56,19 @@ export interface HUDCallbacks {
     key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
     value: number | boolean | string,
   ) => void;
+  onVolume: (bus: AudioBus, level: number) => void;
+  /**
+   * Play an interface sound.
+   *
+   * The HUD asks for a sound by *meaning* rather than reaching for
+   * `AudioManager`: it has no business knowing whether audio has started, is
+   * muted, or exists at all. `Game` owns that and no-ops when it does not.
+   */
+  onUiSound: (kind: UiSound) => void;
+  /** The layout changed. `Game` persists it; the table itself already moved. */
+  onRebind: () => void;
+  onSubtitles: (on: boolean) => void;
+  onTextSpeed: (mult: number) => void;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
@@ -71,6 +100,12 @@ export class HUD {
   private dashFuel = $('dashFuel');
   private dashFuelWrap = $('dashFuelWrap');
   private dashHints = $('dashHints');
+  private flight = $('flight');
+  private flightSpeed = $('flightSpeed');
+  private flightAlt = $('flightAlt');
+  private flightThrottle = $('flightThrottle');
+  private flightWarn = $('flightWarn');
+  private flightEdge = $('flightEdge');
   private mapPanel = $('mapPanel');
   private mapCanvas = $<HTMLCanvasElement>('mapCanvas');
   private mapScaleText = $('mapScaleText');
@@ -270,8 +305,10 @@ export class HUD {
       });
     };
     backdrop($('phone'), () => this.openPhone(false));
+    backdrop($('life'), () => this.openLife(false));
     backdrop(this.info, () => this.settingsPanel.set(false));
     $('phoneClose').addEventListener('click', () => this.openPhone(false));
+    $('lifeClose').addEventListener('click', () => this.openLife(false));
     $('infoClose').addEventListener('click', () => this.settingsPanel.set(false));
 
     window.addEventListener('keydown', (e) => {
@@ -280,8 +317,10 @@ export class HUD {
       // showing does Escape mean "pause". Each test asks whether the panel is
       // *on screen* rather than whether it was wanted — a panel still loading
       // has nothing to close.
-      if (!this.mapPanel.hidden) this.openMap(false);
+      if (this.photoPanel.open) this.openPhoto(false);
+      else if (!this.mapPanel.hidden) this.openMap(false);
       else if (this.phonePanel.open) this.openPhone(false);
+      else if (this.lifePanel.open) this.openLife(false);
       else if (this.settingsPanel.open) this.settingsPanel.set(false);
       else if (this.pausePanel.open) this.openPause(false);
       else if (document.pointerLockElement) document.exitPointerLock();
@@ -301,6 +340,7 @@ export class HUD {
     load: async () => new (await import('./PauseMenu')).PauseMenu(this.pauseDeps!),
     onOpen: (p) => p.open(),
     transitionClass: 'is-on',
+    sound: (k) => this.cb.onUiSound(k),
     afterShow: () => this.input.releaseAll(),
   });
 
@@ -336,6 +376,7 @@ export class HUD {
     },
     onOpen: (p) => p.refresh(),
     transitionClass: 'is-on',
+    sound: (k) => this.cb.onUiSound(k),
     afterShow: () => this.input.releaseAll(),
   });
 
@@ -356,6 +397,70 @@ export class HUD {
     this.phonePanel.set(open);
   }
 
+  // -- photo mode -----------------------------------------------------------
+  private photoDeps: import('./PhotoMode').PhotoDeps | null = null;
+  private readonly photoPanel = new LazyPanel({
+    element: $('photo'),
+    load: async () => new (await import('./PhotoMode')).PhotoMode(this.photoDeps!),
+    onOpen: (p) => p.open(),
+    onClose: (p) => p.close(),
+    afterShow: () => this.input.releaseAll(),
+  });
+
+  setPhotoDeps(deps: import('./PhotoMode').PhotoDeps): void {
+    this.photoDeps = deps;
+  }
+
+  get photoOpen(): boolean {
+    return this.photoPanel.open;
+  }
+
+  togglePhoto(): void {
+    if (this.photoDeps) this.photoPanel.toggle();
+  }
+
+  /**
+   * Photo mode hides the rest of the interface rather than drawing over it.
+   *
+   * A HUD in the corner of every screenshot is the thing photo mode exists to
+   * avoid, and hiding it here — rather than inside `PhotoMode` — keeps the
+   * panel from needing a handle on the chrome it is not responsible for.
+   */
+  openPhoto(open: boolean): void {
+    if (open && !this.photoDeps) return;
+    this.hud.hidden = open;
+    if (this.isTouch) this.touch.hidden = open;
+    this.photoPanel.set(open);
+  }
+
+  // -- carrying, record and property ----------------------------------------
+  private lifeDeps: import('./LifePanel').LifeDeps | null = null;
+  private readonly lifePanel = new LazyPanel({
+    element: $('life'),
+    load: async () => new (await import('./LifePanel')).LifePanel(this.lifeDeps!),
+    onOpen: (p) => p.open(),
+    transitionClass: 'is-on',
+    sound: (k) => this.cb.onUiSound(k),
+    afterShow: () => this.input.releaseAll(),
+  });
+
+  setLifeDeps(deps: import('./LifePanel').LifeDeps): void {
+    this.lifeDeps = deps;
+  }
+
+  get lifeOpen(): boolean {
+    return this.lifePanel.open;
+  }
+
+  toggleLife(): void {
+    if (this.lifeDeps) this.lifePanel.toggle();
+  }
+
+  openLife(open: boolean): void {
+    if (open && !this.lifeDeps) return;
+    this.lifePanel.set(open);
+  }
+
   private readonly settingsPanel = new LazyPanel({
     element: $('info'),
     load: async () =>
@@ -370,11 +475,17 @@ export class HUD {
         onResetProgress: () => this.cb.onResetProgress(),
         onCombatOption: (k, v) => this.cb.onCombatOption(k, v),
         onAccessOption: (k, v) => this.cb.onAccessOption(k, v),
+        onVolume: (bus, level) => this.cb.onVolume(bus, level),
+        bindings: () => this.input.keybindings,
+        onRebind: () => this.cb.onRebind(),
+        onSubtitles: (on) => this.cb.onSubtitles(on),
+        onTextSpeed: (m) => this.cb.onTextSpeed(m),
       }),
     // Reflect anything changed while the panel did not exist — the quality and
     // time tiles are both reachable without it.
     onOpen: (p) => p.syncAll(),
     transitionClass: 'is-on',
+    sound: (k) => this.cb.onUiSound(k),
     closeDelay: 240,
     afterShow: () => this.input.releaseAll(),
   });
@@ -613,12 +724,24 @@ export class HUD {
     this.counter.classList.add('is-pop');
   }
 
+  /**
+   * A toast. `ms` is the *base* dwell; `textSpeed` stretches it.
+   *
+   * Every caller passes the default, and every caller should keep doing so:
+   * how long a line stays is a reading-speed setting, not a decision each
+   * call site should be making. The failure this guards against is a line
+   * that vanishes before it has been read.
+   */
   showToast(title: string, body: string, ms = 3600): void {
     this.toastTitle.textContent = title;
     this.toastBody.textContent = body;
+    this.cb.onUiSound('toast');
     this.toast.classList.add('is-on');
     window.clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => this.toast.classList.remove('is-on'), ms);
+    this.toastTimer = window.setTimeout(
+      () => this.toast.classList.remove('is-on'),
+      ms * this.settings.current.textSpeed,
+    );
   }
 
   /** Show or clear the "press E" prompt. Pass null to hide. */
@@ -646,6 +769,38 @@ export class HUD {
       this.dashFuel.style.width = `${Math.round(readout.fuel * 100)}%`;
     }
     this.dashHints.textContent = readout.hints.join(' · ');
+  }
+
+  /**
+   * Show or hide the flight instruments. Null means not in the aeroplane.
+   *
+   * The reachability gap this closes was the plainest one in the whole
+   * inventory: `FlightState` has mirrored `airspeed`, `altitude`,
+   * `stallWarning` and `boundaryPressure` since Phase 10 *specifically so the
+   * HUD could read them without the flight chunk being present*, and nothing
+   * ever did. You could fly with no airspeed, no height and no stall warning
+   * — which the Phase 10 brief asked for by name.
+   *
+   * Metres per second rather than knots. The world is 2.1 km across and every
+   * other speed in the game is metric; a knot here would be costume.
+   */
+  setFlightReadout(readout: FlightReadout | null): void {
+    if (!readout) {
+      this.flight.hidden = true;
+      return;
+    }
+    this.flight.hidden = false;
+    this.flightSpeed.textContent = String(Math.round(readout.airspeed));
+    this.flightAlt.textContent = String(Math.round(readout.altitude));
+    this.flightThrottle.style.width = `${Math.round(Math.max(0, Math.min(1, readout.throttle)) * 100)}%`;
+    this.flightWarn.hidden = !readout.stallWarning;
+
+    // The boundary caption is already a toast when you cross into the turning
+    // band. This is the quieter, always-there version: it appears while the
+    // pressure is non-zero and says which way home is.
+    const edge = readout.boundary;
+    this.flightEdge.hidden = edge === null;
+    if (edge !== null) this.flightEdge.textContent = edge;
   }
 
   // ------------------------------------------------------------------- map
@@ -969,8 +1124,16 @@ export class HUD {
     this.reticle.style.transform = `scale(${scale.toFixed(2)})`;
   }
 
+  /**
+   * The caption line, for non-musical audio.
+   *
+   * Suppressed entirely when subtitles are off, rather than left rendering
+   * into a hidden element: a player who turned them off should cost nothing
+   * to keep them off, and a hidden node that still gets written to is how a
+   * "disabled" feature quietly stays on.
+   */
   setCaption(text: string | null): void {
-    if (text) {
+    if (text && this.settings.current.subtitles) {
       this.caption.textContent = text;
       this.caption.hidden = false;
     } else {

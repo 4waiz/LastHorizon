@@ -255,7 +255,7 @@
 
       <canvas id="minimap" class="minimap" width="320" height="320" aria-hidden="true"></canvas>
       <div id="prompt" class="prompt"><kbd>E</kbd><span id="promptText"></span></div>
-      <div id="hint" class="hint">WASD to walk · Shift to run · Space to jump · M map · J journal · drag to look</div>
+      <div id="hint" class="hint">WASD to walk · Shift to run · Space to jump · M map · J journal · P phone · I pockets · drag to look</div>
 
       <!-- One objective line, never a list. The journal holds the full picture. -->
       <div id="objective" class="objective" role="status" aria-live="polite" hidden>
@@ -292,6 +292,26 @@
           <div class="dash__bar dash__bar--fuel" id="dashFuelWrap" title="Fuel"><i id="dashFuel"></i></div>
         </div>
         <div id="dashHints" class="dash__hints"></div>
+      </div>
+      <!-- Flight instruments. Contextual like the vehicle dash: absent on
+           foot, absent in a car, present the moment you are in the aeroplane.
+           Airspeed and altitude are the two numbers you cannot fly without;
+           the stall warning is text as well as a class, because a warning
+           conveyed by colour alone is not a warning to everybody. -->
+      <div id="flight" class="flight" hidden aria-live="polite">
+        <div class="flight__row">
+          <span class="flight__label">Speed</span>
+          <span id="flightSpeed" class="flight__value">0</span>
+          <span class="flight__unit">m/s</span>
+        </div>
+        <div class="flight__row">
+          <span class="flight__label">Height</span>
+          <span id="flightAlt" class="flight__value">0</span>
+          <span class="flight__unit">m</span>
+        </div>
+        <div class="flight__bar" title="Throttle"><i id="flightThrottle"></i></div>
+        <p id="flightWarn" class="flight__warn" hidden>Stall — nose down</p>
+        <p id="flightEdge" class="flight__edge" hidden></p>
       </div>
       <div id="debug" class="debug" hidden></div>
     </div>
@@ -431,7 +451,11 @@
             <dt>E</dt><dd>Interact — doors, bed, chair, wardrobe</dd>
             <dt>Drag mouse</dt><dd>Look around</dd>
             <dt>Scroll</dt><dd>Zoom</dd>
-            <dt>Esc</dt><dd>Close this panel</dd>
+            <dt>M</dt><dd>Map</dd>
+            <dt>J</dt><dd>Journal</dd>
+            <dt>P</dt><dd>Phone — work, people, garage</dd>
+            <dt>I</dt><dd>Carrying, record and property</dd>
+            <dt>Esc</dt><dd>Close this panel, or pause</dd>
           </dl>
           <p class="settings__note">
             The rest of these only do anything once you are grown and carrying something.
@@ -446,9 +470,22 @@
             <dt>V</dt><dd>Switch shoulder</dd>
           </dl>
           <p class="keys__touch">The radar, bottom left, rotates with you: roads in grey, houses in clay, keepsakes still to find as pulsing gold.</p>
-          <dl class="keys" hidden>
-          </dl>
           <p class="keys__touch">On a touch screen: joystick on the left, jump and run on the right.</p>
+
+          <h4 class="rebind__title">Change a key</h4>
+          <p class="settings__note" id="rebindHelp">
+            Pick an action, then press the key you want. The arrow keys and
+            Enter always work whatever you choose, so you cannot lock yourself
+            out. Escape cancels.
+          </p>
+          <!-- Built by SettingsPanel: one row per action, and each row's
+               label has to say which key it currently carries. Static markup
+               would be a list of keys that goes stale the moment one changes. -->
+          <div id="rebindList" class="rebind" role="group" aria-labelledby="rebindHelp"></div>
+          <div class="rebind__foot">
+            <button type="button" id="rebindReset" class="rebind__reset">Reset all keys</button>
+            <span id="rebindStatus" class="rebind__status" role="status" aria-live="polite"></span>
+          </div>
         </section>
 
         <section class="settings">
@@ -512,6 +549,35 @@
             None of these change how the game plays. They are here because a setting that
             costs nothing to offer should not be somebody's difficulty level.
           </p>
+          <div class="row row--stack">
+            <span id="volLabel">Sound</span>
+            <!-- Real range inputs, not segments. A level is continuous and a
+                 four-button segment for it would be a lie about the model.
+                 Each is labelled by its own text, so a screen reader says
+                 "Music, slider, 100%" rather than "slider". -->
+            <div class="vols" id="setVolumes" role="group" aria-labelledby="volLabel">
+              <label class="vol"><span class="vol__name">Overall</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="master" />
+                <output class="vol__value" data-for="master">100%</output>
+              </label>
+              <label class="vol"><span class="vol__name">Music</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="music" />
+                <output class="vol__value" data-for="music">100%</output>
+              </label>
+              <label class="vol"><span class="vol__name">Ambience</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="ambience" />
+                <output class="vol__value" data-for="ambience">100%</output>
+              </label>
+              <label class="vol"><span class="vol__name">Effects</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="sfx" />
+                <output class="vol__value" data-for="sfx">100%</output>
+              </label>
+              <label class="vol"><span class="vol__name">Interface</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="ui" />
+                <output class="vol__value" data-for="ui">100%</output>
+              </label>
+            </div>
+          </div>
           <div class="row">
             <span>Text size</span>
             <div class="seg" id="setUiScale">
@@ -527,6 +593,22 @@
               <button type="button" data-motion="auto">Match system</button>
               <button type="button" data-motion="off">Full</button>
               <button type="button" data-motion="on">Reduced</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>Subtitles</span>
+            <div class="seg" id="setSubtitles">
+              <button type="button" data-subs="on">On</button>
+              <button type="button" data-subs="off">Off</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>Text stays</span>
+            <div class="seg" id="setTextSpeed">
+              <button type="button" data-speed="0.6">Briefly</button>
+              <button type="button" data-speed="1">Normal</button>
+              <button type="button" data-speed="1.8">Longer</button>
+              <button type="button" data-speed="3">Much longer</button>
             </div>
           </div>
           <div class="row">
@@ -659,6 +741,52 @@
           <button id="phoneClose" class="phone__close" type="button" aria-label="Close">×</button>
         </div>
         <div id="phoneBody" class="phone__body"></div>
+      </div>
+    </div>
+
+    <!-- ============================== life ============================= -->
+    <!-- Carrying, record and property. Static markup like every other panel:
+         it is here for an accessibility snapshot whether or not the chunk has
+         been fetched. The tab buttons are built by `LifePanel` because the
+         roving tabindex has to be maintained anyway, and markup that lies
+         about which tab is selected is worse than markup that has none. -->
+    <div id="life" class="phone" role="dialog" aria-modal="true"
+         aria-labelledby="lifeTitle" hidden>
+      <div class="phone__card">
+        <div class="phone__head">
+          <h2 id="lifeTitle" class="phone__title">Your life</h2>
+          <span id="life-summary" class="phone__money">$0</span>
+          <button id="lifeClose" class="phone__close" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="phone__body">
+          <div id="life-tabs" class="life__tabs" role="tablist"
+               aria-label="Carrying, record and property"></div>
+          <div id="life-body" class="life__body" role="tabpanel"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =========================== photo mode ========================== -->
+    <!-- Not a modal, deliberately: no backdrop and no card, because the whole
+         point is to see the world. The bar sits along the bottom and takes
+         pointer events; everything above it is left clear. -->
+    <div id="photo" class="photo" hidden>
+      <div id="photoGuides" class="photo__guides" aria-hidden="true" hidden></div>
+      <p class="photo__hint">Drag to look · scroll to zoom · Esc to leave</p>
+      <div class="photo__bar" role="group" aria-label="Photo mode">
+        <span class="photo__group">
+          <label for="photoFov">Lens</label>
+          <input id="photoFov" type="range" min="25" max="95" step="1" value="55" />
+          <output class="photo__value" data-for="photoFov">55</output>
+        </span>
+        <span class="photo__group">
+          <label for="photoRoll">Tilt</label>
+          <input id="photoRoll" type="range" min="-30" max="30" step="1" value="0" />
+          <output class="photo__value" data-for="photoRoll">0°</output>
+        </span>
+        <button type="button" id="photoPlayer" class="photo__toggle" aria-pressed="true">You</button>
+        <button type="button" id="photoGuidesBtn" class="photo__toggle" aria-pressed="false">Thirds</button>
+        <button type="button" id="photoShoot" class="photo__shoot">Take it</button>
       </div>
     </div>
 

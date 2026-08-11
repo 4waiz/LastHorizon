@@ -159,7 +159,59 @@ export interface SettingsState {
   heatNumerals: boolean;
   /** Flying, exposed here because Phase 10 shipped it with no interface. */
   flightAssist: 'assisted' | 'reduced';
+
+  /**
+   * Per-bus levels, 0..1, multiplied onto the mix `AudioManager` designs.
+   *
+   * Deliberately multipliers rather than absolute gains. The balance between
+   * a music bed at 0.30 and effects at 0.75 is a mix decision that belongs in
+   * the audio code; what belongs to the player is *more music, less wind*.
+   * Handing them raw gain values would make every preset a different game.
+   *
+   * `muted` stays separate and still wins. It is one keypress from the HUD
+   * and has to work without disturbing whatever the sliders were set to.
+   */
+  volumes: Record<AudioBus, number>;
+
+  /**
+   * The key layout, as `Keybindings` serialises it.
+   *
+   * Stored here rather than in its own key so a player who clears settings
+   * clears the lot — a reset that leaves a broken layout behind is the one
+   * case where "reset" has to mean it.
+   */
+  bindings: Record<string, string>;
+
+  /**
+   * Subtitles for spoken and non-musical audio, and how long a line stays.
+   *
+   * `textSpeed` is a multiplier on the dwell time of anything the player
+   * reads without dismissing it — toasts, captions, subtitles. Below 1 is
+   * faster and above 1 is slower, and slower is the accessible direction:
+   * the failure mode is a line that vanishes before it has been read.
+   */
+  subtitles: boolean;
+  textSpeed: number;
 }
+
+/**
+ * The four buses.
+ *
+ * `ui` is separate from `sfx` on purpose: interface clicks are the sound
+ * players turn off first, and folding them into world effects would mean
+ * silencing footsteps to silence a button.
+ */
+export type AudioBus = 'master' | 'music' | 'ambience' | 'sfx' | 'ui';
+
+export const AUDIO_BUSES: readonly AudioBus[] = ['master', 'music', 'ambience', 'sfx', 'ui'];
+
+export const DEFAULT_VOLUMES: Record<AudioBus, number> = {
+  master: 1,
+  music: 1,
+  ambience: 1,
+  sfx: 1,
+  ui: 1,
+};
 
 const STORAGE_KEY = 'lasthorizon.settings.v1';
 
@@ -189,6 +241,12 @@ export class Settings {
       highContrast: false,
       heatNumerals: false,
       flightAssist: 'assisted',
+      volumes: { ...DEFAULT_VOLUMES },
+      bindings: {},
+      // On by default, unlike most options here. A caption nobody needs is a
+      // line of small text; a missing caption is content somebody cannot have.
+      subtitles: true,
+      textSpeed: 1,
       ...defaults,
       ...this.read(),
     };
@@ -249,6 +307,33 @@ export class Settings {
       if (parsed.flightAssist === 'assisted' || parsed.flightAssist === 'reduced') {
         out.flightAssist = parsed.flightAssist;
       }
+
+      // Per bus, and clamped, for the same reason `needsEnabled` is read per
+      // key: a stored blob missing one bus, or carrying a bus that no longer
+      // exists, must not silence the others or add a phantom.
+      if (parsed.volumes && typeof parsed.volumes === 'object') {
+        const v: Record<AudioBus, number> = { ...DEFAULT_VOLUMES };
+        for (const bus of AUDIO_BUSES) {
+          const level = num(parsed.volumes[bus], 0, 1);
+          if (level !== null) v[bus] = level;
+        }
+        out.volumes = v;
+      }
+
+      // Shape only. `Keybindings.restore` does the real validation — reserved
+      // codes, duplicates, actions that no longer exist — because those rules
+      // belong with the table rather than being written twice.
+      if (parsed.bindings && typeof parsed.bindings === 'object') {
+        const b: Record<string, string> = {};
+        for (const [k, v] of Object.entries(parsed.bindings)) {
+          if (typeof v === 'string') b[k] = v;
+        }
+        out.bindings = b;
+      }
+
+      if (typeof parsed.subtitles === 'boolean') out.subtitles = parsed.subtitles;
+      const speed = num(parsed.textSpeed, 0.5, 3);
+      if (speed !== null) out.textSpeed = speed;
 
       return out;
     } catch {
@@ -353,6 +438,53 @@ export class Settings {
    * storage — Phase 9's combat options learned that when a clamped value
    * arrived as a string.
    */
+  /**
+   * Set one bus level, 0..1.
+   *
+   * Ignores an unknown bus and a value that is not a finite number rather
+   * than throwing, matching every other setter here: settings arrive from
+   * storage and from a DOM slider, and neither is a trusted caller.
+   */
+  setVolume(bus: AudioBus, level: number): void {
+    if (!AUDIO_BUSES.includes(bus)) return;
+    if (typeof level !== 'number' || !Number.isFinite(level)) return;
+    const next = Math.min(1, Math.max(0, level));
+    if (this.state.volumes[bus] === next) return;
+    this.state.volumes = { ...this.state.volumes, [bus]: next };
+    this.persist();
+    this.emit();
+  }
+
+  /** Store a layout. Validation lives in `Keybindings`, not here. */
+  setBindings(map: Record<string, string>): void {
+    this.state.bindings = { ...map };
+    this.persist();
+    this.emit();
+  }
+
+  setSubtitles(on: boolean): void {
+    if (typeof on !== 'boolean' || this.state.subtitles === on) return;
+    this.state.subtitles = on;
+    this.persist();
+    this.emit();
+  }
+
+  /**
+   * How long text dwells, as a multiplier.
+   *
+   * 0.5 to 3. Slower is the accessible direction — the failure mode is a line
+   * that vanishes before it has been read — so the range is deliberately
+   * lopsided about 1.
+   */
+  setTextSpeed(mult: number): void {
+    if (typeof mult !== 'number' || !Number.isFinite(mult)) return;
+    const next = Math.min(3, Math.max(0.5, mult));
+    if (this.state.textSpeed === next) return;
+    this.state.textSpeed = next;
+    this.persist();
+    this.emit();
+  }
+
   setAccessOption(
     key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
     value: number | boolean | string,

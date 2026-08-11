@@ -59,6 +59,7 @@ export interface PhoneDeps {
   recoverVehicle(id: string): boolean;
   openMap(): void;
   openJournal(): void;
+  openPhoto(): void;
   money(): number;
   toast(title: string, body: string): void;
   /**
@@ -92,7 +93,7 @@ const APPS: readonly AppTile[] = [
   { id: 'map', label: 'Map', glyph: '◈', open: 'delegate' },
   { id: 'journal', label: 'Journal', glyph: '❏', open: 'delegate' },
   { id: 'messages', label: 'Messages', glyph: '✉', open: null },
-  { id: 'camera', label: 'Camera', glyph: '◎', open: null },
+  { id: 'camera', label: 'Camera', glyph: '◎', open: 'delegate' },
 ];
 
 export class Phone {
@@ -160,6 +161,7 @@ export class Phone {
       // Opening one closes the phone, because two full-screen panels stacked
       // is not a thing anybody wants.
       if (app.id === 'map') this.d.openMap();
+      else if (app.id === 'camera') this.d.openPhoto();
       else this.d.openJournal();
     }
   }

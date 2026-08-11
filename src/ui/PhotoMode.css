@@ -1,0 +1,156 @@
+/*
+ * Photo mode chrome.
+ *
+ * Travels with `PhotoMode.ts`, on the rule the other lazy panels follow.
+ *
+ * Unlike every other panel this one is *not* a modal: the whole point is to
+ * see the world, so there is no backdrop, no card, and the controls sit in a
+ * bar along the bottom with everything above them left clear.
+ */
+
+.photo {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.photo[hidden] {
+  display: none;
+}
+
+/* The one moment the chrome must not be in the picture. Opacity rather than
+   `hidden`, because a reflow between the draw and the read would be a task
+   boundary and the drawing buffer does not survive one. */
+.photo.is-shooting .photo__bar,
+.photo.is-shooting .photo__hint {
+  opacity: 0;
+}
+
+/* --- framing guides ------------------------------------------------------ */
+
+.photo__guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.photo__guides::before,
+.photo__guides::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Thirds, drawn as two gradients rather than four elements. */
+  background:
+    linear-gradient(to right, transparent calc(33.333% - 1px), rgba(250, 247, 238, 0.5) calc(33.333% - 1px), rgba(250, 247, 238, 0.5) 33.333%, transparent 33.333%),
+    linear-gradient(to right, transparent calc(66.666% - 1px), rgba(250, 247, 238, 0.5) calc(66.666% - 1px), rgba(250, 247, 238, 0.5) 66.666%, transparent 66.666%);
+}
+
+.photo__guides::after {
+  background:
+    linear-gradient(to bottom, transparent calc(33.333% - 1px), rgba(250, 247, 238, 0.5) calc(33.333% - 1px), rgba(250, 247, 238, 0.5) 33.333%, transparent 33.333%),
+    linear-gradient(to bottom, transparent calc(66.666% - 1px), rgba(250, 247, 238, 0.5) calc(66.666% - 1px), rgba(250, 247, 238, 0.5) 66.666%, transparent 66.666%);
+}
+
+/* --- the control bar ----------------------------------------------------- */
+
+.photo__bar {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: calc(var(--safe-b) + var(--sp-4));
+  margin-inline: auto;
+  inline-size: min(46rem, calc(100% - var(--sp-6)));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius);
+  background: rgba(250, 247, 238, 0.92);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.photo__group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+}
+
+.photo__group input[type='range'] {
+  inline-size: 7rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.photo__group input[type='range']:focus-visible {
+  outline: 3px solid var(--accent-cool);
+  outline-offset: 3px;
+  border-radius: var(--radius-pill);
+}
+
+.photo__value {
+  min-inline-size: 2.6em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.photo__toggle {
+  padding: 4px var(--sp-3);
+  border: var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--paper);
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+/* On-state is weight and a border, not colour alone. */
+.photo__toggle.is-on {
+  background: var(--cream);
+  border-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.photo__shoot {
+  padding: var(--sp-2) var(--sp-5);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--paper);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.photo__shoot:focus-visible,
+.photo__toggle:focus-visible {
+  outline: 3px solid var(--accent-cool);
+  outline-offset: 2px;
+}
+
+.photo__hint {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: calc(var(--safe-t) + var(--sp-4));
+  text-align: center;
+  color: var(--paper);
+  font-size: var(--text-xs);
+  text-shadow: 0 1px 4px rgba(40, 34, 28, 0.7);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+/* On a phone the bar is the whole width and the sliders wrap under. */
+@media (max-width: 34rem) {
+  .photo__group input[type='range'] {
+    inline-size: 5rem;
+  }
+}

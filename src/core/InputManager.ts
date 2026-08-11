@@ -10,21 +10,25 @@
  */
 
 import { GamepadReader, type GamepadState, EMPTY_STATE } from './GamepadReader';
+import { Keybindings, type Action } from './Keybindings';
 
 export interface MoveAxis {
   x: number;
   y: number;
 }
 
-const MOVE_KEYS: Record<string, [number, number]> = {
-  KeyW: [0, 1],
-  ArrowUp: [0, 1],
-  KeyS: [0, -1],
-  ArrowDown: [0, -1],
-  KeyA: [-1, 0],
-  ArrowLeft: [-1, 0],
-  KeyD: [1, 0],
-  ArrowRight: [1, 0],
+/**
+ * Which way each movement action points, on the input plane.
+ *
+ * By *action*, not by key code. The codes live in `Keybindings` so they can be
+ * remapped; this is the part that cannot change, because "forward" meaning
+ * +Y is not a preference.
+ */
+const MOVE_VECTORS: Partial<Record<Action, [number, number]>> = {
+  forward: [0, 1],
+  back: [0, -1],
+  left: [-1, 0],
+  right: [1, 0],
 };
 
 /**
@@ -51,6 +55,8 @@ export class InputManager {
   private mapQueued = false;
   private journalQueued = false;
   private phoneQueued = false;
+  private lifeQueued = false;
+  private photoQueued = false;
   private interactQueued = false;
   /** Touch or gamepad interact, which have no entry in `keys`. */
   private pointerInteractHeld = false;
@@ -92,14 +98,17 @@ export class InputManager {
 
   private disposers: Array<() => void> = [];
   private element: HTMLElement | null = null;
+  /** The layout. Replaced wholesale by `setBindings`, never mutated here. */
+  private bindings = new Keybindings();
 
   get running(): boolean {
-    return (
-      this.keys.has('ShiftLeft') ||
-      this.keys.has('ShiftRight') ||
-      this.stickRunning ||
-      this.gamepadRunning
-    );
+    // Through the table, so a rebound run key runs. `codesFor` returns the
+    // primary plus the fixed alternates, which is why right shift still works
+    // for a player who has moved run off left shift.
+    for (const code of this.bindings.codesFor('run')) {
+      if (code !== '' && this.keys.has(code)) return true;
+    }
+    return this.stickRunning || this.gamepadRunning;
   }
 
   /** Last polled pad state, for the vehicle controller's analogue axes. */
@@ -151,47 +160,40 @@ export class InputManager {
     this.element = null;
   }
 
+  /**
+   * One press, resolved through the binding table.
+   *
+   * Was a chain of eleven `code === 'KeyX'` comparisons. The layout is now
+   * data (`src/core/Keybindings.ts`) so it can be remapped, and this reads the
+   * *meaning* of a key rather than its identity. The slot digits stay
+   * hard-coded: 1–4 is a numeric row, not an action, and a player who wants
+   * slot 2 on `F` wants a different feature.
+   */
   private onKey(e: KeyboardEvent, down: boolean): void {
     if (e.repeat) return;
     const code = e.code;
+
     if (down) {
-      if (code === 'KeyE' || code === 'KeyF' || code === 'Enter') {
-        this.interactQueued = true;
-        e.preventDefault();
+      const action = this.bindings.actionFor(code);
+      switch (action) {
+        case 'interact': this.interactQueued = true; break;
+        case 'jump': this.jumpQueued = true; break;
+        // Righting a vehicle. Harmless on foot, so no mode check here.
+        case 'flip': this.flipQueued = true; break;
+        case 'map': this.mapQueued = true; break;
+        case 'journal': this.journalQueued = true; break;
+        case 'phone': this.phoneQueued = true; break;
+        case 'life': this.lifeQueued = true; break;
+        case 'draw': this.drawQueued = true; break;
+        case 'reload': this.reloadQueued = true; break;
+        case 'shoulder': this.shoulderQueued = true; break;
+        case 'photo': this.photoQueued = true; break;
+        default: break;
       }
-      if (code === 'Space') {
-        this.jumpQueued = true;
-        e.preventDefault();
-      }
-      // Righting a vehicle. Harmless on foot, so it needs no mode check here.
-      if (code === 'KeyR') {
-        this.flipQueued = true;
-        e.preventDefault();
-      }
-      if (code === 'KeyM') {
-        this.mapQueued = true;
-        e.preventDefault();
-      }
-      if (code === 'KeyJ') {
-        this.journalQueued = true;
-        e.preventDefault();
-      }
-      if (code === 'KeyP') {
-        this.phoneQueued = true;
-        e.preventDefault();
-      }
-      if (code === 'KeyQ') {
-        this.drawQueued = true;
-        e.preventDefault();
-      }
-      if (code === 'KeyG') {
-        this.reloadQueued = true;
-        e.preventDefault();
-      }
-      if (code === 'KeyV') {
-        this.shoulderQueued = true;
-        e.preventDefault();
-      }
+      // Movement and `run` are held rather than queued; they fall through to
+      // `this.keys` below and are read by `recomputeMove`.
+      if (action !== null) e.preventDefault();
+
       if (code.startsWith('Digit')) {
         const n = Number(code.slice(5));
         if (n >= 1 && n <= 4) {
@@ -199,7 +201,6 @@ export class InputManager {
           e.preventDefault();
         }
       }
-      if (code in MOVE_KEYS || code === 'Space') e.preventDefault();
       this.keys.add(code);
     } else {
       this.keys.delete(code);
@@ -207,11 +208,24 @@ export class InputManager {
     this.recomputeMove();
   }
 
+  /** Swap the layout. Held keys are released, or a rebind mid-walk sticks. */
+  setBindings(bindings: Keybindings): void {
+    this.bindings = bindings;
+    this.keys.clear();
+    this.recomputeMove();
+  }
+
+  get keybindings(): Keybindings {
+    return this.bindings;
+  }
+
   private recomputeMove(): void {
     let x = 0;
     let y = 0;
     for (const code of this.keys) {
-      const v = MOVE_KEYS[code];
+      // Through the table, so a remapped `forward` moves the player forward.
+      const action = this.bindings.actionFor(code);
+      const v = action ? MOVE_VECTORS[action] : undefined;
       if (v) {
         x += v[0];
         y += v[1];
@@ -425,6 +439,20 @@ export class InputManager {
   consumePhone(): boolean {
     if (!this.phoneQueued) return false;
     this.phoneQueued = false;
+    return true;
+  }
+
+  /** True once per press of the photo key. Enters or leaves photo mode. */
+  consumePhoto(): boolean {
+    if (!this.photoQueued) return false;
+    this.photoQueued = false;
+    return true;
+  }
+
+  /** True once per press of I. Opens or closes carrying/record/property. */
+  consumeLife(): boolean {
+    if (!this.lifeQueued) return false;
+    this.lifeQueued = false;
     return true;
   }
 
