@@ -4330,6 +4330,24 @@ export class Game {
       this.player.motor.teleport(s.position.x, s.position.y - 0.6, s.position.z);
       this.player.controller.facing = s.yaw;
     }
+
+    // The instruments. Contextual like the vehicle dash: present only while
+    // actually flying, and cleared the moment the player climbs out.
+    const verdict = flight.verdict;
+    this.hud.setFlightReadout(
+      flight.riding
+        ? {
+            airspeed: s.airspeed,
+            altitude: s.altitudeAgl,
+            throttle: this.flightThrottle,
+            stallWarning: s.stallWarning,
+            // Only once the boundary is actually pushing back. Inside the
+            // corridor there is nothing to say, and a permanent "you are fine"
+            // line is clutter.
+            boundary: verdict.zone === 'inside' ? null : verdict.caption,
+          }
+        : null,
+    );
   }
 
   /** Throttle is a held axis rather than a rate, so it lives on the game. */

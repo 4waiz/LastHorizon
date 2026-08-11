@@ -115,6 +115,139 @@ test.describe('the life panel', () => {
   });
 });
 
+test.describe('the flight instruments', () => {
+  /**
+   * The plainest reachability gap in the whole inventory: `FlightState` has
+   * mirrored airspeed, altitude and the stall warning since Phase 10 *so the
+   * HUD could read them*, and nothing ever did. You could fly with no
+   * instruments at all — including no stall warning, which the phase brief
+   * asked for by name.
+   */
+  async function board(page: Page): Promise<void> {
+    await page.evaluate(() => window.__LH_TEST__!.awaitFlight());
+    const ok = await page.evaluate(() => window.__LH_TEST__!.boardPlane());
+    expect(ok, 'could not board the aeroplane').toBe(true);
+  }
+
+  test('are absent on foot and present in the aeroplane', async ({ page }) => {
+    const errors = watchConsole(page);
+    await boot(page);
+    await expect(page.locator('#flight')).toBeHidden();
+
+    await board(page);
+    await page.evaluate(() => window.__LH_TEST__!.flyFor(0.5, {}));
+    await expect(page.locator('#flight')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test('show airspeed and height that move when you fly', async ({ page }) => {
+    await boot(page);
+    await board(page);
+
+    await page.evaluate(() => window.__LH_TEST__!.setThrottle(1));
+    await page.evaluate(() => window.__LH_TEST__!.flyFor(6, { throttle: 1 }));
+    const speed = Number(await page.locator('#flightSpeed').textContent());
+    expect(speed, 'airspeed never moved off zero').toBeGreaterThan(3);
+
+    await page.evaluate(() => window.__LH_TEST__!.flyFor(8, { throttle: 1, pitch: 1 }));
+    const alt = Number(await page.locator('#flightAlt').textContent());
+    expect(alt, 'height never moved').toBeGreaterThan(2);
+  });
+
+  test('warn about a stall in words, not only in colour', async ({ page }) => {
+    await boot(page);
+    await board(page);
+
+    // Up to flying speed, then throttle off and hold the nose up: the
+    // textbook way into a stall, and what the warning exists for.
+    await page.evaluate(() => window.__LH_TEST__!.flyFor(10, { throttle: 1 }));
+    await page.evaluate(() => window.__LH_TEST__!.flyFor(6, { throttle: 1, pitch: 1 }));
+    await page.evaluate(() => window.__LH_TEST__!.flyFor(9, { throttle: 0, pitch: 1 }));
+
+    const warned = await page.evaluate(() => window.__LH_TEST__!.getFlight().stallWarning);
+    // If the model did not stall, the HUD has nothing to show and asserting
+    // on it would be asserting on the model. Only check the HUD agrees.
+    const shown = await page.locator('#flightWarn').isVisible();
+    expect(shown, `HUD says ${shown}, model says ${warned}`).toBe(warned);
+    if (warned) {
+      await expect(page.locator('#flightWarn')).toContainText(/stall/i);
+    }
+  });
+
+  test('clear themselves when the player gets out', async ({ page }) => {
+    await boot(page);
+    await board(page);
+    await page.evaluate(() => window.__LH_TEST__!.flyFor(0.5, {}));
+    await expect(page.locator('#flight')).toBeVisible();
+
+    await page.evaluate(() => window.__LH_TEST__!.leavePlane());
+    await page.evaluate(() => window.__LH_TEST__!.flyFor(0.5, {}));
+    await expect(page.locator('#flight')).toBeHidden();
+  });
+
+  test('are styled from the eager sheet, because flying is not a panel', async ({ page }) => {
+    // The `.dash` bug this pass fixed: the vehicle dashboard's styles had been
+    // moved into the lazily-loaded settings chunk, so anybody who drove before
+    // opening settings got an unstyled readout. Neither instrument cluster is
+    // behind a keypress, so neither may depend on a lazy stylesheet.
+    await boot(page);
+    await board(page);
+    await page.evaluate(() => window.__LH_TEST__!.flyFor(0.5, {}));
+
+    const pos = await page
+      .locator('#flight')
+      .evaluate((el) => getComputedStyle(el).position);
+    expect(pos, 'flight instruments are unstyled').toBe('absolute');
+  });
+});
+
+test.describe('always-on chrome is styled without opening anything', () => {
+  /**
+   * The bug this exists for shipped in Phase 11 and survived until Phase 10's
+   * leftovers were being finished.
+   *
+   * The rule that phase's CSS split follows is that a lazy panel's stylesheet
+   * travels with the panel. The check that rule needs is *"is this class used
+   * outside the panel?"* — and `.dash` is: it is the vehicle dashboard, which
+   * appears the moment you get into a car. It went into `SettingsPanel.css`
+   * anyway, so every player who drove before opening settings got an unstyled
+   * readout, and nothing noticed because nothing drives and reads CSS.
+   */
+  test('the vehicle dashboard has its styles before settings is ever opened', async ({ page }) => {
+    await boot(page);
+
+    // A bicycle: the one vehicle that needs no key, so this test is about the
+    // dashboard rather than about the inventory.
+    const inSaddle = await page.evaluate(async () => {
+      const t = window.__LH_TEST__!;
+      const p = t.getPlayerState();
+      const id = (await t.spawnVehicle('bicycle', p.x + 1.6, p.z + 1.5, 0))!;
+      t.settle(90);
+      const entered = await t.enterVehicle(id);
+      t.settle(20);
+      return entered;
+    });
+    expect(inSaddle, 'could not get on the bicycle').toBe(true);
+    await expect(page.locator('#dash')).toBeVisible();
+
+    // `position: absolute` comes from the stylesheet and nothing else. If the
+    // rules were still in the settings chunk this would be `static`.
+    const style = await page.locator('#dash').evaluate((el) => ({
+      position: getComputedStyle(el).position,
+      radius: getComputedStyle(el).borderTopLeftRadius,
+    }));
+    expect(style.position, 'dashboard is unstyled').toBe('absolute');
+    expect(style.radius).not.toBe('0px');
+
+    // And the settings chunk really has not been fetched, or the assertion
+    // above would be true for the wrong reason.
+    const fetched = await page.evaluate(() =>
+      performance.getEntriesByType('resource').some((e) => /SettingsPanel/.test(e.name)),
+    );
+    expect(fetched, 'settings chunk was already loaded; test proves nothing').toBe(false);
+  });
+});
+
 test.describe('lazy panels are actually lazy', () => {
   /**
    * The claim `check-budgets.mjs` makes on every build is that these chunks

@@ -285,6 +285,26 @@
         </div>
         <div id="dashHints" class="dash__hints"></div>
       </div>
+      <!-- Flight instruments. Contextual like the vehicle dash: absent on
+           foot, absent in a car, present the moment you are in the aeroplane.
+           Airspeed and altitude are the two numbers you cannot fly without;
+           the stall warning is text as well as a class, because a warning
+           conveyed by colour alone is not a warning to everybody. -->
+      <div id="flight" class="flight" hidden aria-live="polite">
+        <div class="flight__row">
+          <span class="flight__label">Speed</span>
+          <span id="flightSpeed" class="flight__value">0</span>
+          <span class="flight__unit">m/s</span>
+        </div>
+        <div class="flight__row">
+          <span class="flight__label">Height</span>
+          <span id="flightAlt" class="flight__value">0</span>
+          <span class="flight__unit">m</span>
+        </div>
+        <div class="flight__bar" title="Throttle"><i id="flightThrottle"></i></div>
+        <p id="flightWarn" class="flight__warn" hidden>Stall — nose down</p>
+        <p id="flightEdge" class="flight__edge" hidden></p>
+      </div>
       <div id="debug" class="debug" hidden></div>
     </div>
 

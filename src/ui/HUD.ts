@@ -22,6 +22,21 @@ const HAT_COLOURS = ['#dcc177', '#c9584b', '#7f9ec4', '#8fae7a', '#e3ded0'];
  * All markup is static in index.html; this wires behaviour to it.
  */
 
+/**
+ * The five numbers you cannot fly without, flattened.
+ *
+ * Deliberately not the `FlightState` object: the HUD is handed values, never
+ * a handle on the director. `boundary` is null when there is nothing to say,
+ * so the line is absent rather than empty.
+ */
+export interface FlightReadout {
+  readonly airspeed: number;
+  readonly altitude: number;
+  readonly throttle: number;
+  readonly stallWarning: boolean;
+  readonly boundary: string | null;
+}
+
 export interface HUDCallbacks {
   onQuality: (q: QualityLevel) => void;
   onMuted: (muted: boolean) => void;
@@ -71,6 +86,12 @@ export class HUD {
   private dashFuel = $('dashFuel');
   private dashFuelWrap = $('dashFuelWrap');
   private dashHints = $('dashHints');
+  private flight = $('flight');
+  private flightSpeed = $('flightSpeed');
+  private flightAlt = $('flightAlt');
+  private flightThrottle = $('flightThrottle');
+  private flightWarn = $('flightWarn');
+  private flightEdge = $('flightEdge');
   private mapPanel = $('mapPanel');
   private mapCanvas = $<HTMLCanvasElement>('mapCanvas');
   private mapScaleText = $('mapScaleText');
@@ -676,6 +697,38 @@ export class HUD {
       this.dashFuel.style.width = `${Math.round(readout.fuel * 100)}%`;
     }
     this.dashHints.textContent = readout.hints.join(' · ');
+  }
+
+  /**
+   * Show or hide the flight instruments. Null means not in the aeroplane.
+   *
+   * The reachability gap this closes was the plainest one in the whole
+   * inventory: `FlightState` has mirrored `airspeed`, `altitude`,
+   * `stallWarning` and `boundaryPressure` since Phase 10 *specifically so the
+   * HUD could read them without the flight chunk being present*, and nothing
+   * ever did. You could fly with no airspeed, no height and no stall warning
+   * — which the Phase 10 brief asked for by name.
+   *
+   * Metres per second rather than knots. The world is 2.1 km across and every
+   * other speed in the game is metric; a knot here would be costume.
+   */
+  setFlightReadout(readout: FlightReadout | null): void {
+    if (!readout) {
+      this.flight.hidden = true;
+      return;
+    }
+    this.flight.hidden = false;
+    this.flightSpeed.textContent = String(Math.round(readout.airspeed));
+    this.flightAlt.textContent = String(Math.round(readout.altitude));
+    this.flightThrottle.style.width = `${Math.round(Math.max(0, Math.min(1, readout.throttle)) * 100)}%`;
+    this.flightWarn.hidden = !readout.stallWarning;
+
+    // The boundary caption is already a toast when you cross into the turning
+    // band. This is the quieter, always-there version: it appears while the
+    // pressure is non-zero and says which way home is.
+    const edge = readout.boundary;
+    this.flightEdge.hidden = edge === null;
+    if (edge !== null) this.flightEdge.textContent = edge;
   }
 
   // ------------------------------------------------------------------- map
