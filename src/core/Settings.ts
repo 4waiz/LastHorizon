@@ -172,6 +172,26 @@ export interface SettingsState {
    * and has to work without disturbing whatever the sliders were set to.
    */
   volumes: Record<AudioBus, number>;
+
+  /**
+   * The key layout, as `Keybindings` serialises it.
+   *
+   * Stored here rather than in its own key so a player who clears settings
+   * clears the lot — a reset that leaves a broken layout behind is the one
+   * case where "reset" has to mean it.
+   */
+  bindings: Record<string, string>;
+
+  /**
+   * Subtitles for spoken and non-musical audio, and how long a line stays.
+   *
+   * `textSpeed` is a multiplier on the dwell time of anything the player
+   * reads without dismissing it — toasts, captions, subtitles. Below 1 is
+   * faster and above 1 is slower, and slower is the accessible direction:
+   * the failure mode is a line that vanishes before it has been read.
+   */
+  subtitles: boolean;
+  textSpeed: number;
 }
 
 /**
@@ -222,6 +242,11 @@ export class Settings {
       heatNumerals: false,
       flightAssist: 'assisted',
       volumes: { ...DEFAULT_VOLUMES },
+      bindings: {},
+      // On by default, unlike most options here. A caption nobody needs is a
+      // line of small text; a missing caption is content somebody cannot have.
+      subtitles: true,
+      textSpeed: 1,
       ...defaults,
       ...this.read(),
     };
@@ -294,6 +319,21 @@ export class Settings {
         }
         out.volumes = v;
       }
+
+      // Shape only. `Keybindings.restore` does the real validation — reserved
+      // codes, duplicates, actions that no longer exist — because those rules
+      // belong with the table rather than being written twice.
+      if (parsed.bindings && typeof parsed.bindings === 'object') {
+        const b: Record<string, string> = {};
+        for (const [k, v] of Object.entries(parsed.bindings)) {
+          if (typeof v === 'string') b[k] = v;
+        }
+        out.bindings = b;
+      }
+
+      if (typeof parsed.subtitles === 'boolean') out.subtitles = parsed.subtitles;
+      const speed = num(parsed.textSpeed, 0.5, 3);
+      if (speed !== null) out.textSpeed = speed;
 
       return out;
     } catch {
@@ -411,6 +451,36 @@ export class Settings {
     const next = Math.min(1, Math.max(0, level));
     if (this.state.volumes[bus] === next) return;
     this.state.volumes = { ...this.state.volumes, [bus]: next };
+    this.persist();
+    this.emit();
+  }
+
+  /** Store a layout. Validation lives in `Keybindings`, not here. */
+  setBindings(map: Record<string, string>): void {
+    this.state.bindings = { ...map };
+    this.persist();
+    this.emit();
+  }
+
+  setSubtitles(on: boolean): void {
+    if (typeof on !== 'boolean' || this.state.subtitles === on) return;
+    this.state.subtitles = on;
+    this.persist();
+    this.emit();
+  }
+
+  /**
+   * How long text dwells, as a multiplier.
+   *
+   * 0.5 to 3. Slower is the accessible direction — the failure mode is a line
+   * that vanishes before it has been read — so the range is deliberately
+   * lopsided about 1.
+   */
+  setTextSpeed(mult: number): void {
+    if (typeof mult !== 'number' || !Number.isFinite(mult)) return;
+    const next = Math.min(3, Math.max(0.5, mult));
+    if (this.state.textSpeed === next) return;
+    this.state.textSpeed = next;
     this.persist();
     this.emit();
   }

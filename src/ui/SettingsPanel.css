@@ -232,3 +232,95 @@
   outline-offset: 3px;
   border-radius: var(--radius-pill);
 }
+
+/* --- key remapping ------------------------------------------------------- */
+
+.rebind__title {
+  margin: var(--sp-5) 0 var(--sp-1);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.rebind {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-1) var(--sp-3);
+  align-items: center;
+  margin: var(--sp-2) 0;
+}
+
+.rebind__row {
+  display: contents;
+}
+
+.rebind__name {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+
+/* A key cap. Monospace so W and I are the same width and the column does not
+   jitter as bindings change. */
+.rebind__key {
+  min-inline-size: 7em;
+  padding: 3px var(--sp-2);
+  border: var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.rebind__key:hover {
+  background: var(--cream);
+}
+
+.rebind__key:focus-visible {
+  outline: 3px solid var(--accent-cool);
+  outline-offset: 2px;
+}
+
+/* Listening and unbound are marked by weight and border as well as colour —
+   the same rule the Heat numerals and the equipped-item underline follow. */
+.rebind__key.is-listening {
+  border-color: var(--accent);
+  border-style: dashed;
+  font-weight: 600;
+}
+
+.rebind__key.is-unbound {
+  border-style: dotted;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.rebind__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.rebind__reset {
+  padding: 3px var(--sp-3);
+  border: var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.rebind__reset:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.rebind__status {
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+}

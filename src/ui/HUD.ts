@@ -65,6 +65,10 @@ export interface HUDCallbacks {
    * muted, or exists at all. `Game` owns that and no-ops when it does not.
    */
   onUiSound: (kind: UiSound) => void;
+  /** The layout changed. `Game` persists it; the table itself already moved. */
+  onRebind: () => void;
+  onSubtitles: (on: boolean) => void;
+  onTextSpeed: (mult: number) => void;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
@@ -435,6 +439,10 @@ export class HUD {
         onCombatOption: (k, v) => this.cb.onCombatOption(k, v),
         onAccessOption: (k, v) => this.cb.onAccessOption(k, v),
         onVolume: (bus, level) => this.cb.onVolume(bus, level),
+        bindings: () => this.input.keybindings,
+        onRebind: () => this.cb.onRebind(),
+        onSubtitles: (on) => this.cb.onSubtitles(on),
+        onTextSpeed: (m) => this.cb.onTextSpeed(m),
       }),
     // Reflect anything changed while the panel did not exist — the quality and
     // time tiles are both reachable without it.
@@ -679,13 +687,24 @@ export class HUD {
     this.counter.classList.add('is-pop');
   }
 
+  /**
+   * A toast. `ms` is the *base* dwell; `textSpeed` stretches it.
+   *
+   * Every caller passes the default, and every caller should keep doing so:
+   * how long a line stays is a reading-speed setting, not a decision each
+   * call site should be making. The failure this guards against is a line
+   * that vanishes before it has been read.
+   */
   showToast(title: string, body: string, ms = 3600): void {
     this.toastTitle.textContent = title;
     this.toastBody.textContent = body;
     this.cb.onUiSound('toast');
     this.toast.classList.add('is-on');
     window.clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => this.toast.classList.remove('is-on'), ms);
+    this.toastTimer = window.setTimeout(
+      () => this.toast.classList.remove('is-on'),
+      ms * this.settings.current.textSpeed,
+    );
   }
 
   /** Show or clear the "press E" prompt. Pass null to hide. */
@@ -1068,8 +1087,16 @@ export class HUD {
     this.reticle.style.transform = `scale(${scale.toFixed(2)})`;
   }
 
+  /**
+   * The caption line, for non-musical audio.
+   *
+   * Suppressed entirely when subtitles are off, rather than left rendering
+   * into a hidden element: a player who turned them off should cost nothing
+   * to keep them off, and a hidden node that still gets written to is how a
+   * "disabled" feature quietly stays on.
+   */
   setCaption(text: string | null): void {
-    if (text) {
+    if (text && this.settings.current.subtitles) {
       this.caption.textContent = text;
       this.caption.hidden = false;
     } else {

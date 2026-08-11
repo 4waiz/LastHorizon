@@ -48,6 +48,7 @@ import {
 } from './Gates';
 import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
+import { Keybindings } from './Keybindings';
 import { AudioManager } from './AudioManager';
 import { AssetManager } from './AssetManager';
 // Type-only. The village itself arrives through `VillageSubsystem`, whose
@@ -661,6 +662,11 @@ export class Game {
       // No-ops until audio has started, which is a user gesture away. The HUD
       // asks by meaning and does not know or care.
       onUiSound: (kind) => this.audio.ui(kind),
+      // The panel already moved the table — it holds the live object. This
+      // persists the result, which is the only part `Game` owns.
+      onRebind: () => this.settings.setBindings(this.input.keybindings.toJSON()),
+      onSubtitles: (on) => this.settings.setSubtitles(on),
+      onTextSpeed: (m) => this.settings.setTextSpeed(m),
       onCombatOption: (key, value) => {
         this.settings.setCombatOption(key, value);
         this.applyCombatSettings();
@@ -791,6 +797,11 @@ export class Game {
       if (mode === 'freeRoam') this.applyFreeRoamOptions(options);
     }
 
+    // The saved layout, before the first key press can be read against the
+    // default one. `Keybindings.restore` drops anything reserved, duplicated
+    // or no longer an action, so a blob from an older build gains the new
+    // actions rather than losing every one it does not mention.
+    this.input.setBindings(new Keybindings(this.settings.current.bindings as never));
     this.input.attach(this.canvas);
     this.hud.show();
     this.audio.start();

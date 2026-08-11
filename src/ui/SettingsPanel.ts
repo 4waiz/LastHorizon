@@ -1,5 +1,6 @@
 import './SettingsPanel.css';
 import type { AudioBus, NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
+import { ACTIONS, ACTION_LABELS, keyLabel, type Action, type Keybindings } from '../core/Keybindings';
 
 /**
  * Everything inside the info modal: settings, needs, action, accessibility,
@@ -52,9 +53,17 @@ export interface SettingsPanelDeps {
     value: number | boolean | string,
   ) => void;
   readonly onVolume: (bus: AudioBus, level: number) => void;
+  /** The live table. The panel mutates it and hands it back through `onRebind`. */
+  readonly bindings: () => Keybindings;
+  readonly onRebind: () => void;
+  readonly onSubtitles: (on: boolean) => void;
+  readonly onTextSpeed: (mult: number) => void;
 }
 
 export class SettingsPanel {
+  /** The action whose next key press is being captured, or null. */
+  private listening: Action | null = null;
+
   constructor(private readonly d: SettingsPanelDeps) {
     this.wire();
     this.syncAll();
@@ -74,6 +83,101 @@ export class SettingsPanel {
     this.syncCombat();
     this.syncAccess();
     this.syncVolumes();
+    this.syncBindings();
+  }
+
+  /**
+   * One row per action, rebuilt rather than patched.
+   *
+   * A rebind can change *two* rows — the one that gained the key and the one
+   * it was stolen from — so patching one would leave the other showing a key
+   * it no longer has. Fifteen rows is cheap; a stale key cap is a lie.
+   */
+  private syncBindings(): void {
+    const list = $('rebindList');
+    const kb = this.d.bindings();
+
+    list.replaceChildren(
+      ...ACTIONS.map((action) => {
+        const row = document.createElement('div');
+        row.className = 'rebind__row';
+
+        const name = document.createElement('span');
+        name.className = 'rebind__name';
+        name.textContent = ACTION_LABELS[action];
+
+        const code = kb.codeFor(action);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'rebind__key';
+        btn.dataset.action = action;
+        if (this.listening === action) {
+          btn.classList.add('is-listening');
+          btn.textContent = 'Press a key…';
+        } else if (code === '') {
+          // Never silently blank. An action with no key is a thing the player
+          // has to fix, and it has to look like one.
+          btn.classList.add('is-unbound');
+          btn.textContent = 'Not set';
+        } else {
+          btn.textContent = keyLabel(code);
+        }
+        btn.setAttribute('aria-label', `${ACTION_LABELS[action]}: ${btn.textContent}. Change`);
+        btn.addEventListener('click', () => this.listen(action));
+
+        row.append(name, btn);
+        return row;
+      }),
+    );
+
+    const reset = $<HTMLButtonElement>('rebindReset');
+    reset.disabled = kb.isDefault();
+  }
+
+  /** Wait for the next key press and give it to this action. */
+  private listen(action: Action): void {
+    this.listening = action;
+    this.say('');
+    this.syncBindings();
+
+    const onKey = (e: KeyboardEvent): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.removeEventListener('keydown', onKey, true);
+      this.listening = null;
+
+      if (e.key === 'Escape') {
+        this.say('Left as it was.');
+        this.syncBindings();
+        return;
+      }
+
+      const kb = this.d.bindings();
+      const r = kb.rebind(action, e.code);
+      if (!r.ok) {
+        this.say(
+          r.reason === 'fixed'
+            ? 'That key is a permanent alternate for something else.'
+            : 'That key is reserved.',
+        );
+      } else {
+        this.d.onRebind();
+        this.say(
+          r.stoleFrom
+            ? `${ACTION_LABELS[r.stoleFrom]} has no key now.`
+            : `${ACTION_LABELS[action]} is on ${keyLabel(e.code)}.`,
+        );
+      }
+      this.syncBindings();
+    };
+
+    // Capture phase, so the press never reaches `InputManager` and rebinding
+    // "jump" does not also jump.
+    window.addEventListener('keydown', onKey, true);
+  }
+
+  private say(msg: string): void {
+    $('rebindStatus').textContent = msg;
   }
 
   /**
@@ -145,6 +249,12 @@ export class SettingsPanel {
     }
     for (const b of document.querySelectorAll<HTMLButtonElement>('#setFlightAssist button')) {
       b.classList.toggle('is-on', b.dataset.flight === s.flightAssist);
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setSubtitles button')) {
+      b.classList.toggle('is-on', (b.dataset.subs === 'on') === s.subtitles);
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setTextSpeed button')) {
+      b.classList.toggle('is-on', Number(b.dataset.speed) === s.textSpeed);
     }
     pill('setHighContrast', s.highContrast);
     pill('setHeatNumerals', s.heatNumerals);
@@ -234,6 +344,22 @@ export class SettingsPanel {
         this.syncVolumes();
       });
     }
+
+    seg('#setSubtitles button', 'subs', (v) => {
+      this.d.onSubtitles(v === 'on');
+      this.syncAccess();
+    });
+    seg('#setTextSpeed button', 'speed', (v) => {
+      this.d.onTextSpeed(Number(v));
+      this.syncAccess();
+    });
+
+    $('rebindReset').addEventListener('click', () => {
+      this.d.bindings().reset();
+      this.d.onRebind();
+      this.say('Back to the keys the game shipped with.');
+      this.syncBindings();
+    });
 
     $('setReset').addEventListener('click', () => {
       this.d.onResetProgress();

@@ -462,9 +462,22 @@
             <dt>V</dt><dd>Switch shoulder</dd>
           </dl>
           <p class="keys__touch">The radar, bottom left, rotates with you: roads in grey, houses in clay, keepsakes still to find as pulsing gold.</p>
-          <dl class="keys" hidden>
-          </dl>
           <p class="keys__touch">On a touch screen: joystick on the left, jump and run on the right.</p>
+
+          <h4 class="rebind__title">Change a key</h4>
+          <p class="settings__note" id="rebindHelp">
+            Pick an action, then press the key you want. The arrow keys and
+            Enter always work whatever you choose, so you cannot lock yourself
+            out. Escape cancels.
+          </p>
+          <!-- Built by SettingsPanel: one row per action, and each row's
+               label has to say which key it currently carries. Static markup
+               would be a list of keys that goes stale the moment one changes. -->
+          <div id="rebindList" class="rebind" role="group" aria-labelledby="rebindHelp"></div>
+          <div class="rebind__foot">
+            <button type="button" id="rebindReset" class="rebind__reset">Reset all keys</button>
+            <span id="rebindStatus" class="rebind__status" role="status" aria-live="polite"></span>
+          </div>
         </section>
 
         <section class="settings">
@@ -572,6 +585,22 @@
               <button type="button" data-motion="auto">Match system</button>
               <button type="button" data-motion="off">Full</button>
               <button type="button" data-motion="on">Reduced</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>Subtitles</span>
+            <div class="seg" id="setSubtitles">
+              <button type="button" data-subs="on">On</button>
+              <button type="button" data-subs="off">Off</button>
+            </div>
+          </div>
+          <div class="row">
+            <span>Text stays</span>
+            <div class="seg" id="setTextSpeed">
+              <button type="button" data-speed="0.6">Briefly</button>
+              <button type="button" data-speed="1">Normal</button>
+              <button type="button" data-speed="1.8">Longer</button>
+              <button type="button" data-speed="3">Much longer</button>
             </div>
           </div>
           <div class="row">

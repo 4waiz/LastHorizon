@@ -248,6 +248,96 @@ test.describe('always-on chrome is styled without opening anything', () => {
   });
 });
 
+test.describe('remapping a key changes what the key does', () => {
+  /**
+   * The whole point, and the only test that proves it: the table is data, but
+   * `InputManager` has to be *reading* that data. A remapping screen that
+   * stores a preference nothing consults is worse than no remapping screen.
+   */
+  async function openSettings(page: Page): Promise<void> {
+    await page.locator('#btnInfo').click();
+    await expect(page.locator('#rebindList .rebind__key').first()).toBeVisible({
+      timeout: 20_000,
+    });
+  }
+
+  test('lists every action with the key it currently carries', async ({ page }) => {
+    await boot(page);
+    await openSettings(page);
+
+    const caps = await page.$$eval('#rebindList .rebind__key', (els) =>
+      els.map((e) => e.textContent),
+    );
+    expect(caps.length).toBeGreaterThan(10);
+    expect(caps).toContain('I');
+    expect(caps).toContain('Space');
+    // No raw DOM codes at a player.
+    for (const c of caps) expect(c).not.toMatch(/^(Key|Digit)/);
+  });
+
+  test('a rebound key opens the panel, and the old one stops', async ({ page }) => {
+    await boot(page);
+    await openSettings(page);
+
+    // Move "Carrying and record" from I to B.
+    await page.locator('.rebind__key[data-action="life"]').click();
+    await expect(page.locator('.rebind__key[data-action="life"]')).toHaveClass(/is-listening/);
+    await page.keyboard.press('b');
+    await expect(page.locator('.rebind__key[data-action="life"]')).toHaveText('B');
+
+    await page.locator('#infoClose').click();
+    await expect(page.locator('#info')).toBeHidden();
+
+    await page.keyboard.press('b');
+    await expect(page.locator('#life')).toBeVisible({ timeout: 20_000 });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#life')).toBeHidden();
+
+    // And the key it used to be on does nothing now.
+    await page.keyboard.press('i');
+    await page.waitForTimeout(400);
+    await expect(page.locator('#life')).toBeHidden();
+  });
+
+  test('refuses Escape, so the way out of the menu survives', async ({ page }) => {
+    await boot(page);
+    await openSettings(page);
+
+    await page.locator('.rebind__key[data-action="jump"]').click();
+    await page.keyboard.press('Escape');
+    // Escape cancels rather than binding. Jump keeps its key.
+    await expect(page.locator('.rebind__key[data-action="jump"]')).toHaveText('Space');
+    await expect(page.locator('#rebindStatus')).toContainText(/left as it was/i);
+  });
+
+  test('says which action lost its key when one is stolen', async ({ page }) => {
+    await boot(page);
+    await openSettings(page);
+
+    await page.locator('.rebind__key[data-action="jump"]').click();
+    await page.keyboard.press('m');
+    await expect(page.locator('#rebindStatus')).toContainText(/has no key now/i);
+    await expect(page.locator('.rebind__key[data-action="map"]')).toHaveText('Not set');
+    await expect(page.locator('.rebind__key[data-action="map"]')).toHaveClass(/is-unbound/);
+  });
+
+  test('survives a reload, then resets', async ({ page }) => {
+    await boot(page);
+    await openSettings(page);
+    await page.locator('.rebind__key[data-action="life"]').click();
+    await page.keyboard.press('b');
+    await expect(page.locator('.rebind__key[data-action="life"]')).toHaveText('B');
+
+    await boot(page);
+    await openSettings(page);
+    await expect(page.locator('.rebind__key[data-action="life"]')).toHaveText('B');
+
+    await page.locator('#rebindReset').click();
+    await expect(page.locator('.rebind__key[data-action="life"]')).toHaveText('I');
+    await expect(page.locator('#rebindReset')).toBeDisabled();
+  });
+});
+
 test.describe('lazy panels are actually lazy', () => {
   /**
    * The claim `check-budgets.mjs` makes on every build is that these chunks

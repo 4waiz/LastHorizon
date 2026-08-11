@@ -161,11 +161,25 @@ Minimap upgrade (streamed zones, filters, police search area, owned vehicles) ·
 photo mode · birthday postcard export · UI sound set · audio buses, ducking and
 gain staging · story stingers.
 
+### Accessibility built since
+
+- **Full key remapping** — `src/core/Keybindings.ts`. Every action rebindable;
+  arrows and Enter are fixed alternates that cannot be taken away, so no
+  layout can strand a player. `Escape` is reserved. A rebind steals the key
+  and names the action that lost it.
+- **Subtitles, on by default** — a caption nobody needs is small text; a
+  missing caption is content somebody cannot have.
+- **Text speed** — a multiplier on how long anything read-without-dismissing
+  dwells. The range is lopsided about 1 because slower is the accessible
+  direction.
+- **Five audio buses with levels** — interface separate from world effects,
+  so buttons can be silenced without silencing footsteps.
+
 ### Accessibility still not built
 
-Full remapping · touch layout editor · subtitles and text speed ·
-colour-independent *quest* indicators (Heat and the equipped-item marker are
-both done) · hold/toggle alternatives · aging speed selection · driving assist.
+Touch layout editor · colour-independent *quest* indicators (Heat and the
+equipped-item marker are both done) · hold/toggle alternatives · aging speed
+selection · driving assist.
 
 Flight assist had a settings control and no instruments to use it with; it
 now has both.
