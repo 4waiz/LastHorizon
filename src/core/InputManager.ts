@@ -142,7 +142,18 @@ export class InputManager {
   /** The layout. Replaced wholesale by `setBindings`, never mutated here. */
   private bindings = new Keybindings();
 
+  // -- hold or toggle -------------------------------------------------------
+  //
+  // Both default to hold, which is what the game was built around. When one
+  // is off, the matching latch is what `aimHeld` / `running` read instead —
+  // flipped on the *press* rather than tracked across press and release.
+  private holdToAim = true;
+  private holdToRun = true;
+  private aimLatched = false;
+  private runLatched = false;
+
   get running(): boolean {
+    if (!this.holdToRun) return this.runLatched || this.stickRunning;
     // Through the table, so a rebound run key runs. `codesFor` returns the
     // primary plus the fixed alternates, which is why right shift still works
     // for a player who has moved run off left shift.
@@ -232,6 +243,11 @@ export class InputManager {
         case 'photo': this.photoQueued = true; break;
         default: break;
       }
+      // In toggle mode the run key flips a latch on press instead of being
+      // read as held. `keys` still records it, so switching back to hold
+      // mid-session behaves normally from the next press.
+      if (action === 'run' && !this.holdToRun) this.runLatched = !this.runLatched;
+
       // Movement and `run` are held rather than queued; they fall through to
       // `this.keys` below and are read by `recomputeMove`.
       if (action !== null) e.preventDefault();
@@ -422,7 +438,26 @@ export class InputManager {
    * costs nothing.
    */
   get aimHeld(): boolean {
+    if (!this.holdToAim) return this.aimLatched || this.syntheticAim;
     return this.mouseAim || this.syntheticAim || this.gamepadState.brake > 0.5;
+  }
+
+  /**
+   * Hold-to-aim, or press once to start and again to stop.
+   *
+   * Holding a mouse button or a shoulder trigger for a sustained stretch is
+   * exactly the demand some players cannot meet, and it changes nothing about
+   * how the game plays to remove it. Hold stays the default because it is
+   * what the game was built around.
+   *
+   * Switching mode drops the latch: a player who turns toggle off while
+   * aiming should not be left permanently aiming with no way to stop.
+   */
+  setHoldModes(aim: boolean, run: boolean): void {
+    if (this.holdToAim !== aim) this.aimLatched = false;
+    if (this.holdToRun !== run) this.runLatched = false;
+    this.holdToAim = aim;
+    this.holdToRun = run;
   }
 
   /**
@@ -512,7 +547,10 @@ export class InputManager {
   private onPointerDown(e: PointerEvent): void {
     if ((e.target as HTMLElement)?.closest?.('[data-ui]')) return;
     if (e.pointerType === 'touch') return; // touch look is handled by the HUD pad
-    if (e.button === 2) this.mouseAim = true;
+    if (e.button === 2) {
+      this.mouseAim = true;
+      if (!this.holdToAim) this.aimLatched = !this.aimLatched;
+    }
     if (e.button === 0) this.mouseFire = true;
     this.pointerActive = true;
     this.pointerId = e.pointerId;
@@ -581,6 +619,11 @@ export class InputManager {
     this.mouseAim = false;
     this.syntheticAim = false;
     this.mouseFire = false;
+    // Latches too. Coming back from a hidden tab still aiming, with no
+    // memory of having pressed anything, is the toggle-mode version of a
+    // stuck key — and it is the reason `releaseAll` exists at all.
+    this.aimLatched = false;
+    this.runLatched = false;
     this.drawQueued = false;
     this.reloadQueued = false;
     this.shoulderQueued = false;

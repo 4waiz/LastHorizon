@@ -1,5 +1,5 @@
 import './SettingsPanel.css';
-import type { AudioBus, NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
+import type { AccessOptionKey, AudioBus, NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
 import { ACTIONS, ACTION_LABELS, keyLabel, type Action, type Keybindings } from '../core/Keybindings';
 
 /**
@@ -48,10 +48,7 @@ export interface SettingsPanelDeps {
     key: 'aimAssist' | 'cameraShake' | 'flashes' | 'combatDifficulty',
     value: number | boolean,
   ) => void;
-  readonly onAccessOption: (
-    key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
-    value: number | boolean | string,
-  ) => void;
+  readonly onAccessOption: (key: AccessOptionKey, value: number | boolean | string) => void;
   readonly onVolume: (bus: AudioBus, level: number) => void;
   /** The live table. The panel mutates it and hands it back through `onRebind`. */
   readonly bindings: () => Keybindings;
@@ -250,6 +247,20 @@ export class SettingsPanel {
     for (const b of document.querySelectorAll<HTMLButtonElement>('#setFlightAssist button')) {
       b.classList.toggle('is-on', b.dataset.flight === s.flightAssist);
     }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setAgingSpeed button')) {
+      b.classList.toggle('is-on', b.dataset.aging === s.agingSpeed);
+    }
+    for (const b of document.querySelectorAll<HTMLButtonElement>('#setDrivingAssist button')) {
+      b.classList.toggle('is-on', b.dataset.driving === s.drivingAssist);
+    }
+    for (const [id, on] of [
+      ['setHoldToAim', s.holdToAim],
+      ['setHoldToRun', s.holdToRun],
+    ] as const) {
+      for (const b of document.querySelectorAll<HTMLButtonElement>(`#${id} button`)) {
+        b.classList.toggle('is-on', (b.dataset.hold === 'true') === on);
+      }
+    }
     for (const b of document.querySelectorAll<HTMLButtonElement>('#setSubtitles button')) {
       b.classList.toggle('is-on', (b.dataset.subs === 'on') === s.subtitles);
     }
@@ -342,6 +353,26 @@ export class SettingsPanel {
         const bus = input.dataset.bus as AudioBus;
         this.d.onVolume(bus, Number(input.value) / 100);
         this.syncVolumes();
+      });
+    }
+
+    seg('#setAgingSpeed button', 'aging', (v) => {
+      this.d.onAccessOption('agingSpeed', v);
+      this.syncAccess();
+    });
+    seg('#setDrivingAssist button', 'driving', (v) => {
+      this.d.onAccessOption('drivingAssist', v);
+      this.syncAccess();
+    });
+    // Both hold segments share a `data-hold` attribute, so each needs its own
+    // handler rather than one selector across both.
+    for (const [id, key] of [
+      ['setHoldToAim', 'holdToAim'],
+      ['setHoldToRun', 'holdToRun'],
+    ] as const) {
+      seg(`#${id} button`, 'hold', (v) => {
+        this.d.onAccessOption(key, v === 'true');
+        this.syncAccess();
       });
     }
 

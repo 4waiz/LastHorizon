@@ -674,11 +674,13 @@ export class Game {
       },
       onAccessOption: (key, value) => {
         this.settings.setAccessOption(key, value);
-        // Flight assist is the only one of the five that reaches a system
-        // rather than the document; the rest are `HUD.applyAccess`.
+        // Four of these reach a system rather than the document; the rest are
+        // `HUD.applyAccess`.
         if (key === 'flightAssist') {
           this.flight?.setAssist(this.settings.current.flightAssist);
         }
+        if (key === 'agingSpeed') this.applyAgingSpeed();
+        if (key === 'holdToAim' || key === 'holdToRun') this.applyHoldModes();
       },
       onOutfit: (patch) => {
         // The panel still speaks in colours; Equipment resolves each one back
@@ -814,6 +816,11 @@ export class Game {
     this.audio.setMuted(this.settings.current.muted);
     this.audio.setLevels(this.settings.current.volumes);
     this.applyNeedsSettings();
+    // Restored settings that reach a *system* rather than the document. The
+    // accessibility panel applies these when it changes them; nothing applied
+    // them on boot, so a saved "never age" was forgotten every reload.
+    this.applyAgingSpeed();
+    this.applyHoldModes();
     this.gameScope.addTeardown(
       this.settings.onChange((s) => {
         this.applyNeedsSettings();
@@ -997,6 +1004,32 @@ export class Game {
       .finally(() => {
         this.streamPending = false;
       });
+  }
+
+  /**
+   * How fast a life goes by.
+   *
+   * `LifeRate` is minutes of active play per in-game year, and `frozen` is
+   * one of its values rather than a special case — the clock has supported it
+   * since it was written and nothing ever offered it. The mapping lives here
+   * so `Settings` stays free of `LifeClock`'s types.
+   */
+  private applyAgingSpeed(): void {
+    // The four values `LifeRate` actually has. An earlier draft offered a
+    // fifth, "slowest", and mapped it to the same 120 as "slow" — two options
+    // that did the same thing, which is a menu lying to the player.
+    const rate = {
+      fast: 30,
+      normal: 60,
+      slow: 120,
+      frozen: 'frozen',
+    }[this.settings.current.agingSpeed] as import('./clocks/LifeClock').LifeRate;
+    this.life.setRate(rate);
+  }
+
+  private applyHoldModes(): void {
+    const s = this.settings.current;
+    this.input.setHoldModes(s.holdToAim, s.holdToRun);
   }
 
   private gateContext(): GateContext {

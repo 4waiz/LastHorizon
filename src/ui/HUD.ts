@@ -1,4 +1,4 @@
-import { QualityLevel, Settings, TimeMode, type AudioBus } from '../core/Settings';
+import { QualityLevel, Settings, TimeMode, type AccessOptionKey, type AudioBus } from '../core/Settings';
 import type { UiSound } from '../core/AudioManager';
 import type { Dashboard } from '../vehicles/VehicleControls';
 import type { MinimapData } from './Minimap';
@@ -53,7 +53,7 @@ export interface HUDCallbacks {
   ) => void;
   /** One of the five Phase 11 presentation options. */
   onAccessOption: (
-    key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
+    key: AccessOptionKey,
     value: number | boolean | string,
   ) => void;
   onVolume: (bus: AudioBus, level: number) => void;

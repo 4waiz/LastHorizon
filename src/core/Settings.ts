@@ -192,6 +192,38 @@ export interface SettingsState {
    */
   subtitles: boolean;
   textSpeed: number;
+
+  /**
+   * How fast a life goes by, including not at all.
+   *
+   * A string rather than a multiplier, so `Settings` stays free of
+   * `LifeClock`'s types and `Game` owns the mapping. `frozen` is a real
+   * option rather than a joke setting: the ageing clock is the one system in
+   * this game that takes something away on a timer, and a player who finds
+   * that stressful should be able to switch it off and still have a game.
+   * `LifeClock` has supported a frozen rate since it was written.
+   */
+  agingSpeed: 'fast' | 'normal' | 'slow' | 'frozen';
+
+  /**
+   * Driving assistance, matching `flightAssist` in shape and in default.
+   *
+   * `assisted` is what the handling was tuned against, and `reduced` is the
+   * opt-in for somebody who wants the car to do less for them — the same way
+   * round as flying, because a player who wants one usually wants both.
+   */
+  drivingAssist: 'assisted' | 'reduced';
+
+  /**
+   * Hold a button, or press it twice.
+   *
+   * Aiming and running are both held by default, and holding a mouse button
+   * or a shoulder trigger for a sustained period is exactly the demand some
+   * players cannot meet. Toggle removes it without changing anything about
+   * how the game plays.
+   */
+  holdToAim: boolean;
+  holdToRun: boolean;
 }
 
 /**
@@ -201,6 +233,24 @@ export interface SettingsState {
  * players turn off first, and folding them into world effects would mean
  * silencing footsteps to silence a button.
  */
+/**
+ * The presentation and accessibility options `setAccessOption` accepts.
+ *
+ * One exported union rather than the same nine strings written out in
+ * `HUD`, `SettingsPanel` and `Game`. Adding a tenth used to mean editing four
+ * files and finding out from the compiler which one was missed.
+ */
+export type AccessOptionKey =
+  | 'uiScale'
+  | 'reducedMotion'
+  | 'highContrast'
+  | 'heatNumerals'
+  | 'flightAssist'
+  | 'agingSpeed'
+  | 'drivingAssist'
+  | 'holdToAim'
+  | 'holdToRun';
+
 export type AudioBus = 'master' | 'music' | 'ambience' | 'sfx' | 'ui';
 
 export const AUDIO_BUSES: readonly AudioBus[] = ['master', 'music', 'ambience', 'sfx', 'ui'];
@@ -247,6 +297,12 @@ export class Settings {
       // line of small text; a missing caption is content somebody cannot have.
       subtitles: true,
       textSpeed: 1,
+      agingSpeed: 'normal',
+      drivingAssist: 'assisted',
+      // Hold is the default because it is what the game was built around and
+      // what most players expect; toggle is the accommodation, not the norm.
+      holdToAim: true,
+      holdToRun: true,
       ...defaults,
       ...this.read(),
     };
@@ -334,6 +390,18 @@ export class Settings {
       if (typeof parsed.subtitles === 'boolean') out.subtitles = parsed.subtitles;
       const speed = num(parsed.textSpeed, 0.5, 3);
       if (speed !== null) out.textSpeed = speed;
+
+      if (
+        parsed.agingSpeed === 'fast' || parsed.agingSpeed === 'normal' ||
+        parsed.agingSpeed === 'slow' || parsed.agingSpeed === 'frozen'
+      ) {
+        out.agingSpeed = parsed.agingSpeed;
+      }
+      if (parsed.drivingAssist === 'assisted' || parsed.drivingAssist === 'reduced') {
+        out.drivingAssist = parsed.drivingAssist;
+      }
+      if (typeof parsed.holdToAim === 'boolean') out.holdToAim = parsed.holdToAim;
+      if (typeof parsed.holdToRun === 'boolean') out.holdToRun = parsed.holdToRun;
 
       return out;
     } catch {
@@ -485,10 +553,7 @@ export class Settings {
     this.emit();
   }
 
-  setAccessOption(
-    key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
-    value: number | boolean | string,
-  ): void {
+  setAccessOption(key: AccessOptionKey, value: number | boolean | string): void {
     switch (key) {
       case 'uiScale': {
         if (typeof value !== 'number' || !Number.isFinite(value)) return;
@@ -505,10 +570,22 @@ export class Settings {
         this.state.reducedMotion = value;
         break;
       }
-      case 'flightAssist': {
+      case 'flightAssist':
+      case 'drivingAssist': {
         if (value !== 'assisted' && value !== 'reduced') return;
-        if (this.state.flightAssist === value) return;
-        this.state.flightAssist = value;
+        if (this.state[key] === value) return;
+        this.state[key] = value;
+        break;
+      }
+      case 'agingSpeed': {
+        if (
+          value !== 'fast' && value !== 'normal' &&
+          value !== 'slow' && value !== 'frozen'
+        ) {
+          return;
+        }
+        if (this.state.agingSpeed === value) return;
+        this.state.agingSpeed = value;
         break;
       }
       default: {
