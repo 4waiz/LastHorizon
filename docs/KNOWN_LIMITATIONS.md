@@ -41,6 +41,14 @@ These are the entries most likely to hide a real problem, so they come first.
   is pad-navigable, so dialogue choices, the phone and the save slots need a
   keyboard or a touch screen. Open since Phase 8.
 - **No touch layout editor.** The on-screen controls are where they are.
+- **At phone width the bottom-left corner collides.** The discovery toast,
+  the objective pill and the touch joystick all occupy the same area at
+  390 px, and the toast lands on top of the other two. Found by *looking at*
+  the visual baseline rather than by any assertion — the shot is committed at
+  `tests/visual/scenes.spec.ts-snapshots/touch-portrait-visual-win32.png`, so
+  it is reproducible and a fix will show as a diff. Cosmetic and not
+  progress-blocking: everything is still legible and every control still
+  works. Not fixed here because Phase 12 is hardening rather than layout.
 - **No photo mode**, so the `photograph` objective kind is declared and
   unauthored, and the phone's Camera tile says "not yet" rather than opening
   something empty.

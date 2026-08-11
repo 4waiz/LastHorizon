@@ -77,19 +77,31 @@ test.describe('village', () => {
 });
 
 test.describe('interiors', () => {
-  test('the family home, with its live window portal', async ({ page }) => {
+  test('the family home, assembled from the kit', async ({ page }) => {
     await boot(page);
     await pin(page, { x: 5.4, z: -39.3, facing: Math.PI }, 0.615);
     await page.evaluate(async () => {
       const t = window.__LH_TEST__!;
       const door_home = t.getDoors().find((d) => d.interiorId === 'home');
       if (door_home) await t.enterDoor(door_home.id);
+      // Re-frame *inside*. Going through a door moves the player 600 m up into
+      // the interior cell, and without this the camera keeps its outdoor boom
+      // and shoots the room from outside the wall, looking down through where
+      // the ceiling would be. The first baseline was taken that way.
+      t.frameCamera(0, 3.2, 0.15);
       t.prepareShot();
       t.settle(60);
     });
     await page.waitForTimeout(150);
-    // One of only two rooms that still re-render the outdoor world. If the
-    // portal breaks, the windows go flat and nothing else notices.
+    // What this guards is the *assembled room*: 30 kit parts on the 2 m grid,
+    // their shared materials, and the two-light configuration Phase 7 found
+    // doubles the program count when it is wrong.
+    //
+    // It does **not** guard the window portal, and the first version of this
+    // comment claimed it did. A framing that shows the room does not contain a
+    // window, and one that does would show little else. Portal coverage is the
+    // triangle count in tests/long/perf.spec.ts — 525,886 against an 880,000
+    // budget, which collapses to roughly 340,000 if the portal stops drawing.
     await expect(canvas(page)).toHaveScreenshot('interior-home.png');
   });
 
@@ -100,6 +112,7 @@ test.describe('interiors', () => {
       const t = window.__LH_TEST__!;
       const door_grocery = t.getDoors().find((d) => d.interiorId === 'grocery');
       if (door_grocery) await t.enterDoor(door_grocery.id);
+      t.frameCamera(0, 3.2, 0.15);
       t.prepareShot();
       t.settle(60);
     });
@@ -122,15 +135,39 @@ test.describe('interface', () => {
     await page.locator('#btnInfo').click();
     // The panel is lazy; wait for its content rather than a timeout.
     await page.waitForSelector('.credits', { state: 'visible', timeout: 20_000 });
-    await expect(page.locator('#info .modal__card')).toHaveScreenshot('credits.png');
+
+    // Shoot the credits *section*, not the modal.
+    //
+    // The first baseline framed `#info .modal__card`, which opens scrolled to
+    // the top — so it captured the objective and the controls list and none of
+    // the licences, under a test named for them. That is the second time in
+    // this file a shot did not contain the thing its name claimed, and both
+    // were found by looking at the image rather than at the result.
+    //
+    // This is the one screen where a wrong pixel is a licensing statement:
+    // GSAP is not open source, and the credits saying otherwise would be a
+    // claim rather than a typo.
+    const credits = page.locator('.credits');
+    await credits.scrollIntoViewIfNeeded();
+    await expect(credits).toHaveScreenshot('credits.png');
   });
 });
 
 test.describe('touch layout', () => {
+  // `hasTouch`, not just a small viewport.
+  //
+  // `HUD.isTouch` reads `navigator.maxTouchPoints` **once, in the constructor**,
+  // and hides the joystick and the action buttons when it is zero. Playwright's
+  // Desktop Chrome reports no touch points, so the first baseline was a
+  // 390 px-wide desktop layout with no on-screen controls in it at all — under
+  // a test named "the on-screen controls at phone size".
+  //
+  // Because that check runs at construction, the emulation has to be set
+  // before the page loads. `test.use` does that; `setViewportSize` mid-test
+  // does not, which is what made the first attempt wrong.
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
   test('the on-screen controls at phone size', async ({ page }) => {
-    // A real phone viewport, which is also how the safe-area insets and the
-    // `clamp()` type scale get exercised at the small end.
-    await page.setViewportSize({ width: 390, height: 844 });
     await boot(page);
     await page.evaluate(() => {
       const t = window.__LH_TEST__!;
