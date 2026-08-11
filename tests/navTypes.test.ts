@@ -218,8 +218,11 @@ describe('off-mesh links', () => {
   });
 
   it('produces nothing for a zone with no doors or crossings', () => {
-    const airstrip = WORLD_MANIFEST.zones.find((z) => z.id === 'hill_airstrip')!;
-    expect(offMeshLinksForZone(airstrip, flatGround)).toEqual([]);
+    // Was `hill_airstrip`, which had neither until Phase 10 opened it and gave
+    // it an office door. A synthetic zone keeps the guard: a link list built
+    // from nothing must be empty, not a single degenerate link at the origin.
+    const bare = { ...VILLAGE, interiors: [], crossings: [] };
+    expect(offMeshLinksForZone(bare, flatGround)).toEqual([]);
   });
 });
 

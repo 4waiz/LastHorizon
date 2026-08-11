@@ -169,6 +169,20 @@ const LAZY_CHUNK_PREFIXES = [
   // the destination, so the fetch lands in a gap the player waits through
   // anyway, and a session that never leaves the village never pays for it.
   'CitySubsystem-',
+  // Phase 10, finished late. The airstrip runtime and its builder, behind the
+  // same zone-travel boundary as the districts: a runway is only reachable by
+  // travelling to one.
+  //
+  // Fourth phase running that the gate failed for the reason written twelve
+  // lines above this one. The warning was right and it still did not stop it
+  // happening, so this time the number is worth recording too: 5.5 kB of
+  // genuinely lazy code counted as startup weight put `initial load` 2.5 kB
+  // over a budget that had 4.5 kB of headroom.
+  'AirstripSubsystem-',
+  // Shared by both zone builders and imported by neither eager path. Vite
+  // splits it out because two lazy chunks want it; it is lazy for the same
+  // reason they are.
+  'GeoBatch-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));

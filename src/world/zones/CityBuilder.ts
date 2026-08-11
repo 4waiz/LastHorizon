@@ -1,8 +1,7 @@
-import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { makeToon } from '../../graphics/ToonMaterial';
+import type * as THREE from 'three';
 import type { DisposalRegistry } from '../../core/DisposalRegistry';
 import type { ChunkManifest, ZoneManifest } from './Manifest';
+import { Batch, box, clip, mulberry32, ZONE_PALETTE, type Rect } from './GeoBatch';
 
 /**
  * Procedural city geometry.
@@ -16,23 +15,13 @@ import type { ChunkManifest, ZoneManifest } from './Manifest';
  * Thirty loose boxes would be thirty draw calls; merged by material it is a
  * handful, which is what keeps a streamed district inside the draw-call budget
  * in docs/PERFORMANCE_BUDGETS.md.
+ *
+ * The batching primitives live in `GeoBatch` so the airstrip can share them
+ * without importing a district generator it has no use for.
  */
 
 /** Muted and warm, to sit beside the village rather than fight it. */
-const PALETTE = {
-  road: 0x55565a,
-  sidewalk: 0xb9b3a4,
-  marking: 0xe8e3d2,
-  wallWarm: 0xd8c3a5,
-  wallPink: 0xd9b9b0,
-  wallCool: 0xb8bcc0,
-  roofRed: 0xc4633f,
-  roofDark: 0x6b5b52,
-  glass: 0x8fb3bf,
-  metal: 0x7d8288,
-  water: 0x5b8fa8,
-  skyline: 0xa9b4bd,
-};
+const PALETTE = ZONE_PALETTE;
 
 /**
  * Street layout constants. Exported because `CityRuntime` answers ground
@@ -43,107 +32,7 @@ export const ROAD_HALF = 5.0;
 export const SIDEWALK_W = 2.2;
 export const KERB_H = 0.14;
 
-/**
- * Deterministic per-chunk RNG. Local, so chunk contents never depend on global
- * state or on the order chunks happen to stream in.
- */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** A box, positioned by its centre, ready to merge. */
-function box(w: number, h: number, d: number, x: number, y: number, z: number): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(w, h, d);
-  g.translate(x, y, z);
-  return g;
-}
-
-/** Accumulates geometry per palette colour so each colour becomes one mesh. */
-class Batch {
-  private readonly byColor = new Map<number, THREE.BufferGeometry[]>();
-
-  add(color: number, geo: THREE.BufferGeometry): void {
-    const list = this.byColor.get(color);
-    if (list) list.push(geo);
-    else this.byColor.set(color, [geo]);
-  }
-
-  /**
-   * Merge each colour group into a single mesh, register both geometry and
-   * the parent link for disposal, and attach to `parent`.
-   *
-   * Materials come from `makeToon`, which caches by value — so the city reuses
-   * the village's programs rather than compiling its own.
-   */
-  flush(parent: THREE.Object3D, scope: DisposalRegistry, label: string): THREE.Mesh[] {
-    const meshes: THREE.Mesh[] = [];
-    for (const [color, parts] of this.byColor) {
-      const merged = mergeGeometries(parts, false);
-      // mergeGeometries clones; the sources are now dead weight.
-      parts.forEach((p) => p.dispose());
-      if (!merged) continue;
-
-      const mesh = new THREE.Mesh(merged, makeToon(color));
-      mesh.name = `${label}_${color.toString(16)}`;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      parent.add(mesh);
-      meshes.push(mesh);
-
-      scope.addTeardown(
-        () => {
-          mesh.removeFromParent();
-          merged.dispose();
-          // The material is shared and cached by ToonMaterial; disposing it
-          // here would pull it out from under every other user of that colour.
-        },
-        'geometry',
-        `${label}:${color.toString(16)}`,
-      );
-    }
-    this.byColor.clear();
-    return meshes;
-  }
-}
-
-interface Rect {
-  x0: number;
-  z0: number;
-  x1: number;
-  z1: number;
-}
-
 type Bounds = ChunkManifest['bounds'];
-
-/**
- * Clip a world-space rect to a chunk's bounds.
- *
- * Roads are authored as continuous world-space strips, and each chunk emits
- * only the part that falls inside it. That is what keeps a carriageway
- * seamless across a chunk seam: neighbouring chunks contribute abutting
- * pieces of one strip rather than each guessing where the road should be.
- */
-function clip(b: Bounds, r: Rect): Rect | null {
-  const x0 = Math.max(b.minX, r.x0);
-  const x1 = Math.min(b.maxX, r.x1);
-  const z0 = Math.max(b.minZ, r.z0);
-  const z1 = Math.min(b.maxZ, r.z1);
-  if (x1 - x0 <= 1e-4 || z1 - z0 <= 1e-4) return null;
-  return { x0, z0, x1, z1 };
-}
-
-/** A flat slab covering `r`, `thickness` tall, sitting with its top at `y`. */
-function slab(batch: Batch, color: number, r: Rect, y: number, thickness: number): void {
-  const w = r.x1 - r.x0;
-  const d = r.z1 - r.z0;
-  batch.add(color, box(w, thickness, d, (r.x0 + r.x1) / 2, y - thickness / 2, (r.z0 + r.z1) / 2));
-}
 
 /** Where the carriageways run, in world space. Lanes in the manifest match. */
 export const MAIN_ROAD_X = 0;
@@ -171,7 +60,7 @@ function emitRoads(batch: Batch, b: Bounds): void {
 
   for (const s of strips) {
     const c = clip(b, s);
-    if (c) slab(batch, PALETTE.road, c, 0.02, 0.2);
+    if (c) batch.slab(PALETTE.road, c, 0.02, 0.2);
   }
 
   // Sidewalks flank each carriageway, raised by a kerb.
@@ -190,7 +79,7 @@ function emitRoads(batch: Batch, b: Bounds): void {
   }
   for (const w of walks) {
     const c = clip(b, w);
-    if (c) slab(batch, PALETTE.sidewalk, c, KERB_H, 0.28);
+    if (c) batch.slab(PALETTE.sidewalk, c, KERB_H, 0.28);
   }
 
   // Centre dashes on the main road, on a fixed world grid so they line up
@@ -200,7 +89,7 @@ function emitRoads(batch: Batch, b: Bounds): void {
     const first = Math.ceil(b.minZ / step) * step;
     for (let z = first; z < b.maxZ; z += step) {
       const seg = clip(b, { x0: -0.18, x1: 0.18, z0: z, z1: z + 3.2 });
-      if (seg) slab(batch, PALETTE.marking, seg, 0.05, 0.06);
+      if (seg) batch.slab(PALETTE.marking, seg, 0.05, 0.06);
     }
   }
 
@@ -214,7 +103,7 @@ function emitRoads(batch: Batch, b: Bounds): void {
         z0: SIDE_STREET_Z + ROAD_HALF + 0.6,
         z1: SIDE_STREET_Z + ROAD_HALF + 4.2,
       });
-      if (bar) slab(batch, PALETTE.marking, bar, 0.05, 0.06);
+      if (bar) batch.slab(PALETTE.marking, bar, 0.05, 0.06);
     }
   }
 }
@@ -347,7 +236,7 @@ function emitParking(batch: Batch, b: Bounds, rand: () => number): void {
 /** Calm water for the waterfront district. */
 function emitWater(batch: Batch, b: Bounds): void {
   const c = clip(b, { x0: -1e4, x1: 1e4, z0: -1e4, z1: -120 });
-  if (c) slab(batch, PALETTE.water, c, -0.4, 0.5);
+  if (c) batch.slab(PALETTE.water, c, -0.4, 0.5);
 }
 
 /**
@@ -364,7 +253,7 @@ export function buildCityChunk(
   const b = chunk.bounds;
 
   // Ground plate for the whole chunk, so blocks are never see-through.
-  slab(batch, PALETTE.sidewalk, { x0: b.minX, x1: b.maxX, z0: b.minZ, z1: b.maxZ }, 0, 0.4);
+  batch.slab(PALETTE.sidewalk, { x0: b.minX, x1: b.maxX, z0: b.minZ, z1: b.maxZ }, 0, 0.4);
 
   emitRoads(batch, b);
   emitStreetlights(batch, b);

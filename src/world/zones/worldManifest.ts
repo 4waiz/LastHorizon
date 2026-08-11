@@ -231,9 +231,21 @@ const waterfront: ZoneManifest = {
 };
 
 // ---------------------------------------------------------------------------
-// hill_airstrip — declared, not yet playable (Phase 10)
+// hill_airstrip — open since Phase 10
 // ---------------------------------------------------------------------------
 
+/**
+ * The field.
+ *
+ * Authored, not streamed: it is one 190 m strip, an apron and two buildings.
+ * A chunk grid over that would be four mostly-empty chunks and a seam down the
+ * runway — the one place in this world a seam is visible from the air.
+ *
+ * Every coordinate here has to agree with `AirstripBuilder`, which lays the
+ * tarmac, and with `CHECKPOINTS` in `src/flight/WorldBounds.ts`, which decides
+ * where a recovered aeroplane is put back. `airstrip.test.ts` checks all three
+ * against each other rather than trusting the comment.
+ */
 const airstrip: ZoneManifest = {
   id: 'hill_airstrip',
   displayName: 'Hill Airstrip',
@@ -244,19 +256,39 @@ const airstrip: ZoneManifest = {
   unloadHysteresis: 0,
   bounds: { minX: 128, minZ: -128, maxX: 384, maxZ: 128 },
   spawns: [
+    // On the apron, facing down the strip. Arriving by road lands here.
     { id: 'airstrip_gate', x: 160, z: 0, facing: Math.PI / 2, vehicleSafe: true, clearance: 6.0 },
+    // Outside the office door, for arrivals that came to talk rather than fly.
+    { id: 'airstrip_office', x: 166, z: 4, facing: 0, vehicleSafe: false, clearance: 2.4 },
+    // The hold at the western threshold: where a flight actually begins.
+    { id: 'airstrip_hold', x: 152, z: -18, facing: Math.PI / 2, vehicleSafe: true, clearance: 8.0 },
   ],
   defaultSpawnId: 'airstrip_gate',
   chunks: [],
-  interiors: [],
-  lanes: [],
+  interiors: [
+    { id: 'airstrip_office_door', x: 166, z: 8.1, interiorId: 'airstrip', prompt: 'Enter the airstrip office' },
+  ],
+  // The access road in from the village, along the apron and out to the hangar.
+  // Vehicles may drive the field; the runway itself is deliberately not a lane,
+  // because traffic taxiing down an active strip is not a feature.
+  lanes: [
+    { id: 'as_road_w', x: 132, z: 8, next: ['as_apron_w'], speedLimit: 12 },
+    { id: 'as_apron_w', x: 158, z: 8, next: ['as_apron_e'], speedLimit: 8 },
+    { id: 'as_apron_e', x: 202, z: 8, next: [], speedLimit: 8 },
+  ],
   crossings: [],
-  ambientAreas: [],
+  // Two, both well clear of the apron lane: the fence line north of the
+  // buildings and the scrub south of the strip. `AMBIENT_LANE_CLEARANCE` is
+  // 6 m and the lane runs along z = 8, so anything inside z 2..14 is refused.
+  ambientAreas: [
+    { id: 'as_amb_hangar', x: 214, z: 18, radius: 8, weight: 2 },
+    { id: 'as_amb_gate', x: 140, z: 18, radius: 7, weight: 1 },
+  ],
   audio: { zoneTrack: 'outdoor', ambience: ['wind'], reverb: 0.08 },
   weather: { windStrength: 1.4, fogFar: 620, defaultTimeMode: 'cycle' },
   bundles: ['airstrip_kit'],
   neighbours: ['village_coast'],
-  playable: false,
+  playable: true,
 };
 
 // The village must list the airstrip back, or validation flags the edge as

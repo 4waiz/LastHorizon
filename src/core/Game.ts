@@ -10,6 +10,9 @@ import { ZoneManager } from '../world/zones/ZoneManager';
 // at the moment of travel. See that file for why the boundary is here.
 type CityApi = typeof import('../world/zones/CitySubsystem');
 type CityRuntime = import('../world/zones/CityRuntime').CityRuntime;
+// Same boundary, same reasoning: a player who never walks out to the runway
+// never downloads one.
+type AirstripApi = typeof import('../world/zones/AirstripSubsystem');
 import type { ZoneId } from '../world/zones/Manifest';
 import type { ZoneRuntime } from '../world/zones/ZoneRuntime';
 import { SimulationClock } from './SimulationClock';
@@ -36,6 +39,7 @@ import { SaveService } from '../save/SaveService';
 import { createSaveDriver } from '../save/SaveDriver';
 import { CONTENT_VERSION, type SaveData, type SaveSlotId } from '../save/SaveSchema';
 import {
+  can,
   canEnterZone,
   DEFAULT_FREE_ROAM,
   type FreeRoamOptions,
@@ -171,6 +175,7 @@ export class Game {
   private city: CityRuntime | null = null;
   /** Resolved on first travel to a district, and kept for its chunk streaming. */
   private cityApi: CityApi | null = null;
+  private airstripApi: AirstripApi | null = null;
 
   /**
    * Renderer-lifetime resources.
@@ -492,6 +497,36 @@ export class Game {
           );
           this.runtime = world;
           this.village = world;
+          return;
+        }
+
+        if (zone.id === 'hill_airstrip') {
+          // Authored like the village, lazy like a district. Nothing streams
+          // up here, so the runtime takes its collision once and is done.
+          const api = (this.airstripApi ??= await import('../world/zones/AirstripSubsystem'));
+
+          const group = new THREE.Group();
+          group.name = `zone_${zone.id}`;
+          this.scene.add(group);
+          this.zoneGroup = group;
+
+          const field = new api.AirstripRuntime(zone, group);
+          field.setColliders(api.buildAirstrip(zone, scope, group));
+          this.runtime = field;
+          // No keepsakes and no shared interior cell up here, same as a
+          // district. Clearing this is what makes the village-only paths
+          // unreachable rather than stale.
+          this.village = null;
+
+          scope.addTeardown(
+            () => {
+              this.scene.remove(group);
+              field.dispose();
+              if (this.zoneGroup === group) this.zoneGroup = null;
+            },
+            'other',
+            `zone-group:${zone.id}`,
+          );
           return;
         }
 
@@ -3572,7 +3607,9 @@ export class Game {
       case 'clothing':
         return 'Racks, and a mirror at the back.';
       case 'airstrip':
-        return 'The radio crackles. No aircraft yet.';
+        return this.unlockedZones.has('hill_airstrip')
+          ? 'The radio crackles. Strip is open.'
+          : 'The radio crackles. Somebody could tell you about the strip.';
       case 'apartment':
         return 'Yours, more or less.';
       default:
@@ -3761,7 +3798,7 @@ export class Game {
       saveGame: () => void this.saveWithRollback('autosave'),
       placeDecor: (itemId) => this.placeDecor(itemId),
       talk: (topic) => {
-        const live = this.policeDeskTopic(topic);
+        const live = this.policeDeskTopic(topic) ?? this.airstripTopic(topic);
         this.hud.showToast('Talk', live ?? TOPIC_LINES[topic] ?? '…');
       },
       startTask: (taskId) => this.startTask(taskId),
@@ -4411,6 +4448,35 @@ export class Game {
     const station = this.runtime.interactables.find((i) => i.service === 'police');
     if (!station) return 60;
     return Math.min(60, from.distanceTo(station.position));
+  }
+
+  /**
+   * Asking the controller about the strip is how the airstrip opens.
+   *
+   * The field has been on the map since Phase 2 and buildable since Phase 10,
+   * but `canEnterZone` gates it on `unlockedZones` and nothing ever added it —
+   * so a zone that validated, built and flew was unreachable in a real game.
+   * This conversation is the way in.
+   *
+   * Gated on the same age as driving, and deliberately not a new capability:
+   * the world already decided seventeen is when you may take charge of a motor
+   * vehicle, and an aeroplane is not the place to argue for a lower number.
+   * Repeatable, so a player who forgets where the strip is can ask again.
+   */
+  private airstripTopic(topic: string): string | null {
+    if (topic !== 'airstrip') return null;
+
+    if (this.unlockedZones.has('hill_airstrip')) {
+      return 'Strip is up the hill road, east. Your aircraft is on the apron.';
+    }
+
+    const licensed = can('drive_motor_vehicle', this.gateContext());
+    if (!licensed.allowed) {
+      return 'Strip is quiet. Come back when you are old enough to sign for an aircraft.';
+    }
+
+    this.unlockedZones.add('hill_airstrip');
+    return 'Strip is yours to use. Hill road east — there is an aircraft on the apron.';
   }
 
   /**
@@ -5096,7 +5162,8 @@ const TOPIC_LINES: Readonly<Record<string, string>> = {
   clinic: 'Rest and eat properly, is the advice.',
   police: 'Nothing doing today. Keep it that way.',
   fitting: 'The mirror is round the back.',
-  airstrip: 'Strip is quiet. Nothing flying yet.',
+  // No `airstrip` entry: `airstripTopic` answers that one, because whether the
+  // strip is open is live state and a canned line was wrong from Phase 10 on.
 };
 
 function taskLabel(taskId: string): string {
