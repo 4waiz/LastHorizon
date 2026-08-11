@@ -269,8 +269,12 @@ describe('centrelines from the shipped manifest', () => {
   });
 
   it('handles a zone with no lanes at all', () => {
-    const zone = WORLD_MANIFEST.zones.find((z) => z.id === 'hill_airstrip')!;
-    expect(centrelinesFromManifest(zone, heightAt)).toEqual([]);
+    // Was `hill_airstrip`, which had no lanes until Phase 10 opened it and
+    // gave it an access road. Every shipped zone now has a lane graph, so the
+    // empty case needs a fixture rather than a real zone — the guard still
+    // matters, because a zone author is free to ship one with none.
+    const empty = { ...WORLD_MANIFEST.zones[0], lanes: [] };
+    expect(centrelinesFromManifest(empty, heightAt)).toEqual([]);
     expect(buildLaneGraph([]).lanes).toEqual([]);
   });
 

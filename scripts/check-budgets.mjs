@@ -169,6 +169,34 @@ const LAZY_CHUNK_PREFIXES = [
   // the destination, so the fetch lands in a gap the player waits through
   // anyway, and a session that never leaves the village never pays for it.
   'CitySubsystem-',
+  // Phase 10, finished late. The airstrip runtime and its builder, behind the
+  // same zone-travel boundary as the districts: a runway is only reachable by
+  // travelling to one.
+  //
+  // Fourth phase running that the gate failed for the reason written twelve
+  // lines above this one. The warning was right and it still did not stop it
+  // happening, so this time the number is worth recording too: 5.5 kB of
+  // genuinely lazy code counted as startup weight put `initial load` 2.5 kB
+  // over a budget that had 4.5 kB of headroom.
+  'AirstripSubsystem-',
+  // Shared by both zone builders and imported by neither eager path. Vite
+  // splits it out because two lazy chunks want it; it is lazy for the same
+  // reason they are.
+  'GeoBatch-',
+  // The village: `World` and the five files only it reaches — `Terrain`,
+  // `RoadSystem`, `Vegetation`, `Birds`, `Collectibles`.
+  //
+  // The odd one out on this list, and worth being precise about. Every other
+  // entry saves somebody the download: a session in the village never fetches
+  // a district, a player under eighteen never fetches the weapons. The village
+  // is the start zone, so *every* session fetches this one.
+  //
+  // It earns its place a different way. `initial load` had 2.1 kB of headroom
+  // and Phase 11 still owed five screens; this moves ~40 kB off it and costs
+  // nothing, because `Game.start` requests the chunk before
+  // `AssetManager.loadAll()` and it resolves during the 1.4 MB of GLB. Moved
+  // rather than raised, which is the rule.
+  'VillageSubsystem-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));

@@ -89,6 +89,15 @@ These are the entries most likely to hide a real problem, so they come first.
   setting it.
 - **Ambient pedestrians do not use doors**, and the mid LOD tier uses the
   player's full-detail 4,890-triangle body rather than a decimated one.
+- **The aerial streaming policy does not currently do anything.**
+  `AERIAL_POLICY` fades the chunk load radius from two rings to one between
+  45 m and 160 m AGL, which is what the Phase 10 brief asks for, and it has no
+  effect on the world as it stands — for two independent reasons. Every
+  district is 4×3 chunks over 192×144 m, so with one ring at 48 m and 14 m of
+  hysteresis a chunk is kept to 62 m while the furthest chunk's near edge is
+  53.7 m from the centre: nothing is ever released at any altitude. And the
+  aeroplane lives at `hill_airstrip`, an authored zone that does not stream at
+  all, so a player in the air is never inside a streamed zone to begin with.
 - **The `follow` objective kind is implemented and unused.**
 - **`chapter_7` never lands in `completedChapters`** — it resolves an ending
   instead. Cosmetic; nothing reads the flag.
@@ -127,8 +136,24 @@ These are the entries most likely to hide a real problem, so they come first.
   given up in [adr/0003-hand-written-service-worker.md](adr/0003-hand-written-service-worker.md):
   no navigation preload, no range-request handling for audio, no background
   sync, and we now own the correctness of a service worker.
-- **`style-src 'unsafe-inline'` is in the CSP.** Several panels build markup
-  containing `style="..."` attributes. Removing them is worthwhile and not done.
+- **The game can be embedded in a frame by anyone.** The policy is delivered
+  by a `<meta http-equiv>` element, because the game ships as static files
+  with no server of its own — and the spec requires a meta-delivered policy to
+  ignore `frame-ancestors`, `report-uri` and `sandbox`. Browsers ignore it
+  *and* log a warning, which is a console message in normal play and therefore
+  not allowed here. The smoke suite caught it on the first run after the policy
+  landed, failing all 111 scenarios; it has been removed from the meta tag.
+
+  Clickjacking protection has to come from whatever serves `dist/`, as
+  `Content-Security-Policy: frame-ancestors 'none'` or `X-Frame-Options: DENY`.
+  Both are in [DEPLOYMENT.md](DEPLOYMENT.md) §3. **Neither can be added from
+  inside this repository**, so it is not done and not claimed — a directive
+  that is silently ignored is worse than one that is absent, because it reads
+  as protection nobody has.
+- **`style-src 'unsafe-inline'` is still required.** Several panels build
+  markup containing `style="..."` attributes. Assigning `element.style` from
+  script is CSSOM and needs no permission; a style *attribute* in parsed markup
+  does. Removing the last of these would let the directive go.
 - **WebGL context loss does not resume.** It stops, explains and asks for a
   reload. Resuming would leave the portal render target and ~54 patched
   programs in a state nothing has verified.
@@ -162,7 +187,16 @@ the reason it matters: three objective kinds shipped with no reporter at all,
 and every test passed. It is narrower now — those three are wired and proved by
 doing — but the gap is real and is not rounded up.
 
-## 8. Deferred beyond the MVP, deliberately
+## 8. Licensing
+
+- **GSAP is not open source.** Its standard licence is free for most uses, is
+  not an OSI licence, and its terms differ for paid products. **Confirm the
+  current terms against the intended commercial model before a public
+  release.** Flagged in `docs/ASSET_LICENSES.md` since Phase 11 and still
+  unresolved — the one item on this page that is a business decision rather
+  than an engineering one.
+
+## 9. Deferred beyond the MVP, deliberately
 
 Not bugs. Named in the vision document from the start and still out:
 multiplayer or an authoritative server, accounts and cloud saves, voice chat,

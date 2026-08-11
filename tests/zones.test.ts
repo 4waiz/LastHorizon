@@ -43,6 +43,29 @@ function streamedZone(over: Partial<ZoneManifest> = {}): ZoneManifest {
   };
 }
 
+/**
+ * A world with one zone still shut.
+ *
+ * Every shipped zone is playable since Phase 10 opened the airstrip, so the
+ * "not open yet" guards have nothing real left to refuse. The guard itself is
+ * worth keeping — it is what stops a half-built zone from stranding a player
+ * the moment somebody sets `playable: true` too early — so the tests below
+ * build their own closed zone rather than losing the coverage with the
+ * airstrip.
+ */
+function worldWithClosedZone(): WorldManifest {
+  const open = streamedZone({
+    id: 'village_coast',
+    neighbours: ['city_waterfront'],
+  });
+  const shut = streamedZone({
+    id: 'city_waterfront',
+    neighbours: ['village_coast'],
+    playable: false,
+  });
+  return { version: 1, startZone: 'village_coast', zones: [open, shut] };
+}
+
 describe('world manifest validation', () => {
   it('accepts the shipped world', () => {
     expect(validateWorldManifest(WORLD_MANIFEST)).toEqual([]);
@@ -66,9 +89,15 @@ describe('world manifest validation', () => {
     expect(v.playable).toBe(true);
   });
 
-  it('declares the airstrip but does not open it', () => {
+  it('opens the airstrip, with somewhere safe to arrive by vehicle', () => {
     const a = WORLD_MANIFEST.zones.find((z) => z.id === 'hill_airstrip')!;
-    expect(a.playable).toBe(false);
+    expect(a.playable).toBe(true);
+    // Phase 10 opened it. `no-vehicle-spawn` only fires for playable zones, so
+    // this assertion is what stops the manifest from opening a field a driver
+    // cannot safely arrive in.
+    expect(a.spawns.some((s) => s.vehicleSafe)).toBe(true);
+    expect(a.kind).toBe('authored');
+    expect(a.chunks).toHaveLength(0);
   });
 
   it('catches a default spawn that does not exist', () => {
@@ -383,8 +412,10 @@ describe('spawn safety', () => {
   });
 
   it('refuses a zone that is not open yet rather than guessing', () => {
-    const r = reg.resolve({ zoneId: 'hill_airstrip' });
+    const shut = new SpawnRegistry(worldWithClosedZone());
+    const r = shut.resolve({ zoneId: 'city_waterfront' });
     expect(r.ok).toBe(false);
+    expect(!r.ok && r.reason).toMatch(/not playable/i);
   });
 
   it('reports rather than throwing when nothing can satisfy the request', () => {
@@ -459,10 +490,21 @@ describe('travel', () => {
   });
 
   it('refuses a zone that is not open yet', async () => {
-    const { svc } = service();
-    const r = await svc.travel({ to: 'hill_airstrip', context: { fromZone: 'village_coast' } });
+    const shutReg = new SpawnRegistry(worldWithClosedZone());
+    const svc = new TravelService(shutReg, {
+      prepare: async () => { /* never reached */ },
+      release: async () => { /* never reached */ },
+    });
+    const r = await svc.travel({ to: 'city_waterfront', context: { fromZone: 'village_coast' } });
     expect(r.ok).toBe(false);
     expect(!r.ok && r.message).toMatch(/not open/i);
+  });
+
+  it('now lets the player fly out to the airstrip', async () => {
+    const { svc } = service();
+    const r = await svc.travel({ to: 'hill_airstrip', context: { fromZone: 'village_coast' } });
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.zoneId).toBe('hill_airstrip');
   });
 
   it('keeps the return entry when the return trip itself fails', async () => {

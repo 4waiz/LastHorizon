@@ -23,5 +23,5 @@
  * is the same argument the interior kit makes for its 145 kB.
  */
 
-export { CityRuntime } from './CityRuntime';
-export { buildCityChunk, buildCitySkyline } from './CityBuilder';
+export { CityRuntime, PROXY_ALTITUDE } from './CityRuntime';
+export { buildAerialProxy, buildCityChunk, buildCitySkyline } from './CityBuilder';

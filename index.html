@@ -45,9 +45,23 @@
                object-src 'none';
                base-uri 'self';
                form-action 'none';
-               frame-ancestors 'none';
                upgrade-insecure-requests"
     />
+    <!--
+      No `frame-ancestors` here, deliberately.
+
+      It is one of three directives the spec says a `<meta>`-delivered policy
+      must ignore, and every browser both ignores it *and* logs a warning
+      saying so. That warning is a console message in normal play, which this
+      repository does not allow, and the smoke test caught it on the first run
+      after the policy landed.
+
+      Clickjacking protection therefore has to come from the server, as a
+      `Content-Security-Policy: frame-ancestors 'none'` response header or an
+      `X-Frame-Options: DENY`. Recorded in docs/KNOWN_LIMITATIONS.md, because
+      a directive that is silently ignored is worse than one that is absent —
+      it reads as protection nobody has.
+    -->
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"

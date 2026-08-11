@@ -26,6 +26,13 @@ import {
  * Collision is rebuilt as chunks stream, since the set of solid geometry
  * changes with residency.
  */
+/**
+ * Height, in metres AGL, at which the low-detail stand-in comes up.
+ *
+ * Under `AERIAL_POLICY.groundCeiling` on purpose — see `setViewerAltitude`.
+ */
+export const PROXY_ALTITUDE = 40;
+
 export class CityRuntime implements ZoneRuntime {
   readonly group: THREE.Group;
   readonly collision = new CollisionWorld();
@@ -36,6 +43,10 @@ export class CityRuntime implements ZoneRuntime {
   private readonly colliders = new Map<string, THREE.Mesh[]>();
   private colliderTris = 0;
   private buildingCount = 0;
+
+  /** The always-resident low-detail stand-in. See `buildAerialProxy`. */
+  private proxy: THREE.Mesh[] = [];
+  private proxyShown = false;
 
   constructor(private readonly manifest: ZoneManifest, group?: THREE.Group) {
     this.group = group ?? new THREE.Group();
@@ -124,6 +135,42 @@ export class CityRuntime implements ZoneRuntime {
     this.buildingCount = this.colliders.size;
   }
 
+  // ---------------------------------------------------------- aerial proxy
+
+  /**
+   * Adopt the low-detail stand-in built alongside the zone.
+   *
+   * Starts hidden. Somebody standing in the street is the common case and the
+   * proxy would be inside the buildings they are walking past.
+   */
+  setAerialProxy(meshes: THREE.Mesh[]): void {
+    this.proxy = meshes;
+    this.showProxy(false);
+  }
+
+  /**
+   * Height above the district, in metres. Called by the frame loop.
+   *
+   * The switch is deliberately below `AERIAL_POLICY.groundCeiling` (45 m):
+   * the proxy has to be up *before* chunks start leaving, or there is a window
+   * where the district is neither streamed nor stood in for. Nothing in the
+   * game reaches 40 m without flying — the tallest shell is 15 m.
+   */
+  setViewerAltitude(agl: number): void {
+    this.showProxy(agl >= PROXY_ALTITUDE);
+  }
+
+  private showProxy(on: boolean): void {
+    if (on === this.proxyShown) return;
+    this.proxyShown = on;
+    for (const m of this.proxy) m.visible = on;
+  }
+
+  /** Whether the stand-in is currently drawn. Read by tests and the overlay. */
+  get aerialProxyVisible(): boolean {
+    return this.proxyShown;
+  }
+
   // ------------------------------------------------------------------ rest
 
   /** No doors wired yet; interior links exist in the manifest for Phase 7. */
@@ -188,6 +235,10 @@ export class CityRuntime implements ZoneRuntime {
   }
 
   dispose(): void {
+    // The meshes themselves belong to the zone scope, which disposes them.
+    // Dropping the references is what stops a disposed mesh being toggled.
+    this.proxy = [];
+    this.proxyShown = false;
     this.colliders.clear();
     // The counters are derived, so clearing the map alone leaves stats
     // reporting geometry that no longer exists.
