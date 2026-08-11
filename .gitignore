@@ -31,3 +31,11 @@ playwright-report/
 e2e-run.log
 
 pop-run.log
+
+# Performance report. Written by `npm run test:perf` on every run and uploaded
+# by CI as an artifact; the numbers taken from it live in the release report.
+perf-report/
+
+# Visual regression failure output. The *baselines* under
+# tests/visual/**-snapshots/ are tracked deliberately — they are the reference,
+# and reviewing them is the point.

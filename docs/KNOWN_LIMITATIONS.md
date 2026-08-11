@@ -138,7 +138,9 @@ These are the entries most likely to hide a real problem, so they come first.
 - **Vite is pinned to 7.** Vite 8's Rolldown native binding is blocked by this
   machine's Smart App Control — a host constraint, not an inherent one. See
   [adr/0002-vite-7-not-8.md](adr/0002-vite-7-not-8.md).
-- **`dist/` is committed**, so build output can drift from source.
+- **`dist/` is *not* committed** — it has been gitignored since Phase 4. The
+  Phase 1 report listed it as tracked and that has been stale for eight
+  phases; corrected here rather than copied forward again.
 - **Root-level duplicate assets retained at the author's request**:
   `indoor.mp3`, `outdoor.mp3` and a larger `icon.png`. Not served.
 
