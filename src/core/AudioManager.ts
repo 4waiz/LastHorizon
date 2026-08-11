@@ -192,7 +192,17 @@ export class AudioManager {
       const el = new Audio();
       el.src = `./assets/audio/${zone}.mp3`;
       el.loop = true;
-      el.preload = 'auto';
+      // The outdoor bed is wanted immediately. The indoor one is 1,103.7 kB
+      // and is not audible until somebody walks through a door — so it waited
+      // for one, from Phase 12 onward, instead of being downloaded by every
+      // player who never goes inside.
+      //
+      // This is the same call the interior *kit* already makes, at the same
+      // moment, and it lands in the same gap: entering a building fades to
+      // black while 145 kB of GLB arrives, so the music rides along in a pause
+      // the player is waiting through either way. Worth 1.1 MB off a first
+      // visit, which is more than every code split in Phases 6 to 11 combined.
+      el.preload = zone === 'outdoor' ? 'auto' : 'none';
       el.crossOrigin = 'anonymous';
       el.volume = 1;
 
@@ -251,6 +261,16 @@ export class AudioManager {
   setZone(zone: 'outdoor' | 'indoor'): void {
     if (this.zone === zone) return;
     this.zone = zone;
+
+    // First trip indoors: ask for the bed that was deliberately not preloaded.
+    // `load()` is a no-op once the element has data, so this costs nothing on
+    // every subsequent door.
+    const track = this.tracks[zone];
+    if (zone === 'indoor' && track && track.el.preload === 'none') {
+      track.el.preload = 'auto';
+      track.el.load();
+    }
+
     this.applyZone();
   }
 

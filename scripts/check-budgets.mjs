@@ -203,6 +203,32 @@ const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p)
  */
 const TOTAL_JS_MAX_KB = 1140;
 
+/**
+ * Files at the root of `dist/` that a player does not wait for.
+ *
+ * Phase 12, and the reasoning has to be tighter than usual because this is a
+ * gate exclusion and those are how a budget quietly stops protecting anything.
+ * The test is not "is it small" or "is it infrastructure" — it is **does the
+ * player wait for it before they can play**. Both entries fail that test for a
+ * reason you can point at in the source:
+ *
+ * - `sw.js` is registered inside a `window.addEventListener('load', ...)` in
+ *   `src/core/ServiceWorkerClient.ts`. `load` has by definition already fired,
+ *   the loading screen has already had its 1.4 MB of GLB, and the deferral is
+ *   deliberate and commented there: a worker that makes the first visit slower
+ *   in order to help the second is a bad trade, because for some players the
+ *   first visit is the only one.
+ * - `manifest.webmanifest` is fetched by the browser lazily, for install UI.
+ *   It is not render-blocking and nothing in the game reads it.
+ *
+ * What this exclusion is **not** hiding: the worker then precaches roughly
+ * 2.6 MB in the background on a first visit. That is real bandwidth and it is
+ * recorded as its own line in docs/PERFORMANCE_BUDGETS.md rather than folded
+ * into a number it would misrepresent — `initial load` answers "how long until
+ * the player is playing", and the precache happens after the answer.
+ */
+const LAZY_ROOT_FILES = ['sw.js', 'manifest.webmanifest'];
+
 const ASSET_BUDGETS = [
   // Raised 1200 -> 1360 in Phase 7 for `interior_kit.glb` (138.6 kB). The
   // number that governs how long a player waits — `initial load` — did not
@@ -234,6 +260,19 @@ const LAZY_ASSET_FILES = [
   // up to one at the airstrip or the dock. A player who never leaves the
   // village never pays for either.
   'aircraft.glb',
+  // Phase 12, and the largest single correction this list has ever carried.
+  //
+  // `indoor.mp3` is 1,103.7 kB and was downloaded by every player on every
+  // first visit, whether or not they ever went inside, because `AudioManager`
+  // built both music beds with `preload = 'auto'`. It is `'none'` now until
+  // the first `setZone('indoor')` — the same moment the 145 kB interior kit is
+  // fetched, hidden behind the same fade to black.
+  //
+  // That is worth more than every code split from Phase 6 to Phase 11 put
+  // together, and it had been sitting inside the audio budget the whole time
+  // being counted as startup weight. Same lesson this file keeps relearning:
+  // check what the number is measuring before arguing about the ceiling.
+  'indoor.mp3',
 ];
 
 /**
@@ -430,7 +469,15 @@ for (const f of listFiles(join(dist, 'assets'))) {
   if (LAZY_ASSET_FILES.includes(name)) lazyAssetBytes += statSync(f).size;
 }
 
-const initialLoad = kb(shippedTotalBytes - lazyBytes - lazyAssetBytes);
+// Root-level files the player does not wait for: the service worker and the
+// manifest. See LAZY_ROOT_FILES for why each qualifies.
+let lazyRootBytes = 0;
+for (const name of LAZY_ROOT_FILES) {
+  const p = join(dist, name);
+  if (existsSync(p)) lazyRootBytes += statSync(p).size;
+}
+
+const initialLoad = kb(shippedTotalBytes - lazyBytes - lazyAssetBytes - lazyRootBytes);
 
 notes.push(`  ${(initialLoad > INITIAL_LOAD_MAX_KB ? 'FAIL' : 'ok').padEnd(4)} ${'initial load'.padEnd(14)} ${String(initialLoad).padStart(7)} kB / ${INITIAL_LOAD_MAX_KB} kB`);
 if (initialLoad > INITIAL_LOAD_MAX_KB) {

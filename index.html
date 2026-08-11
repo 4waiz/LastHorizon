@@ -59,6 +59,14 @@
     />
     <link rel="icon" type="image/png" href="/icon.png" />
     <link rel="apple-touch-icon" href="/icon.png" />
+    <!-- Generated at build time by scripts/vite-plugin-pwa.mjs, so it is
+         absent from the dev server. That is deliberate: a worker serving
+         yesterday's module to a hot reload teaches you nothing about
+         production. -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Last Horizon" />
     <title>LastHorizon</title>
   </head>
   <body>
@@ -683,6 +691,27 @@
     <noscript>
       <div class="noscript">LastHorizon needs JavaScript and WebGL to run.</div>
     </noscript>
+
+    <!-- ============================= pwa ==============================
+         Two thin bars, both normally hidden and neither taking the screen.
+         Being offline is not an error in a game that runs entirely on the
+         device, and a new build is an offer rather than an interruption —
+         accepting it reloads, which is why it must never happen on its own
+         while somebody is mid-mission. -->
+    <div id="swOffline" class="swbar swbar--quiet" role="status" hidden>
+      <span class="swbar__dot" aria-hidden="true"></span>
+      <span>Offline — the village is cached and playing normally.</span>
+    </div>
+
+    <div id="swUpdate" class="swbar" role="status" hidden>
+      <span>A new version of Last Horizon is ready.</span>
+      <span class="swbar__acts">
+        <button type="button" class="swbar__btn swbar__btn--go" id="swUpdateGo">
+          Update and reload
+        </button>
+        <button type="button" class="swbar__btn" id="swUpdateLater">Later</button>
+      </span>
+    </div>
 
     <!-- =========================== recovery ===========================
          Shown by src/core/Recovery.ts when an unhandled error escapes after

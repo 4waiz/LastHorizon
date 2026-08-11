@@ -3,6 +3,7 @@ import { Game } from './core/Game';
 import { LoadingScreen } from './ui/LoadingScreen';
 import { featureFlags } from './core/FeatureFlags';
 import { installCrashHandler } from './core/Recovery';
+import { registerServiceWorker } from './core/ServiceWorkerClient';
 
 /** Entry point: boot the game behind the loading screen, fail visibly. */
 
@@ -67,6 +68,15 @@ async function boot(): Promise<void> {
   if (import.meta.hot) {
     import.meta.hot.dispose(() => game?.dispose());
   }
+
+  // Last, and it waits for `load` internally. Registration competes for
+  // bandwidth with the 1.4 MB of GLB the loading screen is already waiting
+  // on, and a worker that makes the first visit slower to help the second is
+  // a bad trade — for some players the first visit is the only one.
+  //
+  // Under `?e2e=1` it is skipped entirely: a worker caching the build between
+  // scenarios is how a suite starts testing the previous commit.
+  if (!featureFlags().e2e) registerServiceWorker();
 }
 
 void boot();

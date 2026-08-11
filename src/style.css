@@ -1404,3 +1404,87 @@ body:has(#touch:not([hidden])) .minimap {
   font-size: var(--text-xs);
   line-height: var(--leading-body);
 }
+
+/* ============================ pwa banners ============================
+   Offline state and the update offer. Both are thin bars pinned to the
+   bottom, deliberately not modals: neither is an error, and a game that
+   stops to tell you it is working offline has misunderstood what offline
+   means for a game that never needed the network. */
+.swbar {
+  position: fixed;
+  left: 50%;
+  bottom: max(var(--sp-3), var(--safe-b));
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: calc(100vw - var(--sp-5));
+  padding: var(--sp-2) var(--sp-4);
+  border: var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+}
+
+/* Offline is information, not a call to action. */
+.swbar--quiet {
+  background: var(--paper-dim);
+  color: var(--ink-soft);
+}
+
+.swbar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+.swbar__acts {
+  display: flex;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+.swbar__btn {
+  padding: var(--sp-1) var(--sp-3);
+  border: var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--cream);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.swbar__btn--go {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--paper);
+  font-weight: 600;
+}
+
+.swbar__btn:focus-visible {
+  outline: 3px solid var(--accent-cool);
+  outline-offset: 2px;
+}
+
+.swbar__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* On a phone the bar would otherwise sit across the touch controls. */
+@media (max-width: 560px) {
+  .swbar {
+    flex-wrap: wrap;
+    justify-content: center;
+    text-align: center;
+    bottom: auto;
+    top: max(var(--sp-2), var(--safe-t));
+  }
+}
