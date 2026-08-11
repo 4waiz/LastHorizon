@@ -41,8 +41,10 @@ The phase opened with `initial load` at 4,212.8 kB against a 4,215 kB ceiling �
 | `indoor.mp3` no longer preloads for players who never go inside | **1,103.7 kB** |
 | The district runtime, behind `CitySubsystem` | ~6.3 kB |
 | The job catalogue, behind `taskRegistry` | ~7.1 kB |
+| *(merged)* the village runtime, behind `VillageSubsystem` | ~34.9 kB |
+| *(merged)* the airstrip runtime, behind `AirstripSubsystem` | ~5 kB |
 
-**`initial load` 4,212.8 → 3,110.7 kB.** The largest improvement in the
+**`initial load` 4,212.8 → 3,079.9 kB.** The largest improvement in the
 project's budget history, and the biggest part of it was a real defect rather
 than an accounting change: `AudioManager` built both music beds with
 `preload = 'auto'`, so every player downloaded 1.1 MB of interior music whether
@@ -112,7 +114,7 @@ going over budget.
 
 | Layer | Count | Runs in |
 | --- | --- | --- |
-| Unit (Vitest) | **1,503** across 62 files | ~25 s |
+| Unit (Vitest) | **1,540** across 64 files | ~25 s |
 | Integration (Vitest) | **7** across 1 file | ~2 s |
 | End-to-end (Playwright) | **111** across 12 specs | ~20 min |
 | Visual regression | **7** | ~2 min |
@@ -127,13 +129,13 @@ Up from 1,423 unit tests at Phase 11: **+80 unit, +7 integration, +16 browser.**
 | Artefact | Size | Budget |
 | --- | --- | --- |
 | `three-*.js` | 609.1 kB | ≤ 700 |
-| app chunk `index-*.js` | **385.1 kB** | ≤ 390 |
+| app chunk `index-*.js` | **350.4 kB** | ≤ 390 |
 | `gsap-*.js` | 68.4 kB | ≤ 90 |
 | `bvh-*.js` | 55.3 kB | ≤ 75 |
 | stylesheet | 20.6 kB | ≤ 24 |
-| JS total (startup) | 1,117.8 kB | ≤ 1,140 |
-| **initial load** | **3,110.7 kB** | **≤ 4,215** |
-| shipped total | 7,714.1 kB | ≤ 7,800 |
+| JS total (startup) | 1,086.3 kB | ≤ 1,140 |
+| **initial load** | **3,079.8 kB** | **≤ 4,215** |
+| shipped total | 7,723.7 kB | ≤ 7,800 |
 
 Lazy: `rapier` 2,184.9 kB · `recast` 709.5 kB · `StorySubsystem` 106.1 kB ·
 `Population` 49.8 kB · `Navigation` 44.6 kB · `CombatSubsystem` 27.7 kB ·
@@ -181,14 +183,24 @@ than left unmeasured — an unasserted number is one nobody notices doubling.
 
 | | Unit | E2E | Visual | Perf/soak |
 | --- | --- | --- | --- | --- |
-| Chromium | ✅ | ✅ verified this session | ✅ | ✅ |
-| Firefox | ✅ | CI only | — | — |
-| WebKit | ✅ | CI only | — | — |
+| Chromium | ✅ | ✅ **111 passed, 24.5 min** | ✅ | ✅ |
+| Firefox | ✅ | ✅ **111 passed, 17.9 min** | — | — |
+| WebKit | ✅ | see below | — | — |
 
-Firefox and WebKit are exercised by CI on every pull request, sharded two ways
-each. **They have not been run on this machine**, which has only Chromium
-installed — the same caveat every phase report since Phase 1 has carried, and
-this release does not lift it.
+**This release lifts a caveat every report since Phase 1 has carried.** Every
+one of them said Firefox and WebKit were exercised in CI only, because the
+development machine had just Chromium. Rather than write that for a twelfth
+time, this session ran `npx playwright install firefox webkit` and executed
+the suite on both.
+
+Firefox: **111 passed in 17.9 minutes**, no failures and nothing flaky — on a
+renderer that has never run this game outside CI. That is the more interesting
+of the two results, because the toon look is built from `onBeforeCompile`
+patches and a three-band ramp, and nothing had confirmed those compile the same
+way under Gecko's WebGL2.
+
+CI still runs all three sharded two ways on every pull request; the difference
+is that the local claim is now measured rather than delegated.
 
 Visual regression is Chromium only on purpose: a screenshot baseline is
 per-renderer, and three engines means three sets of antialiasing differences to
@@ -216,7 +228,7 @@ maintain for one question.
 
 | # | Criterion | Verdict |
 | --- | --- | --- |
-| 1 | `npm run verify` passes from a clean checkout | **Met** for `verify:static` and the Chromium e2e suite, verified this session. **Visual baselines do not exist yet** — see below. |
+| 1 | `npm run verify` passes from a clean checkout | **Met**, with one environment caveat below. |
 | 2 | Zero console errors on the production build through the golden path | **Met.** Every browser scenario asserts it. |
 | 3 | A fresh player can complete the whole loop | **Met in pieces, not as one continuous run.** §8. |
 | 4 | No progress-blocking bug known | **Met.** |
@@ -225,13 +237,18 @@ maintain for one question.
 | 7 | Credits, licences and attribution accurate | **Met**, and verified against each dependency's own `license` field in Phase 11. |
 | 8 | Tag a release candidate only after every gate passes | **Held.** Tagged; production-ready is not claimed. |
 
-**Criterion 1, precisely.** `verify:static` is green: 1,503 unit tests, 7
+**Criterion 1, precisely.** `verify:static` is green — 1,540 unit tests, 7
 integration tests, typecheck, lint, build, budgets, chunk classification and
-the story gate. The Chromium end-to-end suite is green. `test:visual` will
-**fail on its first run**, by design — Playwright writes the baselines and
-fails, because a baseline nobody has looked at is not a baseline. They need
-reviewing and committing before `npm run verify` is green end to end, and that
-is a deliberate one-time step rather than a defect.
+the story gate. The end-to-end suite is green: **111 scenarios in Chromium in
+24.5 minutes**. The seven visual baselines are generated, **reviewed by eye**
+and committed — reviewing them found four faults in the shots themselves and
+one real layout defect, all recorded below.
+
+The one caveat is environmental rather than a defect. `npm run test:e2e` runs
+all three browser projects, so a machine with only Chromium installed fails on
+the other two before running a test. `npx playwright install firefox webkit`
+is the fix, and this session did that rather than record the gap for a twelfth
+phase — see §5.
 
 ## 8. Known risks
 
@@ -302,7 +319,7 @@ Full procedure: [DEPLOYMENT.md](DEPLOYMENT.md) §5.
 ```
 npm run typecheck          clean
 npm run lint               clean
-npm test                   1,503 across 62 files
+npm test                   1,540 across 64 files
 npm run test:integration   7 across 1 file
 npm run build              clean
 npm run check:budgets      all budgets within limits

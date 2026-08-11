@@ -26,7 +26,7 @@ These are the entries most likely to hide a real problem, so they come first.
 | Gap | State |
 | --- | --- |
 | **Mobile frame rate** | **Never measured on real hardware.** The 30 FPS Medium-preset target has been an unverified budget since Phase 1 and this release does not lift that. Everything known about mobile is inference from desktop plus scene cost. |
-| **Firefox and WebKit** | Run in CI only. The development machine has Chromium alone, so local runs prove one engine of three. |
+| **Firefox and WebKit** | **Closed for 0.1.0.** Both were installed locally and run: Firefox 111/111 in 17.9 min. CI continues to run all three sharded two ways per browser. |
 | **Frame timing in CI** | Headless Chromium has no GPU and rasterises in software, so the perf layer asserts *scene cost* (draw calls, triangles, programs) and deliberately does not assert a frame rate. Real timing is a Chrome DevTools trace on a real machine, by hand. |
 | **30-minute heap soak** | The soak layer runs ~10 minutes of simulated play and asserts object counts, which is the reliable leak signal. A 30-minute heap-snapshot pass has not been run for this release. |
 | **Low-memory and low-quality behaviour** | The Low preset exists and is tested; behaviour under genuine memory pressure is not. |
