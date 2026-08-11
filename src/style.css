@@ -1310,3 +1310,97 @@ body:has(#touch:not([hidden])) .minimap {
   .hud.is-impact::after { animation-duration: 1ms; }
   .reticle { transition: none; }
 }
+
+/* =========================== recovery screen ===========================
+   The one panel whose styles cannot travel with a lazy chunk. Everything
+   else in this file that could move, moved in Phase 11 — but a crash screen
+   that has to fetch a stylesheet before it can render is a crash screen that
+   does not render when the network is the thing that broke.
+
+   Deliberately plain: no blur, no transform, no custom font, no animation.
+   It has to paint correctly in a document whose JavaScript has already
+   thrown, and every effect is one more thing that can be the reason it does
+   not. */
+.crash {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: rgba(28, 26, 22, 0.82);
+}
+
+.crash__card {
+  width: min(34rem, 100%);
+  padding: var(--sp-6);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+
+.crash__title {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-lg);
+  line-height: var(--leading-tight);
+}
+
+.crash__lede {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+}
+
+/* The exception text. Monospace because it is machine output, and wrapped
+   because a stack frame is longer than any card. */
+.crash__detail:not(:empty) {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: var(--paper-dim);
+  color: var(--ink-soft);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.crash__acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.crash__btn {
+  flex: 1 1 12rem;
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--cream);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.crash__btn--go {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--paper);
+  font-weight: 600;
+}
+
+.crash__btn:focus-visible {
+  outline: 3px solid var(--accent-cool);
+  outline-offset: 2px;
+}
+
+.crash__note {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}

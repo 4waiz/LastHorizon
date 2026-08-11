@@ -9,6 +9,7 @@ import {
   isSaveSlot,
 } from './SaveSchema';
 import type { GameMode } from '../core/Gates';
+import { parseImportedSave } from './ImportGuard';
 
 /**
  * Reading and writing saves, safely.
@@ -260,14 +261,14 @@ export class SaveService {
    * possibly from another build.
    */
   async importInto(slot: SaveSlotId, json: string): Promise<SaveOutcome> {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(json);
-    } catch {
-      return { ok: false, reason: 'that file is not valid JSON' };
-    }
+    // Size, shape, depth, node count, forbidden keys and control characters,
+    // before `migrateSave` or `validateSave` form an opinion about *meaning*.
+    // Those two reason about fields the schema knows; this reasons about the
+    // input, which is the half a hostile file attacks. See `ImportGuard.ts`.
+    const guarded = parseImportedSave(json);
+    if (!guarded.ok) return { ok: false, reason: guarded.reason };
 
-    const migrated = migrateSave(parsed);
+    const migrated = migrateSave(guarded.value);
     if (!migrated.ok || !migrated.data) {
       return { ok: false, reason: migrated.error ?? 'that file is not a Last Horizon save' };
     }

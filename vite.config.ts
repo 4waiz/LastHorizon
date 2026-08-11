@@ -1,6 +1,36 @@
 import { defineConfig, type Plugin } from 'vite';
 import { fileURLToPath, URL } from 'node:url';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+
+/**
+ * Build identity: the version a player sees, and the commit that produced it.
+ *
+ * Deliberately **not** a timestamp. The service worker keys its cache on
+ * `__LH_BUILD__`, and a clock-derived id would mint a new cache on every
+ * rebuild of identical source — which is both a pointless re-download for
+ * every player and the end of any hope of comparing two builds. A commit sha
+ * changes exactly when the code does.
+ */
+const pkg: { version: string } = JSON.parse(readFileSync('./package.json', 'utf8'));
+
+function buildId(): string {
+  try {
+    const sha = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+    // A dirty tree is not the commit it claims to be, and saying so is the
+    // difference between a useful diagnostic bundle and a misleading one.
+    const dirty = execSync('git status --porcelain', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+    return dirty ? `${sha}-dirty` : sha;
+  } catch {
+    // A tarball or a checkout without git. The version alone still identifies
+    // the release; only the exact commit is lost.
+    return 'nogit';
+  }
+}
 
 /**
  * Dev-only in-engine screenshot harness.
@@ -109,6 +139,10 @@ function shotSink(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [shotSink()],
+  define: {
+    __LH_VERSION__: JSON.stringify(pkg.version),
+    __LH_BUILD__: JSON.stringify(buildId()),
+  },
   resolve: {
     // three-mesh-bvh and the examples modules each import three; without
     // dedupe the bundle can end up with two copies, which breaks instanceof

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createRendererBackend, type RendererBackend } from './RendererBackend';
+import { installContextLossHandler } from './ContextLoss';
 import { Settings, QualityLevel, TimeMode } from './Settings';
 import type { LifeSnapshot, NpcSnapshot, PopulationSnapshot, TestSurface } from './TestMode';
 import type { PerceptionKind } from '../npc/Perception';
@@ -435,6 +436,22 @@ export class Game {
     const preset = this.settings.preset;
 
     this.renderer = createRendererBackend(this.canvas, preset).backend;
+    // Before the first frame. A context can be lost during startup — a phone
+    // reclaiming memory while 1.4 MB of GLB decodes is the likeliest moment
+    // in the whole session — and a handler installed after the loop starts
+    // would miss exactly that case.
+    installContextLossHandler(this.canvas, {
+      onLost: () => {
+        // Stop the loop first. Every GL call after the loss is either a
+        // silent no-op or a console error per frame, and the second kind
+        // buries the one warning that explains what happened.
+        this.running = false;
+        this.audio.setMuted(true);
+      },
+      onRestored: () => {
+        /* The panel says reload; see ContextLoss.ts for why we do not resume. */
+      },
+    });
     this.camera = new ThirdPersonCamera(window.innerWidth / window.innerHeight);
     this.post = new PostProcessing(this.renderer.renderer, this.scene, this.camera.camera);
 
@@ -4917,6 +4934,52 @@ export class Game {
     }
 
     this.hud.setDebug(lines.join('\n'));
+  }
+
+  /**
+   * What the game can say about itself for a crash report.
+   *
+   * **Every access is defensive and the whole thing is wrapped**, because this
+   * runs immediately after an unhandled exception — which is precisely the
+   * moment a half-built subsystem is likeliest to be null. A diagnostics
+   * function that throws while reporting a crash replaces a useful bundle with
+   * a second, less interesting error, so a failure here degrades to a note in
+   * the output rather than propagating.
+   *
+   * Nothing personal goes in: no save contents, no storage, no identifiers.
+   * It is where the player was and what was loaded, which is what a bug report
+   * needs and the most a diagnostic file should ever carry.
+   */
+  diagnostics(): Record<string, unknown> {
+    const out: Record<string, unknown> = { started: this.running };
+    try {
+      const p = this.player?.position;
+      Object.assign(out, {
+        mode: this.mode,
+        zone: this.zones?.debugState()?.zoneId ?? null,
+        indoors: this.interiors?.active?.def.id ?? null,
+        ageYears: Math.floor(this.life?.ageYears ?? 0),
+        position: p ? { x: +p.x.toFixed(1), y: +p.y.toFixed(1), z: +p.z.toFixed(1) } : null,
+        // The vehicle's id, not its kind: `riding` holds a registry id and a
+        // seat, and the registry may itself be the thing that broke.
+        riding: this.riding?.id ?? null,
+        quality: this.settings?.current?.quality ?? null,
+        renderer: this.renderer?.kind ?? null,
+        // Which lazy subsystems had arrived. The single most useful field
+        // when a report says "it broke as I walked into the shop".
+        loaded: {
+          population: this.population !== null,
+          story: this.director !== null,
+          interiors: this.interiors !== null,
+          combat: this.combat !== null,
+          city: this.cityApi !== null,
+        },
+        draws: this.renderer?.renderer?.info?.render?.calls ?? null,
+      });
+    } catch (err) {
+      out.diagnosticsFailed = err instanceof Error ? err.message : 'unknown';
+    }
+    return out;
   }
 
   dispose(): void {

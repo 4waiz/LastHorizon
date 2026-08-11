@@ -2,6 +2,52 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Content Security Policy.
+
+      Restrictive, and every relaxation below is one the app demonstrably
+      needs. The header form in docs/DEPLOYMENT.md is the authority for a
+      deployment; this meta tag is what protects the file:// and
+      `vite preview` cases, and what keeps the policy in the repository next
+      to the code it constrains.
+
+      Two entries are load-bearing and easy to get wrong:
+
+      * `'wasm-unsafe-eval'` — Rapier and recast-navigation each inline their
+        WebAssembly and call `WebAssembly.instantiate`. Under a policy without
+        this, physics and navigation fail at the moment a player first gets on
+        a bicycle, which is a long way from the loading screen and looks like
+        a game bug rather than a policy one. It permits WebAssembly
+        compilation and nothing else — it is *not* `'unsafe-eval'`, and
+        `eval` and `new Function` stay blocked. Neither appears in `src/`.
+      * `style-src 'unsafe-inline'` — several panels build markup containing
+        `style="..."` attributes. Assigning `element.style` from script is
+        CSSOM and needs no permission; a style *attribute* in parsed markup
+        does. Removing these is worthwhile and is recorded in
+        docs/KNOWN_LIMITATIONS.md rather than claimed as done.
+
+      `data:` on img-src is the Life Reel: it is drawn on a canvas and
+      exported through a data URL to the player's own device, which is also
+      why there is no `connect-src` beyond 'self' — nothing in this game
+      talks to a server.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self';
+               script-src 'self' 'wasm-unsafe-eval';
+               style-src 'self' 'unsafe-inline';
+               img-src 'self' data: blob:;
+               media-src 'self';
+               font-src 'self';
+               connect-src 'self';
+               worker-src 'self' blob:;
+               manifest-src 'self';
+               object-src 'none';
+               base-uri 'self';
+               form-action 'none';
+               frame-ancestors 'none';
+               upgrade-insecure-requests"
+    />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
@@ -637,6 +683,40 @@
     <noscript>
       <div class="noscript">LastHorizon needs JavaScript and WebGL to run.</div>
     </noscript>
+
+    <!-- =========================== recovery ===========================
+         Shown by src/core/Recovery.ts when an unhandled error escapes after
+         boot. Static markup, like every other panel, so raising it needs no
+         allocation and no module — the one moment you cannot rely on the
+         thing that just broke is immediately after it broke.
+
+         Diagnostics are built in memory and downloaded to the player's own
+         device. There is no endpoint. -->
+    <div id="crash" class="crash" role="alertdialog" aria-modal="true"
+         aria-labelledby="crashTitle" hidden>
+      <div class="crash__card">
+        <h2 id="crashTitle" class="crash__title">The game stopped</h2>
+        <p class="crash__lede">
+          Something went wrong and Last Horizon had to stop. Your progress is
+          saved up to the last autosave — reloading should put you back near
+          where you were.
+        </p>
+        <p class="crash__detail" id="crashDetail"></p>
+        <div class="crash__acts">
+          <button type="button" class="crash__btn crash__btn--go" id="crashReload">
+            Reload the game
+          </button>
+          <button type="button" class="crash__btn" id="crashSave">
+            Save a diagnostic file
+          </button>
+        </div>
+        <p class="crash__note">
+          The diagnostic file stays on your device — nothing is uploaded. It
+          records what broke, your browser and screen size, and where you were
+          in the game. Attach it to a bug report if you would like to.
+        </p>
+      </div>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

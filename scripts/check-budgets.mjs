@@ -299,7 +299,42 @@ const INITIAL_LOAD_MAX_KB = 4215;
  * Adding eager *code* is not, and the flight systems are lazy for exactly that
  * reason — see `LAZY_CHUNK_PREFIXES`.
  */
-const SHIPPED_TOTAL_MAX_KB = 7700;
+/*
+ * Raised 7,700 -> 7,800 in Phase 12, and this one deserves the argument
+ * spelled out because the reflex in this repository is to move something
+ * first, and here that reflex does not apply.
+ *
+ * **Moving code cannot reduce this number.** `shipped total` is every byte in
+ * `dist/`, lazy chunks included. Splitting a module into a lazy chunk moves
+ * bytes between columns; it does not remove them. The only ways down are
+ * deleting content or re-encoding art, and neither is a sensible response to
+ * adding a crash screen.
+ *
+ * The measurement was checked before the ceiling was, which is the lesson
+ * Phases 8, 9, 10 and 11 each had to learn: `dist/assets` holds 34 files and
+ * exactly one `index-*.js` and one `index-*.css`, so nothing stale is
+ * accumulating and the growth is real.
+ *
+ * What the bytes are — release hardening, all of it necessarily eager:
+ *
+ *   ~4.7 kB  `Recovery` + `ContextLoss` + `ImportGuard` in the app chunk
+ *   ~1.3 kB  the crash screen's stylesheet
+ *   ~3.6 kB  the CSP and the crash markup in index.html
+ *   ~5 kB    (reserved) the service worker, its registration and the manifest
+ *
+ * None of it can be lazy, and the reason is the same in every case: a crash
+ * screen that has to fetch a chunk before it can render is a crash screen that
+ * does not render when the network is what broke, and a policy that arrives
+ * after the page does is not a policy.
+ *
+ * Raised once, with room for the PWA slice, rather than twice.
+ *
+ * **`initial load` is the number that governs how long a player waits**, and
+ * it moved 4,200.2 -> 4,209.8 kB against a 4,215 kB limit that has not been
+ * raised — because Phase 12 first moved the job catalogue and the district
+ * runtime off the startup path, which bought 12.6 kB to spend here.
+ */
+const SHIPPED_TOTAL_MAX_KB = 7800;
 
 /** Dev-only surfaces that must never reach production output. */
 const FORBIDDEN_IN_DIST = ['__shot', '__cap.js', 'lh-shot-sink'];
