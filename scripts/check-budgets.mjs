@@ -183,6 +183,20 @@ const LAZY_CHUNK_PREFIXES = [
   // splits it out because two lazy chunks want it; it is lazy for the same
   // reason they are.
   'GeoBatch-',
+  // The village: `World` and the five files only it reaches — `Terrain`,
+  // `RoadSystem`, `Vegetation`, `Birds`, `Collectibles`.
+  //
+  // The odd one out on this list, and worth being precise about. Every other
+  // entry saves somebody the download: a session in the village never fetches
+  // a district, a player under eighteen never fetches the weapons. The village
+  // is the start zone, so *every* session fetches this one.
+  //
+  // It earns its place a different way. `initial load` had 2.1 kB of headroom
+  // and Phase 11 still owed five screens; this moves ~40 kB off it and costs
+  // nothing, because `Game.start` requests the chunk before
+  // `AssetManager.loadAll()` and it resolves during the 1.4 MB of GLB. Moved
+  // rather than raised, which is the rule.
+  'VillageSubsystem-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));

@@ -50,7 +50,10 @@ import { WORLD_MANIFEST } from '../world/zones/worldManifest';
 import { InputManager } from './InputManager';
 import { AudioManager } from './AudioManager';
 import { AssetManager } from './AssetManager';
-import { World } from '../world/World';
+// Type-only. The village itself arrives through `VillageSubsystem`, whose
+// import is started in `start()` so it lands during asset loading.
+import type { World } from '../world/World';
+type VillageApi = typeof import('../world/VillageSubsystem');
 import { InteractionSystem, type InteractionState } from '../interaction/InteractionSystem';
 import {
   worldInteractables,
@@ -176,6 +179,8 @@ export class Game {
   /** Resolved on first travel to a district, and kept for its chunk streaming. */
   private cityApi: CityApi | null = null;
   private airstripApi: AirstripApi | null = null;
+  /** In flight from the first line of `start()`. See `VillageSubsystem`. */
+  private villageApi: Promise<VillageApi> | null = null;
   /** Re-entry guard for `streamAroundViewer`. */
   private streamPending = false;
 
@@ -464,6 +469,12 @@ export class Game {
 
     const assetManager = new AssetManager();
     this.assetManager = assetManager;
+    // Started here, not where it is used. The village chunk is wanted inside
+    // `zones.enter` a few lines below; requested there it would be a serial
+    // round trip in the middle of the loading screen, and requested here it
+    // rides alongside 1.4 MB of GLB and resolves long before anything asks.
+    // Not awaited, deliberately — `buildZone` awaits it.
+    this.villageApi = import('../world/VillageSubsystem');
     const assets = await assetManager.loadAll((p) =>
       loading.setProgress(p.fraction * 0.7, p.label),
     );
@@ -486,7 +497,8 @@ export class Game {
     this.zones = new ZoneManager(WORLD_MANIFEST, {
       buildZone: async (zone, scope) => {
         if (zone.id === 'village_coast') {
-          const world = new World(assets, preset);
+          const api = await (this.villageApi ??= import('../world/VillageSubsystem'));
+          const world = new api.World(assets, preset);
           world.build();
           this.scene.add(world.group);
           scope.addTeardown(
