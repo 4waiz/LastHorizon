@@ -113,6 +113,7 @@ export class HUD {
   // -- Phase 8: the always-on half only. The panels are in StoryPanels.ts.
   private objective = $('objective');
   private objectiveText = $('objectiveText');
+  private objectivePip = document.querySelector<HTMLElement>('.objective__pip')!;
   private caption = $('caption');
 
   // -- Phase 9 -------------------------------------------------------------
@@ -1034,13 +1035,31 @@ export class HUD {
   // components" made structural rather than aspirational: `StoryDirector`
   // decides, and the HUD renders whatever it is handed.
 
-  setObjective(text: string | null): void {
-    if (text) {
-      this.objectiveText.textContent = text;
-      this.objective.hidden = false;
-    } else {
+  /**
+   * The one objective line, and what kind of thing it is.
+   *
+   * The pip was a coloured dot and nothing else, which is the last
+   * colour-only indicator in the interface — a player who cannot separate the
+   * accent from the cool accent had no way to tell a main-story objective
+   * from a side one. It now carries a **shape** as well: a filled circle for
+   * the main story, a hollow diamond for anything else, plus a name on the
+   * pip so a screen reader gets the distinction too.
+   *
+   * Same argument as the Heat numerals and the equipped-item underline, and
+   * the same rule: colour is a reinforcement, never the only channel.
+   */
+  setObjective(text: string | null, kind: 'main' | 'side' = 'main'): void {
+    if (!text) {
       this.objective.hidden = true;
+      return;
     }
+    this.objectiveText.textContent = text;
+    this.objectivePip.classList.toggle('objective__pip--side', kind === 'side');
+    this.objectivePip.setAttribute(
+      'aria-label',
+      kind === 'main' ? 'Main story' : 'Side task',
+    );
+    this.objective.hidden = false;
   }
 
   get objectiveLine(): string | null {

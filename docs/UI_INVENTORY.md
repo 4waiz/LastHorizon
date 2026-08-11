@@ -207,10 +207,15 @@ Minimap filters and streamed-zone awareness · birthday postcard export.
   them to the same rate.
 - **Driving assist**, matching flight assist in shape and default.
 
+- **Colour-independent quest indicators.** The objective pip was a coloured
+  dot and nothing else — the last colour-only indicator in the interface. It
+  now carries a shape as well: filled circle for the main story, hollow
+  rotated square for a side task, plus a name on the pip so a screen reader
+  gets the distinction too.
+
 ### Accessibility still not built
 
-Touch layout editor · colour-independent *quest* indicators (Heat and the
-equipped-item marker are both done).
+Touch layout editor.
 
 Flight assist had a settings control and no instruments to use it with; it
 now has both.

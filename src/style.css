@@ -1574,3 +1574,14 @@ body:has(#touch:not([hidden])) .minimap {
 :root.is-reduced-motion .flight__warn {
   animation: none;
 }
+
+/* A side task, distinguished by shape as well as colour.
+   The last colour-only indicator in the interface: a player who cannot
+   separate the two accents had no way to tell a main-story objective from a
+   side one. Filled circle for the main story, hollow diamond for the rest. */
+.objective__pip--side {
+  border-radius: 2px;
+  background: transparent;
+  border: 2px solid var(--accent-cool);
+  transform: rotate(45deg);
+}

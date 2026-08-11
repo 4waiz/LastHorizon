@@ -4250,7 +4250,7 @@ export class Game {
       },
 
       toast: (title, body) => this.hud.showToast(title, body),
-      setObjective: (text) => this.hud.setObjective(text),
+      setObjective: (text, kind) => this.hud.setObjective(text, kind),
       npcName: (id) => this.population?.namedById(id)?.definition?.displayName ?? id,
       activeZone: () => this.zones.activeZoneId,
       interiorPoint: (name) => {

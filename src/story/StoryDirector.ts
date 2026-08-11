@@ -29,7 +29,7 @@ import type { ZoneId } from '../world/zones/Manifest';
 export interface StoryDirectorHost extends StoryHost, CutsceneHost {
   toast(title: string, body: string): void;
   /** The HUD's one-line objective. Null clears it. */
-  setObjective(text: string | null): void;
+  setObjective(text: string | null, kind?: 'main' | 'side'): void;
   npcName(id: string): string;
   activeZone(): ZoneId | null;
   /** Interior point positions, when a room is open. */
@@ -281,7 +281,9 @@ export class StoryDirector {
 
     if (text !== this.lastObjective) {
       this.lastObjective = text;
-      this.host.setObjective(text);
+      // The lead quest's own kind, so the HUD can distinguish a main-story
+      // objective from a side one by shape rather than only by colour.
+      this.host.setObjective(text, lead.kind === 'main' ? 'main' : 'side');
     }
   }
 
