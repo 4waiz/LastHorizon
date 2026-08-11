@@ -46,6 +46,23 @@ const EAGER_PREFIXES = [
   'three-',
   'gsap-',
   'bvh-',
+  // A *shared* chunk, and the first one this script ever caught — on the merge
+  // that brought the village and airstrip splits together with the city one.
+  //
+  // Rollup emitted it separately because `CollisionWorld` is imported by both
+  // eager code (`ThirdPersonCamera` and `Player`, reached from `Game`) and
+  // several lazy runtimes (`VillageSubsystem`, `CitySubsystem`,
+  // `AirstripRuntime`). A chunk reached from *any* eager path is eager: the
+  // player downloads it before the first frame however many lazy modules also
+  // want it.
+  //
+  // Worth stating because the convenient answer is the wrong one. Adding this
+  // to `LAZY_CHUNK_PREFIXES` would have made the gate green and quietly
+  // under-reported `initial load` by 3.1 kB — which is precisely the class of
+  // mistake this script was written to stop, arriving by a new route. Splitting
+  // more subsystems out will produce more shared chunks like it, and every one
+  // needs the same question asked rather than the same answer assumed.
+  'CollisionWorld-',
 ];
 
 /** Read the lazy list out of the budget gate rather than keeping a second copy. */
