@@ -1,7 +1,7 @@
 {
   "name": "lasthorizon",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.1.0",
   "type": "module",
   "description": "LastHorizon — a peaceful stylized third-person coastal exploration game built with Three.js.",
   "license": "ISC",

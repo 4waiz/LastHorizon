@@ -306,3 +306,123 @@ npm run verify
 
 Individually: `npm run typecheck`, `npm run lint`, `npm test`,
 `npm run build`, `npm run check:budgets`, `npm run test:e2e`.
+
+---
+
+## Phase 12 — the layers the release gate needed
+
+### The layers as they stand
+
+| Layer | Tool | Command | Count |
+| --- | --- | --- | --- |
+| Unit | Vitest (jsdom) | `npm test` | **1,503** / 62 files |
+| Integration | Vitest (node) | `npm run test:integration` | **7** |
+| End-to-end | Playwright | `npm run test:e2e` | **111** / 12 specs |
+| Visual | Playwright | `npm run test:visual` | **7** |
+| Performance | Playwright | `npm run test:perf` | **5** |
+| Soak | Playwright | `npm run test:soak` | **4** |
+| Budgets | Node | `npm run check:budgets` | |
+| Chunks | Node | `npm run check:chunks` | |
+| Content | Node | `npm run check:story` | |
+
+`verify:static` is the fast inner loop. **`verify` is the complete
+non-destructive gate** and adds e2e and visual. `release:check` adds perf and
+soak.
+
+**Soak and performance are deliberately out of `verify`.** Fifteen minutes on
+every push is a gate people learn to ignore; they run nightly in CI, on demand,
+and before a release. That trade is recorded in `RELEASE_CHECKLIST.md` rather
+than left implicit.
+
+### Integration is a separate project, not a folder
+
+The two layers answer different questions and should fail independently. A unit
+test says a module is correct alone; an integration test says two modules that
+were each correct still agree when wired together — **which is where nearly
+every real defect in this project has lived.** Phase 8's cutscene bug (a quest
+that completed during its own scene left the event queued forever) and Phase
+9's `surrender()` (which cleared Heat and skipped every consequence) were both
+that shape, and both passed every unit test in the repository.
+
+### Save fixtures are frozen, and that is the point
+
+`tests/fixtures/saves/v1.json` … `v5.json`, hand-authored from the interfaces
+at the version each claims, with a fixed `savedAt` so they are byte-identical
+everywhere and a diff means somebody edited one.
+
+**Regenerating them from the current code would make the test circular** — it
+would prove only that the migrations agree with themselves. A count assertion
+fails when `CURRENT_SAVE_VERSION` goes up without a new fixture.
+
+Writing them found the first draft encoding an economy shape no build ever
+wrote: `paidAwards` where the field is `awards`. That is what a fixture is for.
+
+### Visual regression has a tolerance, and it is weaker than a pixel hash
+
+`maxDiffPixelRatio: 0.02`, `threshold: 0.2`. Not a default — a deliberate
+number, because `prepareShot()` pins the clock and the dev readout but **does
+not freeze cloud drift, bird animation or wind phase**, which this document has
+recorded since Phase 1.
+
+It catches structural regressions — a missing building, a black interior, a
+material that lost its banding — and **will not catch a subtle shading change**.
+Pinning `uTime` and the cloud and bird phase in the bridge is the improvement
+that would let the tolerance come down.
+
+Phase 9 is why it exists at all: the aim reticle sat on the back of the
+character's head, every counter was exactly right, and only looking at a
+screenshot caught it.
+
+Chromium only. A baseline is per-renderer, and three engines means three sets
+of antialiasing differences for one question.
+
+### Two of this phase's own tests proved nothing
+
+Worth recording in full, because they are the exact failure this document warns
+about and I wrote them anyway.
+
+`city-old-market` came back **byte-identical to `village-day`** — 264 draw
+calls, 434,174 triangles, the same numbers twice. Story Mode gates the city on
+age 18 *and* the departure chapter, so `travelTo` returned `false`, the run
+never left the village, and every budget assertion passed against the wrong
+scene. The soak spec's twenty city round trips were no-ops for the same reason,
+so a leak test was passing by never leaving home.
+
+Both now open the gate and **assert they arrived** before measuring. The
+district reports 72 calls and 14,934 triangles.
+
+The rule that would have caught it immediately: **a test that travels must
+assert it travelled.** Reading the output is what found it — two identical rows
+in a table are a result nobody should accept.
+
+### `check:chunks`
+
+Five consecutive phases shipped a lazy chunk that `check-budgets.mjs` counted
+as startup weight — `StorySubsystem-` in 8, `CombatSubsystem-` and four vehicle
+chunks in 9, `FlightSubsystem-` in 10, three panels in 11, two more in 12.
+
+The failure is nasty because it is **silent and displaced**: the omission shows
+up as the *next* change being over budget, so it looks like that change's
+fault, and the fix that suggests itself is raising a ceiling. Now a chunk that
+matches neither list fails the build, at the moment its author knows the answer.
+
+Its own first version reported seven correctly-listed chunks as unclassified,
+because scanning for quoted runs picks up apostrophes in the prose around them.
+Anchored to whole entry lines now.
+
+## Gaps — reviewed for 0.1.0
+
+- **No mobile-hardware measurement.** Unchanged since Phase 1 and the largest
+  unknown in the release.
+- **Firefox and WebKit run in CI only.**
+- **Visual baselines do not exist yet.** The first `test:visual` run writes
+  them and fails, by design — a baseline nobody looked at is not a baseline.
+  They need reviewing and committing.
+- **No 30-minute heap soak.** The soak layer runs ~10 minutes and asserts
+  object counts, which is the reliable signal; a heap-snapshot pass is by hand.
+- **No single continuous played run of the whole story.** Every objective kind
+  has a proven reporter and both routes are walked, but part of that walk still
+  reports by id. Narrower than Phase 8, and still open.
+- **Offline play is unit-tested, not browser-tested.** The worker's cache key,
+  precache list and refusal to auto-activate are asserted; loading the game
+  with the network off was not exercised this session.

@@ -506,3 +506,104 @@ Warnings are expected from three sources, and only these three:
    appears only after a vehicle has triggered the lazy load, never on startup.
 
 A change in this count is a signal worth investigating.
+
+---
+
+## Phase 12 — the largest correction this document has carried
+
+`initial load` **4,212.8 → 3,110.7 kB**, and no ceiling was raised to get
+there. Three moves, in order of size.
+
+### 1. `indoor.mp3` was downloaded by everybody — 1,103.7 kB
+
+`AudioManager.buildTracks` created both music beds with `preload = 'auto'`, so
+the interior bed was fetched by every player on every first visit whether or
+not they ever went inside. It is `'none'` now until the first
+`setZone('indoor')` — the same moment the 145 kB interior kit is fetched, and
+hidden behind the same fade to black.
+
+**That single line is worth more than every code split from Phase 6 to Phase 11
+put together**, and it had been sitting inside the audio budget the whole time
+being counted as startup weight. The lesson is the one this document keeps
+relearning and keeps failing to apply first: *check what the number is
+measuring before arguing about the ceiling.*
+
+### 2. The district runtime, behind `CitySubsystem` — ~6.3 kB
+
+**Owed since the Phase 4 report**, which said in as many words that this was
+the answer when the app chunk next needed room. Five phases raised a ceiling
+instead. `ZoneBuilder.buildZone` has returned `Promise<void> | void` since
+Phase 2 and is awaited, so the seam was already there — and travel already
+fades to black while it prepares the destination, so the fetch lands in a gap
+the player waits through anyway.
+
+### 3. The job catalogue, behind `taskRegistry` — ~7.1 kB
+
+Named in the Phase 10 report, which raised `initial load` rather than doing it
+and recorded that it should happen "before adding anything else eager". The
+runtime looks a job up through a tiny eager registry; the six definitions are a
+lazy chunk fetched alongside interiors, story or the phone.
+
+### The app-chunk ceiling went back down
+
+400 → **390 kB**. The pause menu raised it; the two splits above put the chunk
+at 385.1 kB, under the *old* limit, so the raise was handed back. Second phase
+running that a raise has been returned within the phase that granted it.
+
+### One budget was raised: shipped total, 7,700 → 7,800 kB
+
+And this is the case where the usual answer does not apply. **`shipped total`
+counts lazy chunks too**, so moving code between chunks cannot reduce it by
+construction — only deleting content or re-encoding art can, and neither is a
+sensible response to adding a crash screen. The bytes are release hardening,
+all of it necessarily eager: the recovery screen and its stylesheet, the
+context-loss handler, the import guard, the CSP and crash markup in
+`index.html`, and the service worker.
+
+The measurement was checked before the ceiling, per the rule above:
+`dist/assets` holds one `index-*.js` and one `index-*.css`, so nothing stale
+was accumulating.
+
+### `LAZY_ROOT_FILES`, and why it is not gate-gaming
+
+`sw.js` and `manifest.webmanifest` are excluded from `initial load`. The test
+applied was not "is it small" or "is it infrastructure" — it is **does the
+player wait for it**:
+
+- `sw.js` is registered inside a `window.addEventListener('load', ...)`. `load`
+  has already fired and the loading screen has already had its 1.4 MB of GLB.
+- `manifest.webmanifest` is fetched lazily by the browser for install UI.
+
+What that exclusion does *not* hide: the worker then precaches roughly 2.6 MB
+in the background on a first visit. That is real bandwidth, and it gets its own
+line rather than being folded into a number it would misrepresent.
+
+| Measure | Covers | 0.1.0 |
+| --- | --- | --- |
+| initial load | before the player can play | **3,110.7 kB** |
+| first-visit background precache | shell + village, after `load` | ~2.6 MB |
+| shipped total | everything in `dist/` | 7,714.1 kB |
+
+### Scene cost, re-measured
+
+`npm run test:perf`, production build, headless Chromium.
+
+| Scene | Draw calls | Triangles | Programs | Textures |
+| --- | --- | --- | --- | --- |
+| Village, day | 264 / 410 | 434,174 / 700 k | 23 / 70 | 29 / 32 |
+| Village, night | 384 / 500 | 418,003 / 700 k | 39 / 70 | 28 |
+| Interior, home (live portal) | 256 / 290 | 525,886 / 880 k | 55 / 70 | **38** |
+| City, Old Market | 72 / 410 | 14,934 / 700 k | 21 | 29 |
+
+**The interior runs 38 textures against a documented ceiling of 32**, and that
+ceiling was only ever measured outdoors. Now asserted against its own limit
+(44) rather than left unmeasured — an unasserted number is one nobody notices
+doubling. The kit's nine hero props carry their own maps and the portal target
+is one more.
+
+**The frame rate is deliberately not asserted anywhere in CI.** Headless
+Chromium has no GPU and rasterises in software, so a frame time from it
+describes the runner. Scene cost is renderer-reported and hardware-independent,
+and it is what these budgets are written in. Real frame timing is a Chrome
+DevTools trace on real hardware, by hand, recorded in the release report —
+**and the mobile half of that has still never been done.**
