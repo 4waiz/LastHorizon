@@ -40,6 +40,36 @@ const MOVE_VECTORS: Partial<Record<Action, [number, number]>> = {
  */
 const GAMEPAD_LOOK_RATE = 620;
 
+/**
+ * Is this key press meant for a control rather than for the game?
+ *
+ * The bug this fixes was found by the criterion-3 gamepad test and is worth
+ * stating plainly: **`Enter` is a fixed alternate for `interact`**, the
+ * listener is on `window`, and it calls `preventDefault()`. So a player who
+ * tabbed to a HUD tile and pressed Enter had the activation swallowed by the
+ * game — the button did nothing. Space on a focused button was the same, and
+ * every letter typed into a future text field would have been a game action.
+ *
+ * Interactive elements own their own keys. The game only hears a press when
+ * nothing focusable is holding it, which is what "keyboard reaches every
+ * screen" actually requires.
+ */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== 'string') return false;
+  if (el.isContentEditable) return true;
+  switch (el.tagName) {
+    case 'BUTTON':
+    case 'INPUT':
+    case 'SELECT':
+    case 'TEXTAREA':
+    case 'A':
+      return true;
+    default:
+      return false;
+  }
+}
+
 export class InputManager {
   readonly move: MoveAxis = { x: 0, y: 0 };
   /** Camera orbit delta accumulated since the last `consumeLook()`. */
@@ -171,6 +201,7 @@ export class InputManager {
    */
   private onKey(e: KeyboardEvent, down: boolean): void {
     if (e.repeat) return;
+    if (isTypingTarget(e.target)) return;
     const code = e.code;
 
     if (down) {

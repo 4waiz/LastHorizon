@@ -308,18 +308,35 @@ hides the interface outright, which is the strongest version of this
 criterion. No permanent clutter was added.
 
 **3. Keyboard-only, touch and gamepad users can start, save, play and exit.**
-**Keyboard: met and evidenced. Touch and gamepad: still not assessed.**
+**Met, and evidenced for all three.**
 
-`tests/e2e/ui.spec.ts` runs 32 scenarios on chromium covering keyboard-only
-reach into every panel added this phase, arrow-key movement through the tab
-strip with wrapping, the Escape cascade not falling through to pause, roving
-tabindex so Tab leaves a strip rather than walking it, and dialog/tablist
-roles. Full remapping is proven end to end — rebind, the new key works, the
-old one stops, it survives a reload, Escape cancels instead of binding.
+- **Keyboard** — `tests/e2e/ui.spec.ts`, 32 scenarios: reach into every panel,
+  arrow-key movement through the tab strip with wrapping, the Escape cascade
+  not falling through to pause, roving tabindex, and remapping proven end to
+  end (rebind, the new key works, the old one stops, survives a reload).
+- **Touch** — `tests/e2e/touch.spec.ts`, 5 scenarios on an emulated iPhone 13
+  with real touch events: on-screen controls present and the keyboard hint
+  absent, a panel opened *and closed* entirely by tap, a settings control
+  operated by tap with the effect verified on the document, no panel making
+  the page scroll sideways, and a rotation to landscape.
+- **Gamepad** — `tests/e2e/access.spec.ts`, 4 scenarios against a fake
+  standard-mapping pad: seen when present, the left stick moving the
+  character (navigator → reader → `InputManager` → controller → motor), a
+  panel opened and left without a keyboard, and unplugging mid-session
+  leaving the keyboard working.
+- **Screen reader** — 6 scenarios on roles and names: each dialog named, the
+  tab strip reporting exactly one selected tab, photo mode's control group
+  and sliders labelled, the five volume sliders individually named, every
+  rebind button announcing action-key-action, and the live regions marked.
 
-What is still missing is a touch-viewport run, a gamepad path and a full
-accessibility snapshot across every screen. Two thirds of this criterion is
-evidenced; the other third is not, and saying "met" would be inventing it.
+**This found a real bug, and it is the reason the criterion needed a test
+rather than an argument.** `Enter` is a fixed alternate for `interact`, the
+listener is on `window`, and it called `preventDefault()` — so a player who
+tabbed to a HUD tile and pressed Enter had the activation swallowed by the
+game. The button did nothing. Space on a focused button was the same, and
+every letter typed into any future text field would have been a game action.
+`InputManager.onKey` now ignores presses whose target is a button, link,
+form control or contenteditable: interactive elements own their own keys.
 
 **4. Credits and licensing are accurate.** **Met.** §2, unchanged. Verified
 against each dependency's own `license` field rather than from memory.
