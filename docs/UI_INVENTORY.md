@@ -149,17 +149,39 @@ that lies is worse than one that waits.
 - **Flight instruments** — airspeed, height, throttle, stall warning and the
   boundary line, contextual on the HUD
 
+### A correction
+
+**Story Mode / Free Roam selection has existed since Phase 8** and this
+document said twice that it did not. `LoadingScreen.buildModeRow` builds the
+row, `presetMode` locks it for a resumed run so a save cannot have its rules
+changed underneath it, and `main.ts` hands the choice to `Game.begin`.
+
+The claim was inherited from one revision of this list to the next without
+being re-measured against the repository — which is the exact failure the
+prime rule in `CLAUDE.md` exists to prevent, committed in the document whose
+job is to be accurate about the interface. Recorded rather than quietly
+deleted.
+
 ### Screens still not built
 
-Story Mode / Free Roam selection · character name and appearance setup ·
-jobs and tasks as a screen of their own · dedicated credits *screen* (credits
-currently live inside the info modal).
+Character name and appearance setup · jobs and tasks as a screen of their own
+· dedicated credits *screen* (credits currently live inside the info modal).
+
+### Systems built since
+
+- **Photo mode** — `src/ui/PhotoMode.ts`, lazy. Freezes the clocks, hides the
+  interface, lens and tilt, thirds guides, PNG download. Reached with `K` or
+  the phone's Camera tile, which no longer says "not yet".
+- **Audio buses, ducking and gain staging** — five levels, music and ambience
+  ducking under stingers, interface on its own bus.
+- **UI sound set and story stingers** — synthesised, no samples.
+- **Minimap upgrade** — police search area drawn from `Heat.belief` (where
+  they *think* you are), owned vehicles, the parked aeroplane. Every marker
+  kind is a different shape, not only a different colour.
 
 ### Systems still not built
 
-Minimap upgrade (streamed zones, filters, police search area, owned vehicles) ·
-photo mode · birthday postcard export · UI sound set · audio buses, ducking and
-gain staging · story stingers.
+Minimap filters and streamed-zone awareness · birthday postcard export.
 
 ### Accessibility built since
 

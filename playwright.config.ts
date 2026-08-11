@@ -66,6 +66,12 @@ export default defineConfig({
    *
    * A test that passes against the wrong build is worse than a slow one, so
    * this pays ~3 s of startup per run to be sure.
+   *
+   * The cost is real and worth stating: a `preview` left listening from an
+   * interrupted run now makes the *next* run fail immediately with "port
+   * already used" rather than quietly reusing it. That is the right way round
+   * — a loud failure you fix in one command beats a silent wrong answer — but
+   * it does mean killing the stray process rather than ignoring it.
    */
   webServer: {
     command: 'npm run preview -- --port 4173 --strictPort',

@@ -701,7 +701,11 @@ export class Game {
     this.hud.setCounter(this.village!.collectibles.count, this.village!.collectibles.total);
     // Runs every frame, including while a district is active — a district has
     // no keepsakes, so this must degrade rather than assert.
-    this.minimap = new Minimap(this.runtime.mapData, () => this.village?.keepsakeMarkers ?? []);
+    this.minimap = new Minimap(
+      this.runtime.mapData,
+      () => this.village?.keepsakeMarkers ?? [],
+      () => this.minimapOverlay(),
+    );
     // The proving ground, if asked for. Built before the interactables are
     // synced so its collision is in place before anything can drive at it.
     if (featureFlags().testRoad) await this.buildTestRoad();
@@ -2231,6 +2235,43 @@ export class Game {
       },
       money: () => this.economy.wallet.cash,
       toast: (title, body) => this.hud.showToast(title, body),
+    };
+  }
+
+  /**
+   * The radar's live layer: where the police are looking, and what is yours.
+   *
+   * Rebuilt every redraw rather than cached, which is 5 Hz and a handful of
+   * objects. A cached version would need invalidating on impound, on recovery,
+   * on travel and on every Heat tick, and one of those would be forgotten.
+   *
+   * The search circle is `Heat.belief` — *where the police think you are*,
+   * never where you are. That distinction is the whole design of `Heat` and
+   * drawing it is what makes it playable: a circle you can see is one you can
+   * walk around.
+   */
+  private minimapOverlay(): import('../ui/Minimap').MinimapOverlay {
+    const markers: Array<import('../ui/Minimap').MinimapMarker> = [];
+
+    // Only in this zone. A marker for a car two districts away would sit on
+    // the rim pointing at nothing.
+    const here = this.zones.activeZoneId;
+    for (const v of this.garage.owned()) {
+      if (v.impounded || v.zone !== here) continue;
+      markers.push({ x: v.transform.x, z: v.transform.z, kind: 'vehicle' });
+    }
+
+    const parked = this.flightState.parked;
+    if (parked && here === 'hill_airstrip' && !this.flightState.airborne) {
+      markers.push({ x: parked.x, z: parked.z, kind: 'aircraft' });
+    }
+
+    const belief = this.combat?.heat.belief ?? null;
+    return {
+      // The circle widens as the sighting goes stale, which is exactly what
+      // a search does: the longer since anyone saw you, the less they know.
+      search: belief ? { x: belief.at.x, z: belief.at.z, radius: 14 + belief.age * 1.6 } : null,
+      markers,
     };
   }
 
