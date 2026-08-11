@@ -197,11 +197,20 @@ Minimap filters and streamed-zone awareness · birthday postcard export.
 - **Five audio buses with levels** — interface separate from world effects,
   so buttons can be silenced without silencing footsteps.
 
+- **Hold or toggle**, for aiming and running. The latch is flipped from the
+  resolved action, so it composes with remapping; it drops on a mode switch
+  and on `releaseAll`, because a latch that survives a hidden tab is the
+  toggle-mode version of a stuck key.
+- **Ageing speed, including never.** `LifeClock` has supported a frozen rate
+  since it was written and nothing offered it. The four options are exactly
+  the four `LifeRate` has — an earlier draft offered five and mapped two of
+  them to the same rate.
+- **Driving assist**, matching flight assist in shape and default.
+
 ### Accessibility still not built
 
 Touch layout editor · colour-independent *quest* indicators (Heat and the
-equipped-item marker are both done) · hold/toggle alternatives · aging speed
-selection · driving assist.
+equipped-item marker are both done).
 
 Flight assist had a settings control and no instruments to use it with; it
 now has both.
