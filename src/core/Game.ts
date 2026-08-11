@@ -176,6 +176,8 @@ export class Game {
   /** Resolved on first travel to a district, and kept for its chunk streaming. */
   private cityApi: CityApi | null = null;
   private airstripApi: AirstripApi | null = null;
+  /** Re-entry guard for `streamAroundViewer`. */
+  private streamPending = false;
 
   /**
    * Renderer-lifetime resources.
@@ -561,6 +563,10 @@ export class Game {
           `zone-group:${zone.id}`,
         );
         cityApi.buildCitySkyline(zone, scope, group);
+        // The low-detail stand-in for the district itself, built once and
+        // shown only from the air. Without it, fading the load radius with
+        // altitude would leave a hole where the district used to be.
+        city.setAerialProxy(cityApi.buildAerialProxy(zone, scope, group));
       },
       buildChunk: (zone, chunk, scope) => {
         // Authored zones never stream, so this only fires for districts —
@@ -891,6 +897,53 @@ export class Game {
   private syncAge(): void {
     this.hud.setAge(this.life.ageYears, this.life.yearProgress);
     this.player.appearance.applyAge(this.life.ageYears + this.life.yearProgress);
+  }
+
+  /**
+   * Keep the resident chunk set in step with where the viewer actually is.
+   *
+   * Two things wrong before this existed, both of which only showed up once
+   * there was something to find them with.
+   *
+   * The first: streaming ran **once**, on arrival, and never again. A district
+   * whose far corner sat outside the arrival radius simply never built, and
+   * walking there put the player over a hole. `ZoneManager.update` was written
+   * in Phase 2 with a "safe to call every frame" comment on it and then only
+   * ever called from `travelTo`.
+   *
+   * The second is the one the phase brief names: *"Aircraft should not force
+   * all world chunks to load."* An aeroplane at cruise crosses a 48 m chunk
+   * every second and a half. Feeding it the same two-ring radius a pedestrian
+   * gets means loading and disposing an entire district, at speed, for scenery
+   * being looked at from 300 m. So height goes in too, and `AERIAL_POLICY`
+   * fades the radius down to one ring while `buildAerialProxy` holds the
+   * horizon.
+   *
+   * Fire-and-forget with a re-entry guard rather than awaited: a frame must
+   * not block on a chunk build, and `ChunkStreamer` reserves its slots
+   * synchronously so a second call cannot start the same load twice.
+   */
+  private streamAroundViewer(): void {
+    const zone = this.zones.activeZone;
+    if (!zone || zone.kind !== 'streamed') return;
+
+    // The aeroplane's own altitude, not the camera's. A chase camera sits
+    // above and behind, and streaming off the camera would drop a ring every
+    // time the player looked down.
+    const agl = this.flightState.airborne ? this.flightState.altitude : 0;
+    this.city?.setViewerAltitude(agl);
+
+    if (this.streamPending) return;
+    this.streamPending = true;
+    const p = this.player.position;
+    void this.zones
+      .update(p.x, p.z, agl)
+      .catch((err: unknown) => {
+        console.warn('[LastHorizon] streaming update failed', err);
+      })
+      .finally(() => {
+        this.streamPending = false;
+      });
   }
 
   private gateContext(): GateContext {
@@ -2184,6 +2237,7 @@ export class Game {
       this.camera.camera.position,
       this.env.lampFactor,
     );
+    this.streamAroundViewer();
 
     // 5. contact shadow, dimmed as the sun goes down
     const groundY = this.player.motor.grounded

@@ -138,10 +138,16 @@ export class ZoneManager {
     this.active = null;
   }
 
-  /** Drive streaming from the viewer position. Safe to call every frame. */
-  async update(x: number, z: number): Promise<void> {
+  /**
+   * Drive streaming from the viewer position. Safe to call every frame.
+   *
+   * `altitude` is metres above the ground, 0 for anybody walking or driving.
+   * An aeroplane passes its real height, which is what stops a cruise across
+   * a district from loading and disposing the whole thing at 34 m/s.
+   */
+  async update(x: number, z: number, altitude = 0): Promise<void> {
     if (!this.active || this.active.kind !== 'streamed') return;
-    await this.streamer.update(x, z);
+    await this.streamer.update(x, z, altitude);
   }
 
   private async loadChunk(chunk: ChunkManifest): Promise<void> {

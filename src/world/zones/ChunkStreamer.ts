@@ -47,21 +47,84 @@ export function distanceToChunk(chunk: ChunkManifest, x: number, z: number): num
 }
 
 /**
- * Which chunks should be resident for a viewer at (x, z)?
+ * How high you can be before streaming stops trying to keep up.
+ *
+ * The brief for Phase 10 is explicit: *"Aircraft should not force all world
+ * chunks to load."* Left alone it would. The aeroplane cruises at 34 m/s, a
+ * chunk is 48 m, and two rings of hysteresis is about four seconds of level
+ * flight — so crossing a district at altitude means loading and disposing its
+ * entire chunk set, at speed, for scenery the player is looking at from 300 m
+ * and cannot land on without slowing down first.
+ *
+ * So the load radius fades with height instead. Below `groundCeiling` nothing
+ * changes — a low pass down the runway is still a low pass. Above
+ * `aerialFloor` a single ring stays under the aeroplane, and the district's
+ * aerial proxy carries the rest of the horizon: coarse blocks, always
+ * resident, built once. That is the "distant low-detail representation" the
+ * brief asks for.
+ *
+ * One ring rather than zero deliberately. Zero would mean an aeroplane
+ * descending through the floor has nothing beneath it for however long a
+ * chunk takes to build, and the first thing it would meet is the ground.
+ */
+export interface AerialPolicy {
+  /** AGL below which streaming behaves exactly as it always has, in metres. */
+  readonly groundCeiling: number;
+  /** AGL at and above which only `minRings` are kept. */
+  readonly aerialFloor: number;
+  /** Rings held under the aeroplane at `aerialFloor` and above. */
+  readonly minRings: number;
+}
+
+export const AERIAL_POLICY: AerialPolicy = {
+  groundCeiling: 45,
+  aerialFloor: 160,
+  minRings: 1,
+};
+
+/**
+ * The load radius, in rings, for a viewer this high above the ground.
+ *
+ * Linear between the two heights. Fractional rings are the point: a hard step
+ * from two rings to one at a single altitude is a stutter every time somebody
+ * flies level at exactly that height, which is what a climb-out does.
+ */
+export function ringsAt(
+  zone: ZoneManifest,
+  altitude: number,
+  policy: AerialPolicy = AERIAL_POLICY,
+): number {
+  const agl = Math.max(0, altitude);
+  if (agl <= policy.groundCeiling) return zone.loadRadius;
+  if (agl >= policy.aerialFloor) return Math.min(zone.loadRadius, policy.minRings);
+
+  const span = policy.aerialFloor - policy.groundCeiling;
+  const t = (agl - policy.groundCeiling) / span;
+  const floor = Math.min(zone.loadRadius, policy.minRings);
+  return zone.loadRadius + (floor - zone.loadRadius) * t;
+}
+
+/**
+ * Which chunks should be resident for a viewer at (x, z), `altitude` above the
+ * ground?
  *
  * `resident` is the currently-loaded set; passing it in is what makes the
  * result hysteretic rather than a pure function of position. A chunk already
  * resident is kept until it exceeds `loadRadius + unloadHysteresis`.
+ *
+ * `altitude` defaults to 0, so every caller that walks stays unchanged.
  */
 export function computeDelta(
   zone: ZoneManifest,
   x: number,
   z: number,
   resident: ReadonlySet<string>,
+  altitude = 0,
+  policy: AerialPolicy = AERIAL_POLICY,
 ): StreamDelta {
   if (zone.kind !== 'streamed') return { toLoad: [], toUnload: [] };
 
-  const loadDistance = zone.loadRadius * zone.chunkSize;
+  const loadDistance = ringsAt(zone, altitude, policy) * zone.chunkSize;
   const keepDistance = loadDistance + zone.unloadHysteresis;
 
   const toLoad: ChunkManifest[] = [];
@@ -121,11 +184,14 @@ export class ChunkStreamer {
    * Bring the resident set in line with the viewer position. Safe to call
    * every frame: work is only issued for chunks that actually cross a
    * threshold.
+   *
+   * `altitude` is metres above the ground and defaults to 0. See
+   * `AERIAL_POLICY` for what height does to the load radius.
    */
-  async update(x: number, z: number): Promise<StreamDelta> {
+  async update(x: number, z: number, altitude = 0): Promise<StreamDelta> {
     if (!this.zone) return { toLoad: [], toUnload: [] };
 
-    const delta = computeDelta(this.zone, x, z, this.residentIds);
+    const delta = computeDelta(this.zone, x, z, this.residentIds, altitude);
 
     for (const chunk of delta.toLoad) {
       // Reserve the slot before awaiting, so a second update() in the same

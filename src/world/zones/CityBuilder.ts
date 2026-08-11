@@ -298,3 +298,77 @@ export function buildCitySkyline(
 
   return batch.flush(parent, scope, 'skyline');
 }
+
+/**
+ * The district as seen from a thousand feet: every building in it, as one
+ * merged block each, always resident.
+ *
+ * This is the half of the aerial-streaming answer that `ChunkStreamer` cannot
+ * provide. Fading the load radius with altitude stops an aeroplane dragging
+ * the whole district in and out at cruise speed; on its own it would also
+ * leave a hole where the district used to be. So the proxy stands in: coarse,
+ * unlit-looking, built once when the zone is entered, and shown only when the
+ * viewer is high enough that the detail it is missing cannot be seen.
+ *
+ * It is cheap enough not to need a budget argument. A district is at most
+ * twelve chunks of two buildings, so this is ~24 boxes and ~288 triangles for
+ * the whole thing — less than one streamed chunk, and it never streams.
+ *
+ * Footprints come from `cityChunkBuildings`, the same function the real
+ * geometry uses. A proxy that guessed would be a district whose distant
+ * silhouette does not match the one you land in.
+ */
+export function buildAerialProxy(
+  zone: ZoneManifest,
+  scope: DisposalRegistry,
+  parent: THREE.Object3D,
+): THREE.Mesh[] {
+  const batch = new Batch();
+
+  // The ground plate, so a district read from above is not a hole in the
+  // world when its chunks are gone.
+  batch.slab(
+    PALETTE.sidewalk,
+    { x0: zone.bounds.minX, z0: zone.bounds.minZ, x1: zone.bounds.maxX, z1: zone.bounds.maxZ },
+    -0.15,
+    0.4,
+  );
+
+  // The carriageways, as two strips. At altitude the street grid is the only
+  // thing that makes a district legible as a place rather than a texture.
+  batch.slab(
+    PALETTE.road,
+    {
+      x0: MAIN_ROAD_X - ROAD_HALF,
+      z0: zone.bounds.minZ,
+      x1: MAIN_ROAD_X + ROAD_HALF,
+      z1: zone.bounds.maxZ,
+    },
+    -0.1,
+    0.2,
+  );
+  batch.slab(
+    PALETTE.road,
+    {
+      x0: zone.bounds.minX,
+      z0: SIDE_STREET_Z - ROAD_HALF,
+      x1: zone.bounds.maxX,
+      z1: SIDE_STREET_Z + ROAD_HALF,
+    },
+    -0.1,
+    0.2,
+  );
+
+  for (const chunk of zone.chunks) {
+    for (const p of cityChunkBuildings(chunk)) {
+      const w = p.rot ? p.shell.d : p.shell.w;
+      const d = p.rot ? p.shell.w : p.shell.d;
+      // Slightly under the real height, so a proxy that is briefly visible
+      // beside real geometry sinks into it rather than poking through.
+      const h = p.shell.h * 0.96;
+      batch.add(PALETTE.skyline, box(w, h, d, p.x, h / 2, p.z));
+    }
+  }
+
+  return batch.flush(parent, scope, 'aerial');
+}

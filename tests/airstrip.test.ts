@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   APRON,
   BUILDINGS,
+  HORIZON_RINGS,
   OFFICE_DOOR,
   onPaved,
   PAVED,
@@ -134,6 +135,47 @@ describe('the layout reads as an airstrip', () => {
     expect(onPaved(140, 60)).toBe(false);
     expect(onPaved(360, RUNWAY_Z)).toBe(false);
     expect(onPaved(176, 40)).toBe(false);
+  });
+});
+
+describe('the horizon closes', () => {
+  const centre = {
+    x: (zone.bounds.minX + zone.bounds.maxX) / 2,
+    z: (zone.bounds.minZ + zone.bounds.maxZ) / 2,
+  };
+
+  it('starts well beyond the field, so it never crowds the circuit', () => {
+    const fieldReach = Math.max(
+      zone.bounds.maxX - centre.x,
+      zone.bounds.maxZ - centre.z,
+    );
+    expect(HORIZON_RINGS[0].radius).toBeGreaterThan(fieldReach * 2);
+  });
+
+  it('stands outside the turning margin, where the boundary starts pushing back', () => {
+    // A player being turned around at the edge of the corridor should be
+    // looking *at* the hills, not standing among them.
+    expect(HORIZON_RINGS[0].radius).toBeGreaterThan(FLIGHT_CORRIDOR.turningMargin * 2);
+  });
+
+  it('gets further and taller with each ring', () => {
+    for (let i = 1; i < HORIZON_RINGS.length; i++) {
+      expect(HORIZON_RINGS[i].radius).toBeGreaterThan(HORIZON_RINGS[i - 1].radius);
+      expect(HORIZON_RINGS[i].base).toBeGreaterThan(HORIZON_RINGS[i - 1].base);
+    }
+  });
+
+  it('stays under the ceiling, so it never becomes an obstacle', () => {
+    for (const r of HORIZON_RINGS) {
+      expect(r.base + r.spread).toBeLessThan(FLIGHT_CORRIDOR.ceiling);
+    }
+  });
+
+  it('costs less than a city chunk', () => {
+    // The whole justification for it being always-resident. A box is 12
+    // triangles; one streamed district chunk is a few thousand.
+    const boxes = HORIZON_RINGS.reduce((n, r) => n + r.count, 0);
+    expect(boxes * 12).toBeLessThan(1000);
   });
 });
 

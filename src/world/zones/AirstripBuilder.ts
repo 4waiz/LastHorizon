@@ -67,6 +67,17 @@ export function onPaved(x: number, z: number): boolean {
   return false;
 }
 
+/**
+ * The distant-terrain rings. Nearest lowest, so the far ones read as behind
+ * rather than beside. Exported so the budget claim can be checked rather than
+ * asserted in a comment.
+ */
+export const HORIZON_RINGS = [
+  { radius: 620, count: 20, base: 38, spread: 34, width: 150 },
+  { radius: 900, count: 22, base: 62, spread: 46, width: 200 },
+  { radius: 1180, count: 21, base: 84, spread: 58, width: 260 },
+] as const;
+
 // ---------------------------------------------------------------------------
 // Geometry
 // ---------------------------------------------------------------------------
@@ -192,6 +203,42 @@ function emitScrub(batch: Batch, zone: ZoneManifest): void {
 }
 
 /**
+ * The far horizon, as low-detail terrain.
+ *
+ * The airstrip zone is 256 m across and the flight corridor is 2.1 km. Fly
+ * east off the end of the strip and, before this existed, the world stopped at
+ * the edge of the ground plate and became sky — which is the failure the brief
+ * names when it asks for *"distant low-detail terrain or skyline
+ * representations"*, and the thing that made the soft boundary feel like an
+ * invisible wall rather than a horizon.
+ *
+ * Three rings of blocks at 620, 900 and 1180 m, sized and coloured to read as
+ * hills rather than buildings. Always resident and never streamed: 63 boxes is
+ * 756 triangles, which is a fifth of one city chunk and costs less than
+ * deciding whether to draw it.
+ *
+ * Deterministic from the zone seed, because the airstrip is a screenshot
+ * baseline and a hill that moves between runs is a false regression.
+ */
+function emitHorizon(batch: Batch, zone: ZoneManifest): void {
+  const rand = mulberry32(zone.seed ^ 0x484f5a4e);
+  const cx = (zone.bounds.minX + zone.bounds.maxX) / 2;
+  const cz = (zone.bounds.minZ + zone.bounds.maxZ) / 2;
+
+  for (const ring of HORIZON_RINGS) {
+    for (let i = 0; i < ring.count; i++) {
+      const a = ((i + rand() * 0.5) / ring.count) * Math.PI * 2;
+      const r = ring.radius * (0.94 + rand() * 0.12);
+      const h = ring.base + rand() * ring.spread;
+      const w = ring.width * (0.7 + rand() * 0.6);
+      // Sunk below zero so the base never shows as a floating slab edge when
+      // the aeroplane is low.
+      batch.add(P.skyline, box(w, h, w * 0.8, cx + Math.cos(a) * r, h / 2 - 12, cz + Math.sin(a) * r));
+    }
+  }
+}
+
+/**
  * Build the airstrip. Everything created is registered into `scope`, which the
  * ZoneManager disposes when the zone is left.
  *
@@ -217,6 +264,7 @@ export function buildAirstrip(
   emitWindsock(batch);
   emitFence(batch);
   emitScrub(batch, zone);
+  emitHorizon(batch, zone);
 
   for (const bld of BUILDINGS) {
     if (bld.id === 'hangar') emitHangar(batch, bld);
