@@ -130,7 +130,8 @@ the convention Phases 1–10 established and this keeps.
 ## 4. What the Phase 11 brief asks for that does not exist
 
 Listed plainly, because a component inventory that omits the gaps is a
-marketing document.
+marketing document. Re-measured against the repository after the Phase 10
+leftovers were finished, not against the previous version of this list.
 
 **Partly built:** the phone — five of seven apps are live (Work, People,
 Garage, and Map/Journal by delegation). **Messages and Camera are present but
@@ -138,26 +139,60 @@ disabled and labelled "not yet"**: Messages needs a conversation store nothing
 writes to yet, and Camera is photo mode, which is its own piece of work. A tile
 that lies is worse than one that waits.
 
-**Screens not built:** Story Mode / Free Roam selection · three save slots and
-autosave status · character name and appearance setup · pause menu · dedicated
-accessibility panel · controls **remapping** · inventory and equipment ·
-jobs and tasks · relationships and contacts · vehicle garage · apartment and
-property · dedicated credits *screen* (credits currently live inside the info
-modal).
+### Built since this section was first written
 
-**Systems not built:** minimap upgrade (streamed zones,
-filters, police search area, owned vehicles) · photo mode · birthday postcard
-export · UI sound set · audio buses, ducking and gain staging · story stingers.
+- Three save slots and autosave status, and the pause menu — `PauseMenu`, lazy
+- The dedicated accessibility panel — `SettingsPanel`, lazy
+- **Inventory and equipment · criminal record · property** — `LifePanel`,
+  lazy, opened with I. One panel with three tabs, because they answer one
+  question and three keybinds for that is three things to remember
+- **Flight instruments** — airspeed, height, throttle, stall warning and the
+  boundary line, contextual on the HUD
 
-**Accessibility not built:** full remapping · touch layout editor · subtitles
-and text speed · colour-independent *quest* indicators (Heat is done) ·
-hold/toggle alternatives ·
-aging speed selection · driving assist · flight assist UI.
+### Screens still not built
 
-**Reachability gap (criterion 1):** the systems added in Phases 9 and 10 are
-partly unreachable from the interface. Weapons, Heat and arrest have HUD
-readouts but no inventory or record screen; flight has no UI at all beyond the
-test bridge; the six new activities have no jobs board.
+Story Mode / Free Roam selection · character name and appearance setup ·
+jobs and tasks as a screen of their own · dedicated credits *screen* (credits
+currently live inside the info modal).
+
+### Systems still not built
+
+Minimap upgrade (streamed zones, filters, police search area, owned vehicles) ·
+photo mode · birthday postcard export · UI sound set · audio buses, ducking and
+gain staging · story stingers.
+
+### Accessibility still not built
+
+Full remapping · touch layout editor · subtitles and text speed ·
+colour-independent *quest* indicators (Heat and the equipped-item marker are
+both done) · hold/toggle alternatives · aging speed selection · driving assist.
+
+Flight assist had a settings control and no instruments to use it with; it
+now has both.
+
+### Reachability (criterion 1)
+
+Weapons, Heat, arrest and the aeroplane all have screens now. **The plainest
+gap in this document was the flight one** — `FlightState` had mirrored
+airspeed, altitude and the stall warning since Phase 10 specifically so the
+HUD could read them without the flight chunk being present, and nothing ever
+did.
+
+Still unreachable: the six Phase 10 activities have no board of their own.
+The phone's Work app lists the job catalogue; the activities are a separate
+list and appear in neither.
+
+### Evidence (criteria 3 and 5)
+
+`tests/e2e/ui.spec.ts` is the first browser evidence for either. It covers
+keyboard-only reach, arrow-key tab movement with wrapping, the Escape cascade
+not falling through to pause, roving tabindex, dialog and tablist roles,
+lazy-chunk fetch timing **read off the network** rather than off file names,
+stylesheet-applied-before-reveal, forty open/close cycles returning the DOM
+node count, and zero console errors throughout.
+
+Still missing: a touch run, a gamepad run, a full accessibility snapshot
+across every screen, and a DevTools heap and audio-node pass.
 
 ---
 
