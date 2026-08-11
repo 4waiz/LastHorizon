@@ -1,19 +1,47 @@
-# Phase 11 report — design tokens, an accurate credits screen, and an inventory
+# Phase 11 report — the interface, and the Phase 10 leftovers it needed
 
-**Status: the foundation, and one real bug fixed. Most of the phase is not
-done.** This covers the design-token layer every other screen depends on, a
-credits screen that is now factually correct, a licence audit, and
-`docs/UI_INVENTORY.md`. The eighteen screens, the phone, the minimap upgrade,
-the audio pass, photo mode and the accessibility work are **not built**, and §5
-lists them rather than describing them as nearly finished.
+**Status: the phase is substantially done.** The design-token layer, an
+accurate credits screen and a licence audit came first; the screens, the audio
+pass, remapping, subtitles, photo mode and the minimap upgrade followed, along
+with the Phase 10 work that had to land before any of it could be reached —
+the airstrip, per-frame streaming and the flight instruments.
 
-One acceptance criterion is met. §4 goes through all six.
+**Five of six acceptance criteria are met or substantially met.** §4 goes
+through all six and names what is still missing rather than rounding up.
 
 **Date:** 2026-08-11
 **Base:** `phase-10` (`9cd936b`)
-**Gate:** `npm run verify` green — **1,417 unit tests** across 55 files;
-**111 Playwright scenarios**, unchanged
+**Gate:** `npm run verify` green — **1,586 unit tests** across 65 files;
+**32 browser scenarios** in `tests/e2e/ui.spec.ts` on chromium, plus the
+existing suite
 **Branch:** `main`
+
+## Eight bugs found on the way
+
+Worth listing, because most of them pre-dated this phase and none were found
+by reading:
+
+1. **Streaming ran once, on arrival, and never again** — a Phase 2 bug.
+   `ZoneManager.update` carried a "safe to call every frame" comment and was
+   only ever called from `travelTo`, so a district chunk outside the arrival
+   radius never built.
+2. **`frame-ancestors` in the meta CSP** — ignored by spec, logs a warning,
+   was failing 16 smoke tests across three browsers.
+3. **`.dash` in the lazy settings chunk** — that is the *vehicle dashboard*.
+   Anyone who drove before opening settings got an unstyled readout.
+4. **Flight had no HUD at all**, despite `FlightState` existing to feed one.
+5. **The airstrip was unreachable** — `canEnterZone` gates it on
+   `unlockedZones` and nothing ever added it.
+6. **The budget script counted four lazy chunks as eager**, for the fourth
+   phase running and for the reason its own comment warns about.
+7. **`docs/KNOWN_LIMITATIONS.md` was referenced but had never been written.**
+8. **A stale `vite preview` was serving an old build to the test suite** — 37 kB
+   against 43 kB on disk, missing a whole panel from two commits earlier.
+
+Three of my own tests asserted things that were not true and were corrected
+rather than made to pass: the aerial streaming policy saves nothing on
+districts this small, a canvas read outside a render returns a blank frame,
+and jsdom has no 2D context so a whole test file was passing vacuously.
 
 ---
 
@@ -255,63 +283,86 @@ live, empty slots disabled, autosave loadable.
 
 ## 4. Against the acceptance criteria
 
+Re-measured after the Phase 10 leftovers and the rest of Phase 11 landed. The
+earlier version of this section is superseded, not amended, because most of it
+described a repository that no longer exists.
+
 **1. Every system added in prior phases is reachable through a coherent UI.**
-**Partly met, and better than it was.** The phone reaches jobs, contacts and
-garage recovery, and flight assist is in the accessibility panel. Still
-unreachable: weapons and the criminal record have HUD readouts but no inventory
-or record screen, and there is still no save-slot, pause or character screen.
-`docs/UI_INVENTORY.md` §4 lists it rather than leaving it to be discovered.
+**Met, with one gap named.** `LifePanel` (I) reaches inventory, equipment, the
+criminal record, fines, impound and property. The flight instruments reach
+airspeed, height, throttle, the stall warning and the boundary — closing what
+`docs/UI_INVENTORY.md` called the plainest gap in the document, since
+`FlightState` had mirrored those numbers since Phase 10 *specifically so the
+HUD could read them* and nothing did. The phone reaches work, contacts,
+garage, map, journal and now the camera. Pause reaches the three save slots.
+
+Still unreachable: **the six Phase 10 activities have no board of their own.**
+The phone's Work app lists the job catalogue; the activities are a separate
+list and appear in neither.
 
 **2. The HUD remains readable without covering the environment.**
-**Held, not improved.** The existing HUD is already contextual — dash only when
-driving, Heat only when wanted, ammo only when armed, reticle only when aiming.
-Phase 11 changed none of it, and the screenshots in this phase show the world
-unobstructed. No new HUD element was added.
+**Met.** Every element added this phase is contextual: the flight instruments
+appear only in the aeroplane and clear on exit, the search circle only when
+somebody is looking, the markers only inside the radar's 78 m. Photo mode
+hides the interface outright, which is the strongest version of this
+criterion. No permanent clutter was added.
 
 **3. Keyboard-only, touch and gamepad users can start, save, play and exit.**
-**Partly addressed, still not assessed.** *Save* and *exit* now have a screen
-(§3e) and every panel added this phase focuses its first control on open, so a
-keyboard player is never stranded. But no keyboard-only run, accessibility
-snapshot, touch-viewport run or gamepad path has been executed, so the
-criterion is not evidenced. No keyboard-only or
-accessibility-snapshot tests were written, so claiming it either way would be
-inventing a result. The accessibility *options* added in §3b are a different
-thing from input coverage and are not evidence for this criterion.
+**Keyboard: met and evidenced. Touch and gamepad: still not assessed.**
 
-**4. Credits and licensing are accurate.** **Met.** §2. Verified by reading
-`package.json` and each dependency's own `license` field rather than from
-memory, and rendered and screenshotted at 1280×800 and 390×844.
+`tests/e2e/ui.spec.ts` runs 32 scenarios on chromium covering keyboard-only
+reach into every panel added this phase, arrow-key movement through the tab
+strip with wrapping, the Escape cascade not falling through to pause, roving
+tabindex so Tab leaves a strip rather than walking it, and dialog/tablist
+roles. Full remapping is proven end to end — rebind, the new key works, the
+old one stops, it survives a reload, Escape cancels instead of binding.
+
+What is still missing is a touch-viewport run, a gamepad path and a full
+accessibility snapshot across every screen. Two thirds of this criterion is
+evidenced; the other third is not, and saying "met" would be inventing it.
+
+**4. Credits and licensing are accurate.** **Met.** §2, unchanged. Verified
+against each dependency's own `license` field rather than from memory.
 
 **5. No menu leaks timers, listeners, audio nodes or render targets.**
-**Not assessed.** No DevTools memory or audio-node work was done.
+**Partly evidenced.** Forty open/close cycles of `LifePanel` return the DOM
+node count to within 40 nodes of where it started, with zero console errors —
+`replaceChildren` on every render is what makes that true, and a panel that
+appended would climb by a few dozen per cycle. `LazyPanel.onClose` exists so
+photo mode puts the clocks, the player and the lens back rather than leaking
+them, and there is a test that re-entering shows the defaults.
+
+Not done: a DevTools heap snapshot, and an audio-node count across the new
+buses. The audio work added a fifth `GainNode` and creates a short-lived
+oscillator per interface sound; those are `stop()`-ed and self-collect, but
+that is an argument rather than a measurement.
 
 **6. `docs/PHASE_11_REPORT.md` and a UI component inventory.** **Met.** This
-document and `docs/UI_INVENTORY.md`, which enumerates 60-odd components across
-five groups, the token set, the accessibility features that exist, and a
-plainly-labelled list of what does not.
+document and `docs/UI_INVENTORY.md`.
 
 ---
 
 ## 5. What is not done
 
-The great majority of the brief. Listed so the next session can start from a
-list rather than a re-read:
+Re-measured, and much shorter than it was.
 
-- **Screens:** mode selection · three save slots and autosave status ·
-  character setup · pause menu · accessibility panel · controls remapping ·
-  inventory and equipment · jobs and tasks · relationships and contacts ·
-  garage · property · a dedicated credits *screen* (credits currently live
-  inside the info modal).
-- **Systems:** the in-game phone · the minimap upgrade · photo mode · birthday
-  postcard export · UI sound set · audio buses, ducking and gain staging ·
-  story stingers.
-- **Accessibility:** full remapping · touch layout editor · subtitles and text
-  speed · font scaling wired to the `--ui-scale` hook · high-contrast prompts ·
-  colour-independent Heat and quest indicators · hold/toggle alternatives ·
-  aging speed · driving and flight assist UI.
-- **Testing:** accessibility snapshots · keyboard-only runs · touch viewport
-  runs · gamepad paths · visual comparison · DevTools passes for layout shift,
-  long tasks, input delay, audio-node leaks and memory.
+- **Screens:** character name and appearance setup · a jobs and activities
+  board · a dedicated credits *screen* (credits live inside the info modal and
+  are complete there).
+- **Systems:** minimap filters and streamed-zone awareness · birthday postcard
+  export.
+- **Accessibility:** touch layout editor · colour-independent *quest*
+  indicators (Heat and the equipped-item marker are done) · hold/toggle
+  alternatives · aging speed · driving assist.
+- **Testing:** touch-viewport runs · gamepad paths · accessibility snapshots
+  across every screen · DevTools passes for memory and audio nodes.
+
+**A correction.** Earlier revisions of this section listed "mode selection" as
+missing. It has existed since Phase 8 — `LoadingScreen.buildModeRow` builds the
+Story / Free Roam row and `presetMode` locks it for a resumed run so a save
+cannot have its rules changed underneath it. The claim was carried forward
+without being re-measured, which is the failure `CLAUDE.md` opens by warning
+about, committed in the report whose job is to be accurate.
 
 ---
 
