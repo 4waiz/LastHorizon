@@ -200,6 +200,9 @@ const LAZY_CHUNK_PREFIXES = [
   // Phase 11. Carrying, record and property, opened with I. The sixth panel
   // to follow the pattern.
   'LifePanel-',
+  // Phase 11. Photo mode: chrome, framing guides and the capture. The seventh
+  // panel to follow the pattern, and the first that is not a modal.
+  'PhotoMode-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));

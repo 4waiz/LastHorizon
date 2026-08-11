@@ -758,6 +758,30 @@
       </div>
     </div>
 
+    <!-- =========================== photo mode ========================== -->
+    <!-- Not a modal, deliberately: no backdrop and no card, because the whole
+         point is to see the world. The bar sits along the bottom and takes
+         pointer events; everything above it is left clear. -->
+    <div id="photo" class="photo" hidden>
+      <div id="photoGuides" class="photo__guides" aria-hidden="true" hidden></div>
+      <p class="photo__hint">Drag to look · scroll to zoom · Esc to leave</p>
+      <div class="photo__bar" role="group" aria-label="Photo mode">
+        <span class="photo__group">
+          <label for="photoFov">Lens</label>
+          <input id="photoFov" type="range" min="25" max="95" step="1" value="55" />
+          <output class="photo__value" data-for="photoFov">55</output>
+        </span>
+        <span class="photo__group">
+          <label for="photoRoll">Tilt</label>
+          <input id="photoRoll" type="range" min="-30" max="30" step="1" value="0" />
+          <output class="photo__value" data-for="photoRoll">0°</output>
+        </span>
+        <button type="button" id="photoPlayer" class="photo__toggle" aria-pressed="true">You</button>
+        <button type="button" id="photoGuidesBtn" class="photo__toggle" aria-pressed="false">Thirds</button>
+        <button type="button" id="photoShoot" class="photo__shoot">Take it</button>
+      </div>
+    </div>
+
     <!-- ============================= icons ============================= -->
     <svg style="display: none" aria-hidden="true">
       <symbol id="i-sound-on" viewBox="0 0 24 24">

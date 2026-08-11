@@ -36,13 +36,14 @@ export type Action =
   | 'life'
   | 'draw'
   | 'reload'
-  | 'shoulder';
+  | 'shoulder'
+  | 'photo';
 
 export const ACTIONS: readonly Action[] = [
   'forward', 'back', 'left', 'right', 'run',
   'jump', 'interact', 'flip',
   'map', 'journal', 'phone', 'life',
-  'draw', 'reload', 'shoulder',
+  'draw', 'reload', 'shoulder', 'photo',
 ];
 
 /** What each action is called in the interface. */
@@ -62,6 +63,7 @@ export const ACTION_LABELS: Readonly<Record<Action, string>> = {
   draw: 'Take out or put away',
   reload: 'Reload',
   shoulder: 'Switch shoulder',
+  photo: 'Photo mode',
 };
 
 /** The layout the game ships with. Every one of these is rebindable. */
@@ -81,6 +83,7 @@ export const DEFAULT_BINDINGS: Readonly<Record<Action, string>> = {
   draw: 'KeyQ',
   reload: 'KeyG',
   shoulder: 'KeyV',
+  photo: 'KeyK',
 };
 
 /**

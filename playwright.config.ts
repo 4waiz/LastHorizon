@@ -49,10 +49,28 @@ export default defineConfig({
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
 
+  /**
+   * `vite preview`, serving `dist/`. These tests run against a **build**, not
+   * against the sources — new markup needs `npm run build` before it exists.
+   *
+   * `reuseExistingServer` is false everywhere, not just in CI, and that is a
+   * deliberate departure from the usual idiom.
+   *
+   * A `preview` process left listening from an earlier run keeps serving the
+   * snapshot it started with — its index.html is transformed once and cached.
+   * Reusing it means the suite tests an old build while reporting on the new
+   * one, and the failure is silent in the worst direction: five photo-mode
+   * tests failed with "element not found" against a `dist/` that had the
+   * element, and the served page turned out to be 37 kB against 43 kB on
+   * disk, missing a whole panel from two commits earlier.
+   *
+   * A test that passes against the wrong build is worse than a slow one, so
+   * this pays ~3 s of startup per run to be sure.
+   */
   webServer: {
     command: 'npm run preview -- --port 4173 --strictPort',
     url: 'http://localhost:4173',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

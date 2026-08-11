@@ -56,6 +56,7 @@ export class InputManager {
   private journalQueued = false;
   private phoneQueued = false;
   private lifeQueued = false;
+  private photoQueued = false;
   private interactQueued = false;
   /** Touch or gamepad interact, which have no entry in `keys`. */
   private pointerInteractHeld = false;
@@ -186,6 +187,7 @@ export class InputManager {
         case 'draw': this.drawQueued = true; break;
         case 'reload': this.reloadQueued = true; break;
         case 'shoulder': this.shoulderQueued = true; break;
+        case 'photo': this.photoQueued = true; break;
         default: break;
       }
       // Movement and `run` are held rather than queued; they fall through to
@@ -437,6 +439,13 @@ export class InputManager {
   consumePhone(): boolean {
     if (!this.phoneQueued) return false;
     this.phoneQueued = false;
+    return true;
+  }
+
+  /** True once per press of the photo key. Enters or leaves photo mode. */
+  consumePhoto(): boolean {
+    if (!this.photoQueued) return false;
+    this.photoQueued = false;
     return true;
   }
 

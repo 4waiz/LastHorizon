@@ -695,6 +695,7 @@ export class Game {
     // `openPhone` refuses rather than showing an empty handset.
     this.hud.setPhoneDeps(this.phoneDeps());
     this.hud.setLifeDeps(this.lifeDeps());
+    this.hud.setPhotoDeps(this.photoDeps());
     this.hud.setPauseDeps(this.pauseDeps());
     this.hud.syncOutfit(this.player.outfit);
     this.hud.setCounter(this.village!.collectibles.count, this.village!.collectibles.total);
@@ -880,7 +881,14 @@ export class Game {
     this.life.setBlocked('settings', settingsOpen);
     this.life.setBlocked('loading', this.transitioning);
     this.life.setBlocked('paused', this.paused);
-    this.storyClock.setPaused(this.paused || settingsOpen || this.transitioning);
+    // A photo is a still. The life clock, the story clock and the physics
+    // clock all stop; the camera does not, which is the whole feature.
+    // `photoMode` has been in `LifeBlockReason` since the clock was written
+    // and nothing ever set it. This is what it was reserved for.
+    this.life.setBlocked('photoMode', this.photoFrozen);
+    this.storyClock.setPaused(
+      this.paused || settingsOpen || this.transitioning || this.photoFrozen,
+    );
 
     this.storyClock.advance(dt);
 
@@ -2111,6 +2119,10 @@ export class Game {
         this.hud.openPhone(false);
         this.hud.openMap(true);
       },
+      openPhoto: () => {
+        this.hud.openPhone(false);
+        this.hud.openPhoto(true);
+      },
       openJournal: () => {
         this.hud.openPhone(false);
         this.panels?.openJournal(true, this.director?.journal() ?? []);
@@ -2221,6 +2233,61 @@ export class Game {
       toast: (title, body) => this.hud.showToast(title, body),
     };
   }
+
+  /**
+   * Photo mode's narrow view of the game.
+   *
+   * `capture` is the load-bearing one and the reason it is *synchronous*.
+   * The renderer runs without `preserveDrawingBuffer`, so the drawing buffer
+   * is gone by the next task and a `toBlob` callback — or anything after an
+   * `await` — reads transparent black. Drawing and reading therefore happen
+   * in one statement, and `toDataURL` is used rather than `toBlob` precisely
+   * because it returns rather than calls back.
+   */
+  private photoDeps(): import('../ui/PhotoMode').PhotoDeps {
+    return {
+      capture: () => {
+        try {
+          // Draw, then read, with nothing between them.
+          this.render();
+          return this.canvas.toDataURL('image/png');
+        } catch (err) {
+          // A lost context and a tainted canvas both land here, and neither
+          // may throw out of a click handler.
+          console.warn('[LastHorizon] photo capture failed', err);
+          return null;
+        }
+      },
+      freeze: (on) => {
+        this.photoFrozen = on;
+      },
+      showPlayer: (on) => {
+        this.player.root.visible = on;
+      },
+      setRoll: (radians) => {
+        this.camera.camera.rotation.z = radians;
+      },
+      setFov: (degrees) => {
+        this.camera.camera.fov = degrees;
+        this.camera.camera.updateProjectionMatrix();
+      },
+      toast: (title, body) => this.hud.showToast(title, body),
+      placeName: () =>
+        (this.zones.activeZone?.displayName ?? 'somewhere')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-'),
+    };
+  }
+
+  /**
+   * True while photo mode holds the world still.
+   *
+   * Separate from `paused`, which is the tab-hidden and menu case. A photo is
+   * a still: the clocks stop, the camera does not, and `resize` must be able
+   * to put the field of view back afterwards — which is why leaving photo
+   * mode restores it explicitly rather than waiting for a resize.
+   */
+  private photoFrozen = false;
 
   /** Flying, flattened for the bridge. Never a handle on the director. */
   private flightSnapshot(): import('./TestMode').FlightSnapshotData {
@@ -2410,6 +2477,9 @@ export class Game {
     }
     if (this.input.consumePhone()) this.hud.togglePhone();
     if (this.input.consumeLife()) this.hud.toggleLife();
+    // `openPhoto` rather than `togglePhoto`: entering hides the HUD and
+    // leaving puts it back, and only the former knows about the chrome.
+    if (this.input.consumePhoto()) this.hud.openPhoto(!this.hud.photoOpen);
 
     this.hud.setWallet(this.economy.wallet.cash);
 
@@ -2668,7 +2738,7 @@ export class Game {
 
   private stepPhysics(dt: number): void {
     if (!this.physics) return;
-    this.physicsClock.setPaused(this.paused || this.transitioning);
+    this.physicsClock.setPaused(this.paused || this.transitioning || this.photoFrozen);
     const tick = this.physicsClock.advance(dt);
     for (let i = 0; i < tick.steps; i++) {
       // Controllers first: the forces they set have to be the ones this step

@@ -46,6 +46,15 @@ export interface LazyPanelOptions<T> {
   /** Called after the element is shown. Where input release belongs. */
   readonly afterShow?: () => void;
   /**
+   * Called as the panel closes, if it was ever built.
+   *
+   * Added for photo mode, which is the first panel that changes the *world*
+   * rather than only drawing over it — it freezes the simulation, hides the
+   * player and moves the lens. Something has to put all that back, and a
+   * panel that only knows how to open is a panel whose effects leak.
+   */
+  readonly onClose?: (instance: T) => void;
+  /**
    * Interface sound, by meaning.
    *
    * Here rather than in each panel's wrapper so every panel sounds the same
@@ -88,7 +97,12 @@ export class LazyPanel<T> {
       // Only if something was actually on screen. `set(false)` is called
       // defensively from the Escape cascade and from `Game` on several paths;
       // a click every time would be a click on nothing.
-      if (this.open) this.o.sound?.('close');
+      if (this.open) {
+        this.o.sound?.('close');
+        // Before `hide()`, and only when there is an instance: a panel whose
+        // chunk never landed has nothing to undo.
+        if (this.instance !== null) this.o.onClose?.(this.instance);
+      }
       this.wantedValue = false;
       this.hide();
       return;

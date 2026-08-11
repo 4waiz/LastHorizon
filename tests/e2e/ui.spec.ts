@@ -338,6 +338,119 @@ test.describe('remapping a key changes what the key does', () => {
   });
 });
 
+test.describe('photo mode', () => {
+  async function enter(page: Page): Promise<void> {
+    await page.keyboard.press('k');
+    await expect(page.locator('#photoShoot')).toBeVisible({ timeout: 20_000 });
+  }
+
+  test('hides the interface, because that is what it is for', async ({ page }) => {
+    const errors = watchConsole(page);
+    await boot(page);
+    await expect(page.locator('#hud')).toBeVisible();
+
+    await enter(page);
+    await expect(page.locator('#hud')).toBeHidden();
+    await expect(page.locator('#photo')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#photo')).toBeHidden();
+    await expect(page.locator('#hud')).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  /**
+   * The one that matters, and the reason `capture` is synchronous.
+   *
+   * The renderer runs without `preserveDrawingBuffer`, so a canvas read on a
+   * later task returns transparent black. A test that only checked "a data
+   * URL came back" would pass on a fully blank image — so this decodes it and
+   * asserts the pixels are not all one colour.
+   */
+  test('captures a real frame rather than an empty buffer', async ({ page }) => {
+    await boot(page);
+    await enter(page);
+
+    /*
+     * Through the shutter button, not by reading the canvas directly.
+     *
+     * The first version of this test called `canvas.toDataURL()` inside a
+     * `page.evaluate` and got a transparent frame — correctly, and for
+     * exactly the reason `PhotoMode` is built the way it is. The renderer
+     * runs without `preserveDrawingBuffer`, so a read from *any* task other
+     * than the one that drew is empty. Only the real path renders first.
+     */
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 20_000 }),
+      page.locator('#photoShoot').click(),
+    ]);
+
+    expect(download.suggestedFilename()).toMatch(/^last-horizon-.*\.png$/);
+
+    const path = await download.path();
+    expect(path, 'the download produced no file').toBeTruthy();
+
+    const { readFileSync } = await import('node:fs');
+    const bytes = readFileSync(path!);
+    // PNG magic, then enough data that it cannot be a 1x1 placeholder.
+    expect(bytes.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    expect(bytes.length, 'the frame was blank or tiny').toBeGreaterThan(20_000);
+  });
+
+  test('freezes the world and starts it again on the way out', async ({ page }) => {
+    await boot(page);
+
+    const blocked = () => page.evaluate(() => window.__LH_TEST__!.getLifeState().blocked);
+    expect(await blocked()).not.toContain('photoMode');
+
+    await enter(page);
+    expect(await blocked(), 'the life clock ran during a still').toContain('photoMode');
+
+    // The year does not advance while the clock is blocked.
+    const during = await page.evaluate(() => window.__LH_TEST__!.getLifeState().yearProgress);
+    await page.evaluate(() => window.__LH_TEST__!.settle(600));
+    const still = await page.evaluate(() => window.__LH_TEST__!.getLifeState().yearProgress);
+    expect(still).toBe(during);
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#photo')).toBeHidden();
+    expect(await blocked(), 'the block was never released').not.toContain('photoMode');
+
+    await page.evaluate(() => window.__LH_TEST__!.settle(600));
+    const after = await page.evaluate(() => window.__LH_TEST__!.getLifeState().yearProgress);
+    expect(after, 'the life clock never restarted').toBeGreaterThan(still);
+  });
+
+  test('puts the player and the lens back when it closes', async ({ page }) => {
+    await boot(page);
+    await enter(page);
+
+    await page.locator('#photoPlayer').click();
+    await expect(page.locator('#photoPlayer')).toHaveAttribute('aria-pressed', 'false');
+    await page.locator('#photoFov').fill('90');
+    await page.locator('#photoFov').dispatchEvent('input');
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#photo')).toBeHidden();
+
+    // Re-entering shows the defaults, which is only true if `close` restored
+    // them rather than leaving the camera at 90° and the player invisible.
+    await enter(page);
+    await expect(page.locator('#photoFov')).toHaveValue('55');
+    await expect(page.locator('#photoPlayer')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('is reachable from the phone’s Camera tile', async ({ page }) => {
+    await boot(page);
+    await page.keyboard.press('p');
+    await expect(page.locator('#phone')).toBeVisible({ timeout: 20_000 });
+
+    await page.getByText('Camera', { exact: true }).click();
+    await expect(page.locator('#phone')).toBeHidden();
+    await expect(page.locator('#photoShoot')).toBeVisible({ timeout: 20_000 });
+  });
+});
+
 test.describe('lazy panels are actually lazy', () => {
   /**
    * The claim `check-budgets.mjs` makes on every build is that these chunks

@@ -317,7 +317,8 @@ export class HUD {
       // showing does Escape mean "pause". Each test asks whether the panel is
       // *on screen* rather than whether it was wanted — a panel still loading
       // has nothing to close.
-      if (!this.mapPanel.hidden) this.openMap(false);
+      if (this.photoPanel.open) this.openPhoto(false);
+      else if (!this.mapPanel.hidden) this.openMap(false);
       else if (this.phonePanel.open) this.openPhone(false);
       else if (this.lifePanel.open) this.openLife(false);
       else if (this.settingsPanel.open) this.settingsPanel.set(false);
@@ -394,6 +395,42 @@ export class HUD {
   openPhone(open: boolean): void {
     if (open && !this.phoneDeps) return;
     this.phonePanel.set(open);
+  }
+
+  // -- photo mode -----------------------------------------------------------
+  private photoDeps: import('./PhotoMode').PhotoDeps | null = null;
+  private readonly photoPanel = new LazyPanel({
+    element: $('photo'),
+    load: async () => new (await import('./PhotoMode')).PhotoMode(this.photoDeps!),
+    onOpen: (p) => p.open(),
+    onClose: (p) => p.close(),
+    afterShow: () => this.input.releaseAll(),
+  });
+
+  setPhotoDeps(deps: import('./PhotoMode').PhotoDeps): void {
+    this.photoDeps = deps;
+  }
+
+  get photoOpen(): boolean {
+    return this.photoPanel.open;
+  }
+
+  togglePhoto(): void {
+    if (this.photoDeps) this.photoPanel.toggle();
+  }
+
+  /**
+   * Photo mode hides the rest of the interface rather than drawing over it.
+   *
+   * A HUD in the corner of every screenshot is the thing photo mode exists to
+   * avoid, and hiding it here — rather than inside `PhotoMode` — keeps the
+   * panel from needing a handle on the chrome it is not responsible for.
+   */
+  openPhoto(open: boolean): void {
+    if (open && !this.photoDeps) return;
+    this.hud.hidden = open;
+    if (this.isTouch) this.touch.hidden = open;
+    this.photoPanel.set(open);
   }
 
   // -- carrying, record and property ----------------------------------------
