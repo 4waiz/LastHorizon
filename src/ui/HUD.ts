@@ -307,9 +307,17 @@ export class HUD {
     };
     backdrop($('phone'), () => this.openPhone(false));
     backdrop($('life'), () => this.openLife(false));
+    backdrop($('credits'), () => this.openCredits(false));
     backdrop(this.info, () => this.settingsPanel.set(false));
     $('phoneClose').addEventListener('click', () => this.openPhone(false));
     $('lifeClose').addEventListener('click', () => this.openLife(false));
+    $('creditsClose').addEventListener('click', () => this.openCredits(false));
+    // From the settings modal too, where they used to live. A player who goes
+    // looking in the old place still finds them.
+    $('openCredits').addEventListener('click', () => {
+      this.settingsPanel.set(false);
+      this.openCredits(true);
+    });
     $('infoClose').addEventListener('click', () => this.settingsPanel.set(false));
 
     window.addEventListener('keydown', (e) => {
@@ -322,6 +330,7 @@ export class HUD {
       else if (!this.mapPanel.hidden) this.openMap(false);
       else if (this.phonePanel.open) this.openPhone(false);
       else if (this.lifePanel.open) this.openLife(false);
+      else if (this.creditsPanel.open) this.openCredits(false);
       else if (this.settingsPanel.open) this.settingsPanel.set(false);
       else if (this.pausePanel.open) this.openPause(false);
       else if (document.pointerLockElement) document.exitPointerLock();
@@ -432,6 +441,25 @@ export class HUD {
     this.hud.hidden = open;
     if (this.isTouch) this.touch.hidden = open;
     this.photoPanel.set(open);
+  }
+
+  // -- credits --------------------------------------------------------------
+  private readonly creditsPanel = new LazyPanel({
+    element: $('credits'),
+    load: async () => new (await import('./CreditsPanel')).CreditsPanel(),
+    onOpen: (p) => p.open(),
+    transitionClass: 'is-on',
+    sound: (k) => this.cb.onUiSound(k),
+    afterShow: () => this.input.releaseAll(),
+  });
+
+  get creditsOpen(): boolean {
+    return this.creditsPanel.open;
+  }
+
+  /** No deps to wait for: the credits are static markup with no state. */
+  openCredits(open: boolean): void {
+    this.creditsPanel.set(open);
   }
 
   // -- carrying, record and property ----------------------------------------

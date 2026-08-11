@@ -430,6 +430,67 @@ test.describe('the map legend filters layers', () => {
   });
 });
 
+test.describe('credits are a screen of their own', () => {
+  /**
+   * The brief names four things that must be visible, and the licence
+   * statement must be honest about what actually ships. That is checked
+   * against the rendered screen rather than against the source, because a
+   * credits block that is present in `index.html` and never reachable is the
+   * same failure as one that is missing.
+   */
+  test('reachable from pause, and says who made it', async ({ page }) => {
+    const errors = watchConsole(page);
+    await boot(page);
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#pause')).toBeVisible({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Credits' }).click();
+
+    const dialog = page.getByRole('dialog', { name: 'Credits' });
+    await expect(dialog).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#pause')).toBeHidden();
+
+    for (const required of [
+      'A Kanban Studios game',
+      'Kanban Studios',
+      'kanbanstudios.ae',
+      'Game Developer: Awaiz Ahmed',
+    ]) {
+      await expect(dialog, `missing: ${required}`).toContainText(required);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test('lists the libraries that actually ship, GSAP included', async ({ page }) => {
+    await boot(page);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Credits' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Credits' });
+    await expect(dialog).toBeVisible({ timeout: 20_000 });
+
+    // All five runtime dependencies. Rapier and recast were omitted once and
+    // the omission survived a phase.
+    for (const lib of ['three.js', 'three-mesh-bvh', 'rapier', 'recast', 'GSAP']) {
+      await expect(dialog, `missing library: ${lib}`).toContainText(new RegExp(lib, 'i'));
+    }
+    // GSAP is not an OSI licence and the screen must not imply it is.
+    await expect(dialog).toContainText(/no charge/i);
+  });
+
+  test('is also reachable from where it used to live', async ({ page }) => {
+    await boot(page);
+    await page.locator('#btnInfo').click();
+    await expect(page.locator('#openCredits')).toBeVisible({ timeout: 20_000 });
+
+    await page.locator('#openCredits').click();
+    await expect(page.getByRole('dialog', { name: 'Credits' })).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#info')).toBeHidden();
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#credits')).toBeHidden();
+  });
+});
+
 test.describe('photo mode', () => {
   async function enter(page: Page): Promise<void> {
     await page.keyboard.press('k');

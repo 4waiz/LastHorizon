@@ -2089,6 +2089,10 @@ export class Game {
         this.hud.openPause(false);
         this.hud.openInfoPanel();
       },
+      openCredits: () => {
+        this.hud.openPause(false);
+        this.hud.openCredits(true);
+      },
       toast: (title, body) => this.hud.showToast(title, body),
     };
   }

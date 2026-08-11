@@ -181,7 +181,8 @@ Character name and appearance setup · jobs and tasks as a screen of their own
 
 ### Systems still not built
 
-Minimap filters and streamed-zone awareness · birthday postcard export.
+Streamed-zone awareness on the minimap · birthday postcard export · the boat
+(model only; the brief made it conditional).
 
 ### Accessibility built since
 

@@ -37,6 +37,7 @@ export interface PauseDeps {
   load(slot: string): Promise<boolean>;
   resume(): void;
   openSettings(): void;
+  openCredits(): void;
   toast(title: string, body: string): void;
 }
 
@@ -76,6 +77,7 @@ export class PauseMenu {
         <li><button type="button" data-do="save" class="pause__item">Save</button></li>
         <li><button type="button" data-do="load" class="pause__item">Load</button></li>
         <li><button type="button" data-do="settings" class="pause__item">Settings</button></li>
+        <li><button type="button" data-do="credits" class="pause__item">Credits</button></li>
       </ul>
       <p class="pause__note">The world is still while this is open.</p>`;
   }
@@ -109,6 +111,7 @@ export class PauseMenu {
     const act = el.dataset.do;
     if (act === 'resume') return this.d.resume();
     if (act === 'settings') return this.d.openSettings();
+    if (act === 'credits') return this.d.openCredits();
     if (act === 'save' || act === 'load') return void this.go(act);
 
     const slot = el.dataset.slot;

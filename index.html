@@ -481,6 +481,14 @@
         </section>
 
         <section class="settings">
+          <h3>Credits and licences</h3>
+          <p class="settings__note">
+            Who made this, and every third-party licence it actually uses.
+          </p>
+          <p><button type="button" id="openCredits" class="rebind__reset">Open credits</button></p>
+        </section>
+
+        <section class="settings">
           <h3>Settings</h3>
           <div class="row">
             <span>Audio</span>
@@ -698,8 +706,51 @@
           under GreenSock's standard licence, and saying otherwise would be a
           licensing claim rather than a typo.
         -->
-        <section class="credits" aria-labelledby="creditsHeading">
-          <h3 id="creditsHeading">Credits</h3>
+      </div>
+    </div>
+
+    <!-- ============================= pause ============================ -->
+    <div id="pause" class="pause" role="dialog" aria-modal="true"
+         aria-labelledby="pauseTitle" hidden>
+      <div class="pause__card">
+        <div class="pause__head">
+          <button id="pauseBack" class="pause__back" type="button" aria-label="Back" hidden>‹</button>
+          <h2 id="pauseTitle" class="pause__title">Paused</h2>
+        </div>
+        <div id="pauseBody" class="pause__body"></div>
+      </div>
+    </div>
+
+    <!-- ============================= phone ============================ -->
+    <!-- Static markup, like every other panel: it is here for an
+         accessibility snapshot whether or not the chunk has been fetched. -->
+    <div id="phone" class="phone" role="dialog" aria-modal="true"
+         aria-labelledby="phoneTitle" hidden>
+      <div class="phone__card">
+        <div class="phone__head">
+          <button id="phoneBack" class="phone__back" type="button" aria-label="Back" hidden>‹</button>
+          <h2 id="phoneTitle" class="phone__title">Phone</h2>
+          <span id="phoneMoney" class="phone__money">$0</span>
+          <button id="phoneClose" class="phone__close" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="phoneBody" class="phone__body"></div>
+      </div>
+    </div>
+
+    <!-- ============================ credits =========================== -->
+    <!-- Its own screen since Phase 11, rather than a section at the bottom of
+         the settings modal. The phase brief lists it as a screen, and credits
+         that require scrolling past six settings groups to reach are credits
+         nobody reads. Reachable from Pause and from the info modal. -->
+    <div id="credits" class="phone" role="dialog" aria-modal="true"
+         aria-labelledby="creditsTitle" hidden>
+      <div class="phone__card">
+        <div class="phone__head">
+          <h2 id="creditsTitle" class="phone__title">Credits</h2>
+          <button id="creditsClose" class="phone__close" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="phone__body">
+          <div class="credits">
 
           <p class="credits__studio">
             <strong>A Kanban Studios game</strong><br />
@@ -734,35 +785,8 @@
           <p class="credits__tech">
             Built with Vite, TypeScript, Vitest, Playwright and Blender.
           </p>
-        </section>
-      </div>
-    </div>
-
-    <!-- ============================= pause ============================ -->
-    <div id="pause" class="pause" role="dialog" aria-modal="true"
-         aria-labelledby="pauseTitle" hidden>
-      <div class="pause__card">
-        <div class="pause__head">
-          <button id="pauseBack" class="pause__back" type="button" aria-label="Back" hidden>‹</button>
-          <h2 id="pauseTitle" class="pause__title">Paused</h2>
+          </div>
         </div>
-        <div id="pauseBody" class="pause__body"></div>
-      </div>
-    </div>
-
-    <!-- ============================= phone ============================ -->
-    <!-- Static markup, like every other panel: it is here for an
-         accessibility snapshot whether or not the chunk has been fetched. -->
-    <div id="phone" class="phone" role="dialog" aria-modal="true"
-         aria-labelledby="phoneTitle" hidden>
-      <div class="phone__card">
-        <div class="phone__head">
-          <button id="phoneBack" class="phone__back" type="button" aria-label="Back" hidden>‹</button>
-          <h2 id="phoneTitle" class="phone__title">Phone</h2>
-          <span id="phoneMoney" class="phone__money">$0</span>
-          <button id="phoneClose" class="phone__close" type="button" aria-label="Close">×</button>
-        </div>
-        <div id="phoneBody" class="phone__body"></div>
       </div>
     </div>
 
