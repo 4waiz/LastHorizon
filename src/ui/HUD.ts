@@ -6,6 +6,7 @@ import type { MinimapData } from './Minimap';
 import type { MapMarker, MapView } from './MapPanel';
 import { InputManager } from '../core/InputManager';
 import { clamp } from '../utils/MathUtils';
+import { LazyPanel } from './LazyPanel';
 import type { Outfit } from '../player/Player';
 
 /** Wardrobe palettes. Muted enough that any pick still fits the world. */
@@ -172,7 +173,7 @@ export class HUD {
       this.syncTime();
       this.showToast('Time of day', m === 'cycle' ? 'Following the sun.' : `Locked to ${m}.`);
     });
-    $('btnInfo').addEventListener('click', () => this.openInfo(true));
+    $('btnInfo').addEventListener('click', () => this.settingsPanel.set(true));
     $('btnFull').addEventListener('click', () => this.toggleFullscreen());
   }
 
@@ -261,145 +262,104 @@ export class HUD {
    * work whether or not the panel has ever been opened.
    */
   private wireInfoChrome(): void {
+    // Backdrop dismissal, per panel. `e.target === el` is what distinguishes a
+    // click on the dimmed surround from a click inside the card.
+    const backdrop = (el: HTMLElement, close: () => void) => {
+      el.addEventListener('pointerdown', (e) => {
+        if (e.target === el) close();
+      });
+    };
+    backdrop($('phone'), () => this.openPhone(false));
+    backdrop(this.info, () => this.settingsPanel.set(false));
     $('phoneClose').addEventListener('click', () => this.openPhone(false));
-    this.phone.addEventListener('pointerdown', (e) => {
-      if (e.target === this.phone) this.openPhone(false);
-    });
-    $('infoClose').addEventListener('click', () => this.openInfo(false));
-    this.info.addEventListener('pointerdown', (e) => {
-      if (e.target === this.info) this.openInfo(false);
-    });
+    $('infoClose').addEventListener('click', () => this.settingsPanel.set(false));
+
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        // Innermost panel first: Esc should close what is actually on top.
-        // Innermost panel first, then pointer lock, and only with nothing
-        // else showing does Escape mean "pause".
-        if (!this.mapPanel.hidden) this.openMap(false);
-        else if (!this.phone.hidden) this.openPhone(false);
-        else if (!this.info.hidden) this.openInfo(false);
-        else if (!this.pause.hidden) this.openPause(false);
-        else if (document.pointerLockElement) document.exitPointerLock();
-        else this.togglePause();
-      }
+      if (e.key !== 'Escape') return;
+      // Innermost panel first, then pointer lock, and only with nothing else
+      // showing does Escape mean "pause". Each test asks whether the panel is
+      // *on screen* rather than whether it was wanted — a panel still loading
+      // has nothing to close.
+      if (!this.mapPanel.hidden) this.openMap(false);
+      else if (this.phonePanel.open) this.openPhone(false);
+      else if (this.settingsPanel.open) this.settingsPanel.set(false);
+      else if (this.pausePanel.open) this.openPause(false);
+      else if (document.pointerLockElement) document.exitPointerLock();
+      else this.togglePause();
     });
   }
 
   // -- pause ----------------------------------------------------------------
-  private pause = $('pause');
-  private pausePanel: import('./PauseMenu').PauseMenu | null = null;
-  private pauseLoading: Promise<void> | null = null;
-  private pauseWanted = false;
+  //
+  // Three declarations where there used to be forty lines each. `LazyPanel`
+  // owns `wanted`/`loading`/`instance` and the reveal-after-load ordering that
+  // Phase 11 had to learn twice; a panel here supplies only what is different
+  // about it.
   private pauseDeps: import('./PauseMenu').PauseDeps | null = null;
+  private readonly pausePanel = new LazyPanel({
+    element: $('pause'),
+    load: async () => new (await import('./PauseMenu')).PauseMenu(this.pauseDeps!),
+    onOpen: (p) => p.open(),
+    transitionClass: 'is-on',
+    afterShow: () => this.input.releaseAll(),
+  });
 
   setPauseDeps(deps: import('./PauseMenu').PauseDeps): void {
     this.pauseDeps = deps;
   }
 
   get pauseOpen(): boolean {
-    return this.pause.hidden === false;
+    return this.pausePanel.open;
   }
 
   togglePause(): void {
-    this.openPause(!this.pauseWanted);
+    // Refuses rather than opening an empty menu if `Game` has not handed the
+    // save hooks over yet.
+    if (this.pauseDeps) this.pausePanel.toggle();
   }
 
-  /** Fifth panel to reveal only once its chunk has landed. */
   openPause(open: boolean): void {
-    if (!open) {
-      this.pauseWanted = false;
-      this.pause.classList.remove('is-on');
-      window.setTimeout(() => {
-        this.pause.hidden = true;
-      }, 220);
-      return;
-    }
-    if (!this.pauseDeps) return;
-
-    this.pauseWanted = true;
-    void this.loadPause().then(() => {
-      if (!this.pauseWanted) return;
-      this.pausePanel?.open();
-      this.pause.hidden = false;
-      requestAnimationFrame(() => this.pause.classList.add('is-on'));
-      this.input.releaseAll();
-    });
-  }
-
-  private loadPause(): Promise<void> {
-    this.pauseLoading ??= import('./PauseMenu').then((api) => {
-      this.pausePanel = new api.PauseMenu(this.pauseDeps!);
-    });
-    return this.pauseLoading;
+    if (open && !this.pauseDeps) return;
+    this.pausePanel.set(open);
   }
 
   // -- the phone ------------------------------------------------------------
-  private phone = $('phone');
-  private phonePanel: import('./Phone').Phone | null = null;
-  private phoneLoading: Promise<void> | null = null;
-  private phoneWanted = false;
-  /** Supplied by `Game` once, before the phone can be opened. */
   private phoneDeps: import('./Phone').PhoneDeps | null = null;
+  private readonly phonePanel = new LazyPanel({
+    element: $('phone'),
+    // The phone waits on its *data* as well as its code: the Work app lists
+    // the job catalogue, which is itself a lazy chunk, and an empty Work
+    // screen is indistinguishable from "you have no jobs".
+    load: async () => {
+      const [api] = await Promise.all([import('./Phone'), this.phoneDeps!.ready()]);
+      return new api.Phone(this.phoneDeps!);
+    },
+    onOpen: (p) => p.refresh(),
+    transitionClass: 'is-on',
+    afterShow: () => this.input.releaseAll(),
+  });
 
-  /** Hand the phone its data sources. Called by `Game` during setup. */
   setPhoneDeps(deps: import('./Phone').PhoneDeps): void {
     this.phoneDeps = deps;
   }
 
   get phoneOpen(): boolean {
-    return this.phone.hidden === false;
+    return this.phonePanel.open;
   }
 
   togglePhone(): void {
-    this.openPhone(!this.phoneWanted);
+    if (this.phoneDeps) this.phonePanel.toggle();
   }
 
-  /**
-   * Show or hide the phone.
-   *
-   * Revealed only once its chunk has landed, the fourth panel to follow that
-   * rule. Without the deps it refuses rather than opening an empty handset —
-   * `Game` supplies them during setup, so this only bites if the order changes.
-   */
   openPhone(open: boolean): void {
-    if (!open) {
-      this.phoneWanted = false;
-      this.phone.classList.remove('is-on');
-      window.setTimeout(() => {
-        this.phone.hidden = true;
-      }, 220);
-      return;
-    }
-    if (!this.phoneDeps) return;
-
-    this.phoneWanted = true;
-    void this.loadPhone().then(() => {
-      if (!this.phoneWanted) return;
-      this.phonePanel?.refresh();
-      this.phone.hidden = false;
-      requestAnimationFrame(() => this.phone.classList.add('is-on'));
-      this.input.releaseAll();
-    });
+    if (open && !this.phoneDeps) return;
+    this.phonePanel.set(open);
   }
 
-  private loadPhone(): Promise<void> {
-    // The chunk and the data it renders. `ready()` is the host's promise that
-    // the job catalogue has landed; without awaiting it the Work app opens
-    // empty and reads as "no jobs" rather than "not yet".
-    this.phoneLoading ??= Promise.all([import('./Phone'), this.phoneDeps!.ready()]).then(([api]) => {
-      this.phonePanel = new api.Phone(this.phoneDeps!);
-    });
-    return this.phoneLoading;
-  }
-
-  /** Resolved on the first opening; null until then. */
-  private settingsPanel: import('./SettingsPanel').SettingsPanel | null = null;
-  private settingsLoading: Promise<void> | null = null;
-  /** Whether the player has asked for it, which may be ahead of the download. */
-  private infoWanted = false;
-
-  private loadSettingsPanel(): Promise<void> {
-    this.settingsLoading ??= import('./SettingsPanel').then((api) => {
-      this.settingsPanel = new api.SettingsPanel({
+  private readonly settingsPanel = new LazyPanel({
+    element: $('info'),
+    load: async () =>
+      new (await import('./SettingsPanel')).SettingsPanel({
         settings: this.settings,
         syncTiles: () => this.syncTiles(),
         applyAccess: () => this.applyAccess(),
@@ -410,11 +370,14 @@ export class HUD {
         onResetProgress: () => this.cb.onResetProgress(),
         onCombatOption: (k, v) => this.cb.onCombatOption(k, v),
         onAccessOption: (k, v) => this.cb.onAccessOption(k, v),
-      });
-    });
-    return this.settingsLoading;
-  }
-
+      }),
+    // Reflect anything changed while the panel did not exist — the quality and
+    // time tiles are both reachable without it.
+    onOpen: (p) => p.syncAll(),
+    transitionClass: 'is-on',
+    closeDelay: 240,
+    afterShow: () => this.input.releaseAll(),
+  });
 
   /** Build the swatch rows once and keep their selected state in sync. */
   private wireWardrobe(): void {
@@ -500,35 +463,11 @@ export class HUD {
    */
   /** Public entry point, for the pause menu's Settings item. */
   openInfoPanel(): void {
-    this.openInfo(true);
-  }
-
-  private openInfo(open: boolean): void {
-    if (!open) {
-      this.infoWanted = false;
-      this.info.classList.remove('is-on');
-      window.setTimeout(() => {
-        this.info.hidden = true;
-      }, 240);
-      return;
-    }
-
-    this.infoWanted = true;
-    void this.loadSettingsPanel().then(() => {
-      // Still wanted? The player may have pressed Escape while it landed.
-      if (!this.infoWanted) return;
-      // Reflect anything that changed while the panel did not exist — the
-      // quality tile and the time tile are both reachable without it.
-      this.settingsPanel?.syncAll();
-      this.info.hidden = false;
-      // next frame, so the transition has a starting state to animate from
-      requestAnimationFrame(() => this.info.classList.add('is-on'));
-      this.input.releaseAll();
-    });
+    this.settingsPanel.set(true);
   }
 
   get infoOpen(): boolean {
-    return !this.info.hidden;
+    return this.settingsPanel.open;
   }
 
   // -------------------------------------------------------------- touch
