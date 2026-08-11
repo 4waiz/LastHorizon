@@ -185,3 +185,50 @@
   font-size: var(--text-xs) !important;
   opacity: 0.75;
 }
+
+/* --- volume sliders ------------------------------------------------------ */
+
+/* A row whose control is wider than a segment strip and belongs under its
+   label rather than beside it. */
+.row--stack {
+  display: block;
+}
+
+.vols {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-1) var(--sp-3);
+  align-items: center;
+  margin-top: var(--sp-2);
+}
+
+.vol {
+  display: contents;
+}
+
+.vol__name {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+
+.vol__value {
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  min-inline-size: 3.2em;
+  text-align: end;
+}
+
+.vol input[type='range'] {
+  inline-size: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* A visible focus ring: these are the only native controls in the interface
+   and the UA default is easy to lose against warm paper. */
+.vol input[type='range']:focus-visible {
+  outline: 3px solid var(--accent-cool);
+  outline-offset: 3px;
+  border-radius: var(--radius-pill);
+}

@@ -1,5 +1,6 @@
 import { clamp, lerp } from '../utils/MathUtils';
 import type { InteriorAudioProfile } from '../world/interiors/InteriorDefinition';
+import { DEFAULT_VOLUMES, type AudioBus } from './Settings';
 
 /**
  * Original soundscape, synthesised in the Web Audio API.
@@ -66,12 +67,69 @@ const INTERIOR_PROFILE_GAIN: Readonly<Record<InteriorAudioProfile, number>> = {
   hangar: 0.55,
 };
 
+/**
+ * The mix, before the player touches it.
+ *
+ * These are the numbers the game is balanced at. `SettingsState.volumes`
+ * multiplies them; it never replaces them.
+ */
+const BASE = { music: 0.30, ambience: 0.34, sfx: 0.75, ui: 0.5 } as const;
+
+/** Master with nothing turned down. Was an inline 0.85 in three places. */
+const MASTER_LEVEL = 0.85;
+
+export type UiSound = 'click' | 'open' | 'close' | 'toast' | 'refuse';
+
+/**
+ * Four tones and a thud, synthesised.
+ *
+ * `refuse` falls rather than rises and is the only one that lands below
+ * 300 Hz, because "that did not work" has to be distinguishable from "that
+ * worked" without looking at the screen.
+ */
+const UI_SOUNDS: Readonly<Record<UiSound, {
+  wave: OscillatorType;
+  from: number;
+  to: number;
+  peak: number;
+  length: number;
+}>> = {
+  click: { wave: 'sine', from: 880, to: 880, peak: 0.11, length: 0.05 },
+  open: { wave: 'sine', from: 620, to: 930, peak: 0.13, length: 0.13 },
+  close: { wave: 'sine', from: 780, to: 520, peak: 0.11, length: 0.12 },
+  toast: { wave: 'triangle', from: 1040, to: 1560, peak: 0.10, length: 0.16 },
+  refuse: { wave: 'triangle', from: 300, to: 190, peak: 0.14, length: 0.18 },
+};
+
+export type StingerKind = 'discovery' | 'chapter' | 'arrest' | 'birthday';
+
+/**
+ * Story punctuation, as note pairs and triples.
+ *
+ * All drawn from the same D-minor-ish set the pad uses, so a stinger lands
+ * inside the music rather than beside it. `arrest` is the only one that
+ * falls, and it is the only one that is bad news.
+ */
+const STINGERS: Readonly<Record<StingerKind, readonly number[]>> = {
+  discovery: [587.33, 880.0],
+  chapter: [440.0, 587.33, 880.0],
+  arrest: [349.23, 261.63],
+  birthday: [523.25, 659.25, 783.99],
+};
+
 export class AudioManager {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private musicGain: GainNode | null = null;
   private ambientGain: GainNode | null = null;
   private sfxGain: GainNode | null = null;
+  /** Interface only. Separate from `sfxGain` so buttons can be silenced alone. */
+  private uiGain: GainNode | null = null;
+
+  private levels: Record<AudioBus, number> = { ...DEFAULT_VOLUMES };
+  /** 1 when nothing is ducking. See `duck`. */
+  private duckFactor = 1;
+  private duckUntil = 0;
 
   private windGain: GainNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
@@ -120,17 +178,23 @@ export class AudioManager {
       this.master.gain.value = this.muted ? 0 : 0.0001;
       this.master.connect(ctx.destination);
 
+      // Four buses under the master, each starting at the designed mix scaled
+      // by whatever the player had set last session.
       this.musicGain = ctx.createGain();
-      this.musicGain.gain.value = 0.30;
+      this.musicGain.gain.value = BASE.music * this.levels.music;
       this.musicGain.connect(this.master);
 
       this.ambientGain = ctx.createGain();
-      this.ambientGain.gain.value = 0.34;
+      this.ambientGain.gain.value = BASE.ambience * this.levels.ambience;
       this.ambientGain.connect(this.master);
 
       this.sfxGain = ctx.createGain();
-      this.sfxGain.gain.value = 0.75;
+      this.sfxGain.gain.value = BASE.sfx * this.levels.sfx;
       this.sfxGain.connect(this.master);
+
+      this.uiGain = ctx.createGain();
+      this.uiGain.gain.value = BASE.ui * this.levels.ui;
+      this.uiGain.connect(this.master);
 
       this.buildWind();
       this.buildInsects();
@@ -139,7 +203,11 @@ export class AudioManager {
 
       this.started = true;
       // Fade in rather than punch in.
-      this.master.gain.setTargetAtTime(this.muted ? 0 : 0.85, ctx.currentTime, 1.4);
+      this.master.gain.setTargetAtTime(
+        this.muted ? 0 : MASTER_LEVEL * this.levels.master,
+        ctx.currentTime,
+        1.4,
+      );
       void ctx.resume();
       this.applyZone();
     } catch (err) {
@@ -352,7 +420,150 @@ export class AudioManager {
   setMuted(m: boolean): void {
     this.muted = m;
     if (!this.ctx || !this.master) return;
-    this.master.gain.setTargetAtTime(m ? 0 : 0.85, this.ctx.currentTime, 0.25);
+    this.master.gain.setTargetAtTime(m ? 0 : MASTER_LEVEL * this.levels.master, this.ctx.currentTime, 0.25);
+  }
+
+  // ------------------------------------------------------------------ buses
+
+  /**
+   * Apply the player's per-bus levels.
+   *
+   * Multipliers onto the mix designed in `start()`, never replacements for
+   * it. The balance between a 0.30 music bed and 0.75 effects is a mix
+   * decision; what belongs to the player is *more music, less wind*. See
+   * `SettingsState.volumes`.
+   *
+   * Ramped rather than assigned. A `gain.value` write mid-tone is a click,
+   * and a slider produces dozens of them per drag.
+   */
+  setLevels(levels: Readonly<Record<AudioBus, number>>): void {
+    this.levels = { ...levels };
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    if (this.master && !this.muted) {
+      this.master.gain.setTargetAtTime(MASTER_LEVEL * this.levels.master, t, 0.08);
+    }
+    this.musicGain?.gain.setTargetAtTime(BASE.music * this.levels.music * this.duckFactor, t, 0.08);
+    this.ambientGain?.gain.setTargetAtTime(
+      BASE.ambience * this.levels.ambience * this.duckFactor,
+      t,
+      0.08,
+    );
+    this.sfxGain?.gain.setTargetAtTime(BASE.sfx * this.levels.sfx, t, 0.08);
+    this.uiGain?.gain.setTargetAtTime(BASE.ui * this.levels.ui, t, 0.08);
+  }
+
+  /**
+   * Duck the bed under something that has to be heard.
+   *
+   * Music and ambience only: ducking effects would silence the footstep that
+   * caused the line. `seconds` is how long to hold before recovering, and a
+   * second call during a duck extends rather than restarts, so two stingers
+   * in quick succession do not pump.
+   */
+  duck(seconds = 1.6, amount = 0.35): void {
+    if (!this.ctx) return;
+    const until = this.ctx.currentTime + seconds;
+    this.duckUntil = Math.max(this.duckUntil, until);
+    this.duckFactor = Math.min(this.duckFactor, Math.max(0, Math.min(1, amount)));
+    this.applyDuck(0.12);
+  }
+
+  private applyDuck(timeConstant: number): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.musicGain?.gain.setTargetAtTime(
+      BASE.music * this.levels.music * this.duckFactor,
+      t,
+      timeConstant,
+    );
+    this.ambientGain?.gain.setTargetAtTime(
+      BASE.ambience * this.levels.ambience * this.duckFactor,
+      t,
+      timeConstant,
+    );
+  }
+
+  /** Called every frame. Lets the bed back up once the duck has expired. */
+  private updateDuck(now: number): void {
+    if (this.duckFactor >= 1 || now < this.duckUntil) return;
+    this.duckFactor = 1;
+    // Slower coming back than going down: a fast recovery is as noticeable as
+    // the duck itself, and the point is for neither to be noticed.
+    this.applyDuck(0.5);
+  }
+
+  // ------------------------------------------------------------- ui and cues
+
+  /**
+   * Interface sounds.
+   *
+   * Synthesised like everything else in this file — three short tones and a
+   * filtered noise tick, not a sample pack. They sit on their own bus so a
+   * player can silence buttons without silencing footsteps, which is the
+   * sound people reach for the volume over first.
+   *
+   * Deliberately quiet and deliberately short. An interface that announces
+   * itself is an interface you stop opening.
+   */
+  ui(kind: UiSound): void {
+    if (!this.available || !this.ctx || !this.uiGain) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const spec = UI_SOUNDS[kind];
+
+    const osc = ctx.createOscillator();
+    osc.type = spec.wave;
+    osc.frequency.setValueAtTime(spec.from, now);
+    if (spec.to !== spec.from) {
+      osc.frequency.exponentialRampToValueAtTime(spec.to, now + spec.length);
+    }
+
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(spec.peak, now + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + spec.length);
+
+    osc.connect(g);
+    g.connect(this.uiGain);
+    osc.start(now);
+    osc.stop(now + spec.length + 0.02);
+  }
+
+  /**
+   * A story stinger: two notes and a duck.
+   *
+   * The duck is the point. A stinger that plays *over* the bed at the same
+   * level is a third layer of music; one that briefly opens a hole for itself
+   * reads as punctuation.
+   */
+  stinger(kind: StingerKind): void {
+    if (!this.available || !this.ctx || !this.musicGain) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const notes = STINGERS[kind];
+
+    this.duck(1.8, 0.4);
+
+    notes.forEach((freq, i) => {
+      const when = now + i * 0.14;
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, when);
+
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.exponentialRampToValueAtTime(0.16, when + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, when + 1.1);
+
+      osc.connect(g);
+      // Onto the music bus, so a player who has turned music down turns the
+      // stingers down with it. They are music.
+      g.connect(this.musicGain!);
+      osc.start(when);
+      osc.stop(when + 1.2);
+    });
   }
 
   /** Pause the graph when the tab is hidden so it doesn't drone in the dark. */
@@ -385,6 +596,7 @@ export class AudioManager {
     if (!this.available || !this.ctx) return;
     const ctx = this.ctx;
     const now = ctx.currentTime;
+    this.updateDuck(now);
 
     // wind rises a little with speed, and thins out after dark
     if (this.windFilter && this.windGain) {

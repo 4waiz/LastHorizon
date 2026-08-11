@@ -1,5 +1,5 @@
 import './SettingsPanel.css';
-import type { NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
+import type { AudioBus, NeedId, QualityLevel, Settings, TimeMode } from '../core/Settings';
 
 /**
  * Everything inside the info modal: settings, needs, action, accessibility,
@@ -51,6 +51,7 @@ export interface SettingsPanelDeps {
     key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
     value: number | boolean | string,
   ) => void;
+  readonly onVolume: (bus: AudioBus, level: number) => void;
 }
 
 export class SettingsPanel {
@@ -72,6 +73,24 @@ export class SettingsPanel {
     this.syncNeeds();
     this.syncCombat();
     this.syncAccess();
+    this.syncVolumes();
+  }
+
+  /**
+   * The five bus sliders.
+   *
+   * Percentages in the `<output>`, not decimals: 0.35 is a gain and 35% is a
+   * volume, and only one of those is a thing a player has an opinion about.
+   */
+  private syncVolumes(): void {
+    const v = this.d.settings.current.volumes;
+    for (const input of document.querySelectorAll<HTMLInputElement>('#setVolumes input')) {
+      const bus = input.dataset.bus as AudioBus;
+      const pct = Math.round((v[bus] ?? 1) * 100);
+      input.value = String(pct);
+      const out = document.querySelector<HTMLElement>(`.vol__value[data-for="${bus}"]`);
+      if (out) out.textContent = `${pct}%`;
+    }
   }
 
   /**
@@ -202,6 +221,17 @@ export class SettingsPanel {
       $(id).addEventListener('click', () => {
         this.d.onAccessOption(key, !this.d.settings.current[key]);
         this.syncAccess();
+      });
+    }
+
+    // The bus sliders. `input` rather than `change`, so the mix follows the
+    // drag — a level you can only hear after letting go is a level you cannot
+    // set by ear, which is the only way anybody sets one.
+    for (const input of document.querySelectorAll<HTMLInputElement>('#setVolumes input')) {
+      input.addEventListener('input', () => {
+        const bus = input.dataset.bus as AudioBus;
+        this.d.onVolume(bus, Number(input.value) / 100);
+        this.syncVolumes();
       });
     }
 

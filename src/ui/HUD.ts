@@ -1,4 +1,5 @@
-import { QualityLevel, Settings, TimeMode } from '../core/Settings';
+import { QualityLevel, Settings, TimeMode, type AudioBus } from '../core/Settings';
+import type { UiSound } from '../core/AudioManager';
 import type { Dashboard } from '../vehicles/VehicleControls';
 import type { MinimapData } from './Minimap';
 // Type-only: the map is a panel behind a keypress, so its drawing code arrives
@@ -55,6 +56,15 @@ export interface HUDCallbacks {
     key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
     value: number | boolean | string,
   ) => void;
+  onVolume: (bus: AudioBus, level: number) => void;
+  /**
+   * Play an interface sound.
+   *
+   * The HUD asks for a sound by *meaning* rather than reaching for
+   * `AudioManager`: it has no business knowing whether audio has started, is
+   * muted, or exists at all. `Game` owns that and no-ops when it does not.
+   */
+  onUiSound: (kind: UiSound) => void;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
@@ -325,6 +335,7 @@ export class HUD {
     load: async () => new (await import('./PauseMenu')).PauseMenu(this.pauseDeps!),
     onOpen: (p) => p.open(),
     transitionClass: 'is-on',
+    sound: (k) => this.cb.onUiSound(k),
     afterShow: () => this.input.releaseAll(),
   });
 
@@ -360,6 +371,7 @@ export class HUD {
     },
     onOpen: (p) => p.refresh(),
     transitionClass: 'is-on',
+    sound: (k) => this.cb.onUiSound(k),
     afterShow: () => this.input.releaseAll(),
   });
 
@@ -387,6 +399,7 @@ export class HUD {
     load: async () => new (await import('./LifePanel')).LifePanel(this.lifeDeps!),
     onOpen: (p) => p.open(),
     transitionClass: 'is-on',
+    sound: (k) => this.cb.onUiSound(k),
     afterShow: () => this.input.releaseAll(),
   });
 
@@ -421,11 +434,13 @@ export class HUD {
         onResetProgress: () => this.cb.onResetProgress(),
         onCombatOption: (k, v) => this.cb.onCombatOption(k, v),
         onAccessOption: (k, v) => this.cb.onAccessOption(k, v),
+        onVolume: (bus, level) => this.cb.onVolume(bus, level),
       }),
     // Reflect anything changed while the panel did not exist — the quality and
     // time tiles are both reachable without it.
     onOpen: (p) => p.syncAll(),
     transitionClass: 'is-on',
+    sound: (k) => this.cb.onUiSound(k),
     closeDelay: 240,
     afterShow: () => this.input.releaseAll(),
   });
@@ -667,6 +682,7 @@ export class HUD {
   showToast(title: string, body: string, ms = 3600): void {
     this.toastTitle.textContent = title;
     this.toastBody.textContent = body;
+    this.cb.onUiSound('toast');
     this.toast.classList.add('is-on');
     window.clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => this.toast.classList.remove('is-on'), ms);

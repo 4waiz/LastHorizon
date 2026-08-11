@@ -643,6 +643,9 @@ export class Game {
       this.hud.popCounter();
       this.hud.showToast(count >= total ? 'All found' : 'Found', def.found);
       this.audio.playDiscovery();
+      // The last keepsake is a moment; the first four are a chime. A stinger
+      // on every one of them would stop meaning anything by the third.
+      if (count >= total) this.audio.stinger('discovery');
     };
 
     this.hud = new HUD(this.settings, this.input, {
@@ -654,6 +657,10 @@ export class Game {
         this.hud.setCounter(0, this.village!.collectibles.total);
       },
       onInteract: (down) => this.input.setInteractHeld(down),
+      onVolume: (bus, level) => this.settings.setVolume(bus, level),
+      // No-ops until audio has started, which is a user gesture away. The HUD
+      // asks by meaning and does not know or care.
+      onUiSound: (kind) => this.audio.ui(kind),
       onCombatOption: (key, value) => {
         this.settings.setCombatOption(key, value);
         this.applyCombatSettings();
@@ -788,8 +795,17 @@ export class Game {
     this.hud.show();
     this.audio.start();
     this.audio.setMuted(this.settings.current.muted);
+    this.audio.setLevels(this.settings.current.volumes);
     this.applyNeedsSettings();
-    this.gameScope.addTeardown(this.settings.onChange(() => this.applyNeedsSettings()));
+    this.gameScope.addTeardown(
+      this.settings.onChange((s) => {
+        this.applyNeedsSettings();
+        // Levels come from the same subscription rather than a bespoke
+        // callback: a slider, a restored save and a reset all reach the mixer
+        // by one path, so none of them can be the one that forgets.
+        this.audio.setLevels(s.volumes);
+      }),
+    );
 
     // The six job definitions, in both modes. Fire-and-forget for the same
     // reason as the population: nothing can start a task until an interior

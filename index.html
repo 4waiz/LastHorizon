@@ -528,6 +528,35 @@
             None of these change how the game plays. They are here because a setting that
             costs nothing to offer should not be somebody's difficulty level.
           </p>
+          <div class="row row--stack">
+            <span id="volLabel">Sound</span>
+            <!-- Real range inputs, not segments. A level is continuous and a
+                 four-button segment for it would be a lie about the model.
+                 Each is labelled by its own text, so a screen reader says
+                 "Music, slider, 100%" rather than "slider". -->
+            <div class="vols" id="setVolumes" role="group" aria-labelledby="volLabel">
+              <label class="vol"><span class="vol__name">Overall</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="master" />
+                <output class="vol__value" data-for="master">100%</output>
+              </label>
+              <label class="vol"><span class="vol__name">Music</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="music" />
+                <output class="vol__value" data-for="music">100%</output>
+              </label>
+              <label class="vol"><span class="vol__name">Ambience</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="ambience" />
+                <output class="vol__value" data-for="ambience">100%</output>
+              </label>
+              <label class="vol"><span class="vol__name">Effects</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="sfx" />
+                <output class="vol__value" data-for="sfx">100%</output>
+              </label>
+              <label class="vol"><span class="vol__name">Interface</span>
+                <input type="range" min="0" max="100" step="5" value="100" data-bus="ui" />
+                <output class="vol__value" data-for="ui">100%</output>
+              </label>
+            </div>
+          </div>
           <div class="row">
             <span>Text size</span>
             <div class="seg" id="setUiScale">

@@ -159,7 +159,39 @@ export interface SettingsState {
   heatNumerals: boolean;
   /** Flying, exposed here because Phase 10 shipped it with no interface. */
   flightAssist: 'assisted' | 'reduced';
+
+  /**
+   * Per-bus levels, 0..1, multiplied onto the mix `AudioManager` designs.
+   *
+   * Deliberately multipliers rather than absolute gains. The balance between
+   * a music bed at 0.30 and effects at 0.75 is a mix decision that belongs in
+   * the audio code; what belongs to the player is *more music, less wind*.
+   * Handing them raw gain values would make every preset a different game.
+   *
+   * `muted` stays separate and still wins. It is one keypress from the HUD
+   * and has to work without disturbing whatever the sliders were set to.
+   */
+  volumes: Record<AudioBus, number>;
 }
+
+/**
+ * The four buses.
+ *
+ * `ui` is separate from `sfx` on purpose: interface clicks are the sound
+ * players turn off first, and folding them into world effects would mean
+ * silencing footsteps to silence a button.
+ */
+export type AudioBus = 'master' | 'music' | 'ambience' | 'sfx' | 'ui';
+
+export const AUDIO_BUSES: readonly AudioBus[] = ['master', 'music', 'ambience', 'sfx', 'ui'];
+
+export const DEFAULT_VOLUMES: Record<AudioBus, number> = {
+  master: 1,
+  music: 1,
+  ambience: 1,
+  sfx: 1,
+  ui: 1,
+};
 
 const STORAGE_KEY = 'lasthorizon.settings.v1';
 
@@ -189,6 +221,7 @@ export class Settings {
       highContrast: false,
       heatNumerals: false,
       flightAssist: 'assisted',
+      volumes: { ...DEFAULT_VOLUMES },
       ...defaults,
       ...this.read(),
     };
@@ -248,6 +281,18 @@ export class Settings {
       if (typeof parsed.heatNumerals === 'boolean') out.heatNumerals = parsed.heatNumerals;
       if (parsed.flightAssist === 'assisted' || parsed.flightAssist === 'reduced') {
         out.flightAssist = parsed.flightAssist;
+      }
+
+      // Per bus, and clamped, for the same reason `needsEnabled` is read per
+      // key: a stored blob missing one bus, or carrying a bus that no longer
+      // exists, must not silence the others or add a phantom.
+      if (parsed.volumes && typeof parsed.volumes === 'object') {
+        const v: Record<AudioBus, number> = { ...DEFAULT_VOLUMES };
+        for (const bus of AUDIO_BUSES) {
+          const level = num(parsed.volumes[bus], 0, 1);
+          if (level !== null) v[bus] = level;
+        }
+        out.volumes = v;
       }
 
       return out;
@@ -353,6 +398,23 @@ export class Settings {
    * storage — Phase 9's combat options learned that when a clamped value
    * arrived as a string.
    */
+  /**
+   * Set one bus level, 0..1.
+   *
+   * Ignores an unknown bus and a value that is not a finite number rather
+   * than throwing, matching every other setter here: settings arrive from
+   * storage and from a DOM slider, and neither is a trusted caller.
+   */
+  setVolume(bus: AudioBus, level: number): void {
+    if (!AUDIO_BUSES.includes(bus)) return;
+    if (typeof level !== 'number' || !Number.isFinite(level)) return;
+    const next = Math.min(1, Math.max(0, level));
+    if (this.state.volumes[bus] === next) return;
+    this.state.volumes = { ...this.state.volumes, [bus]: next };
+    this.persist();
+    this.emit();
+  }
+
   setAccessOption(
     key: 'uiScale' | 'reducedMotion' | 'highContrast' | 'heatNumerals' | 'flightAssist',
     value: number | boolean | string,
