@@ -415,6 +415,32 @@ export class AudioManager {
     osc2.start(when);
     osc.stop(when + 2.8);
     osc2.stop(when + 1.4);
+    this.releaseOnEnd(osc, g1);
+    this.releaseOnEnd(osc2, g2);
+  }
+
+  /**
+   * Unwire a one-shot once it has finished.
+   *
+   * Every sound in this file that starts and stops builds a small chain —
+   * source, filter, gain, sometimes a panner — and every one of them left it
+   * connected to its bus when the source ended. A stopped source releases
+   * itself; the nodes downstream of it do not, and CLAUDE.md is explicit that
+   * audio nodes are disposed rather than assumed.
+   *
+   * Found by the criterion-5 leak test rather than by reading: instrumenting
+   * `createBufferSource` showed nine of nine retained across a run in which
+   * the only thing happening was a panel opening and closing. Footsteps,
+   * insects, birdsong, the discovery arpeggio and the bell motif were all
+   * doing it, and had been since Phase 1.
+   *
+   * `ended` fires once per source, so this is idempotent by construction.
+   */
+  private releaseOnEnd(source: AudioScheduledSourceNode, ...chain: AudioNode[]): void {
+    source.addEventListener('ended', () => {
+      source.disconnect();
+      for (const node of chain) node.disconnect();
+    });
   }
 
   setMuted(m: boolean): void {
@@ -529,6 +555,15 @@ export class AudioManager {
     g.connect(this.uiGain);
     osc.start(now);
     osc.stop(now + spec.length + 0.02);
+    // Explicitly, not by collection. A stopped oscillator releases itself; its
+    // gain stays wired to the bus until something unwires it, and the rule in
+    // CLAUDE.md is that audio nodes are disposed rather than assumed. The
+    // criterion-5 test counts what is still connected, and 2.7 nodes per
+    // open/close cycle was exactly these.
+    osc.addEventListener('ended', () => {
+      osc.disconnect();
+      g.disconnect();
+    });
   }
 
   /**
@@ -563,6 +598,10 @@ export class AudioManager {
       g.connect(this.musicGain!);
       osc.start(when);
       osc.stop(when + 1.2);
+      osc.addEventListener('ended', () => {
+        osc.disconnect();
+        g.disconnect();
+      });
     });
   }
 
@@ -686,6 +725,7 @@ export class AudioManager {
     src.connect(filter).connect(gain).connect(this.sfxGain!);
     src.start(when);
     src.stop(when + decay + 0.02);
+    this.releaseOnEnd(src, filter, gain);
   }
 
   private chirp(when: number): void {
@@ -711,6 +751,7 @@ export class AudioManager {
       osc.connect(gain).connect(pan).connect(this.ambientGain!);
       osc.start(t);
       osc.stop(t + 0.12);
+      this.releaseOnEnd(osc, gain, pan);
     }
   }
 
@@ -735,6 +776,7 @@ export class AudioManager {
     src.connect(filter).connect(gain).connect(pan).connect(this.insectGain!);
     src.start(when);
     src.stop(when + 0.1);
+    this.releaseOnEnd(src, filter, gain, pan);
   }
 
   /** Bright arpeggio when a keepsake is found. */
@@ -755,6 +797,7 @@ export class AudioManager {
       osc.connect(gain).connect(this.sfxGain!);
       osc.start(t);
       osc.stop(t + 0.9);
+      this.releaseOnEnd(osc, gain);
     });
   }
 
@@ -773,6 +816,7 @@ export class AudioManager {
     src.connect(filter).connect(gain).connect(this.sfxGain!);
     src.start(t);
     src.stop(t + 0.13);
+    this.releaseOnEnd(src, filter, gain);
   }
 
   playLand(force: number): void {

@@ -117,6 +117,186 @@ test.describe('every screen names itself', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Criterion 5: no menu leaks timers, listeners, audio nodes or render targets
+// ---------------------------------------------------------------------------
+
+test.describe('nothing accumulates', () => {
+  /**
+   * Count the audio nodes the game creates, by wrapping the constructors
+   * before it starts.
+   *
+   * This is the half of criterion 5 that the Phase 11 audio work made a live
+   * question rather than a formality. Every interface sound builds an
+   * `OscillatorNode` and a `GainNode` and throws them away; a stinger builds
+   * three of each. They are `stop()`-ed and should self-collect, but "should"
+   * is an argument and this is a measurement.
+   *
+   * What is asserted is *net growth per cycle*, not the raw count — the point
+   * is that repeating an action does not climb without bound, and a fixed
+   * one-time cost is not a leak.
+   */
+  async function instrument(page: Page): Promise<void> {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __nodes: { made: number; live: number } };
+      w.__nodes = { made: 0, live: 0 };
+      const Ctor = window.AudioContext ?? (window as unknown as {
+        webkitAudioContext: typeof AudioContext;
+      }).webkitAudioContext;
+      if (!Ctor) return;
+      for (const name of ['createGain', 'createOscillator', 'createBufferSource'] as const) {
+        const original = Ctor.prototype[name] as (this: AudioContext) => AudioNode;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (Ctor.prototype as any)[name] = function patched(this: AudioContext) {
+          w.__nodes.made++;
+          w.__nodes.live++;
+          const node = original.call(this);
+          /*
+           * Released means *disconnected*, not "ended".
+           *
+           * The first version counted `ended`, which only source nodes fire —
+           * so every `GainNode` looked permanently live and the measurement
+           * read 2.7 retained per cycle. That was the instrument, not the
+           * graph. It did point at something real though: the gains were left
+           * wired to their bus, and `AudioManager` now disconnects both ends
+           * explicitly, which is what CLAUDE.md asks for anyway.
+           */
+          const release = node.disconnect.bind(node) as AudioNode['disconnect'];
+          let counted = false;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (node as any).disconnect = (...args: unknown[]) => {
+            if (!counted) {
+              counted = true;
+              w.__nodes.live--;
+            }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            return (release as any)(...args);
+          };
+          return node;
+        };
+      }
+    });
+  }
+
+  const nodes = (page: Page) =>
+    page.evaluate(() => (window as unknown as { __nodes: { made: number; live: number } }).__nodes);
+
+  test('opening and closing panels does not grow the audio graph without bound', async ({
+    page,
+  }) => {
+    const errors = watchConsole(page);
+    await instrument(page);
+    await boot(page);
+
+    // Audio needs a gesture. A click on the sound tile starts the context and
+    // is itself one interface sound, which is what we want to repeat.
+    await page.locator('#btnSound').click();
+    await page.locator('#btnSound').click();
+
+    // One warm-up cycle so the chunk fetch and its one-time nodes are not in
+    // the measurement.
+    await page.keyboard.press('i');
+    await expect(page.locator('#life')).toBeVisible({ timeout: 20_000 });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#life')).toBeHidden();
+
+    const before = await nodes(page);
+
+    const CYCLES = 25;
+    for (let i = 0; i < CYCLES; i++) {
+      await page.keyboard.press('i');
+      await page.keyboard.press('Escape');
+    }
+    await expect(page.locator('#life')).toBeHidden();
+    /*
+     * Five seconds, not one.
+     *
+     * "Retained per cycle" divided by 25 and looked like 1.04, then 2.48,
+     * then 6.08 as the file grew — because the ambient scheduler is dropping
+     * birds and insects throughout, and anything still playing at the moment
+     * of measurement counts as live. That is a drain problem, not a leak, and
+     * dividing by cycles disguised it as a rate.
+     *
+     * So: drain properly, then assert an *absolute* ceiling. The longest
+     * one-shot in the file is 2.8 s (the bell), so five clears everything
+     * transient. Whatever is still connected after that is genuinely held.
+     */
+    await page.waitForTimeout(5000);
+
+    const after = await nodes(page);
+    const made = after.made - before.made;
+    const retained = after.live - before.live;
+
+    // Each open/close is two interface sounds, plus whatever ambience the
+    // room happened to play. Made is expected to be large.
+    expect(made, `made ${made} nodes across ${CYCLES} cycles`).toBeGreaterThan(0);
+    // Held is what matters. A graph that grew with use would be at 25+ here;
+    // this is the check that every one-shot unwires itself.
+    expect(retained, `retained ${retained} nodes after draining`).toBeLessThan(10);
+    expect(errors).toEqual([]);
+  });
+
+  test('the mixer is a fixed set of buses, not one per change', async ({ page }) => {
+    await instrument(page);
+    await boot(page);
+    await page.locator('#btnSound').click();
+    await page.locator('#btnSound').click();
+
+    await page.locator('#btnInfo').click();
+    await expect(page.locator('#setVolumes')).toBeVisible({ timeout: 20_000 });
+
+    /*
+     * Against a control window, not against zero — the ambient scheduler is
+     * dropping birds and insects throughout whatever the player does.
+     *
+     * **This asserts retention, not creation, and that is a retreat worth
+     * recording.** The test I wanted was "a slider drag creates no nodes",
+     * because `setLevels` only ramps gains that already exist. It measures
+     * ~2-3 nodes per change against an idle control, consistently, and I have
+     * not found what makes them. Tuning the threshold until it passed would
+     * hide a number I cannot explain, which is the opposite of what this file
+     * is for. See docs/KNOWN_LIMITATIONS.md.
+     *
+     * What is checked instead is the thing criterion 5 actually asks: that
+     * whatever a drag makes, it does not *hold*.
+     */
+    const slider = page.locator('#setVolumes input[data-bus="music"]');
+
+    const before = await nodes(page);
+    for (let v = 0; v <= 100; v += 5) {
+      await slider.fill(String(v));
+      await slider.dispatchEvent('input');
+    }
+    await page.waitForTimeout(5000);
+    const after = await nodes(page);
+
+    expect(
+      after.live - before.live,
+      `a slider drag retained ${after.live - before.live} nodes after draining`,
+    ).toBeLessThan(10);
+  });
+
+  /*
+   * No render-stat assertion for photo mode here, deliberately.
+   *
+   * The obvious test — open and close it eight times, expect geometries,
+   * textures and programs to come back level — measured 158 against 173 and
+   * looked like a leak. It is not one: the world keeps streaming, vegetation
+   * and birds keep being built and released, and a settled frame count is
+   * not a controlled environment. The number moves on its own.
+   *
+   * `smoke.spec.ts` already makes the equivalent assertion where it *is*
+   * controlled — an interior round trip, twice, comparing the second lap to
+   * the first — and that is the right place for it. A test that cannot
+   * attribute what it measures is worse than no test, and this file has
+   * already made that mistake once (see the slider control window above).
+   *
+   * What photo mode *is* checked for is behavioural, in `ui.spec.ts`:
+   * re-entering shows the defaults, which is only true if `LazyPanel.onClose`
+   * put the lens, the player and the clocks back.
+   */
+});
+
+// ---------------------------------------------------------------------------
 // Gamepad
 // ---------------------------------------------------------------------------
 

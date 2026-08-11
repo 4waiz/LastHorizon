@@ -40,31 +40,42 @@ const MOVE_VECTORS: Partial<Record<Action, [number, number]>> = {
  */
 const GAMEPAD_LOOK_RATE = 620;
 
+/** Keys a button or link activates with. Nothing else is theirs. */
+const ACTIVATION_KEYS: ReadonlySet<string> = new Set(['Enter', 'Space']);
+
 /**
- * Is this key press meant for a control rather than for the game?
+ * Should the focused element get this key instead of the game?
  *
- * The bug this fixes was found by the criterion-3 gamepad test and is worth
- * stating plainly: **`Enter` is a fixed alternate for `interact`**, the
- * listener is on `window`, and it calls `preventDefault()`. So a player who
- * tabbed to a HUD tile and pressed Enter had the activation swallowed by the
- * game — the button did nothing. Space on a focused button was the same, and
- * every letter typed into a future text field would have been a game action.
+ * Two bugs, in opposite directions, and the second was mine.
  *
- * Interactive elements own their own keys. The game only hears a press when
- * nothing focusable is holding it, which is what "keyboard reaches every
- * screen" actually requires.
+ * The first: **`Enter` is a fixed alternate for `interact`**, the listener is
+ * on `window`, and it calls `preventDefault()` — so a player who tabbed to a
+ * HUD tile and pressed Enter had the activation swallowed and the button did
+ * nothing. Found by the criterion-3 gamepad test.
+ *
+ * The second: the first fix swallowed *every* key aimed at a button. Clicking
+ * a HUD tile leaves focus on it, so walking stopped working until focus moved
+ * — which the leak test found one commit later by pressing a tile and then a
+ * key. Strictly worse than the bug it replaced.
+ *
+ * So the rule is by element **and** by key. A text field owns everything typed
+ * at it. A button owns Enter and Space, which are the two keys that activate
+ * it, and nothing else: `W` aimed at a focused button is a player trying to
+ * walk.
  */
-function isTypingTarget(target: EventTarget | null): boolean {
+function isTypingTarget(target: EventTarget | null, code: string): boolean {
   const el = target as HTMLElement | null;
   if (!el || typeof el.tagName !== 'string') return false;
   if (el.isContentEditable) return true;
   switch (el.tagName) {
-    case 'BUTTON':
     case 'INPUT':
     case 'SELECT':
     case 'TEXTAREA':
-    case 'A':
+      // Everything, including the arrows a slider moves by.
       return true;
+    case 'BUTTON':
+    case 'A':
+      return ACTIVATION_KEYS.has(code);
     default:
       return false;
   }
@@ -201,8 +212,8 @@ export class InputManager {
    */
   private onKey(e: KeyboardEvent, down: boolean): void {
     if (e.repeat) return;
-    if (isTypingTarget(e.target)) return;
     const code = e.code;
+    if (isTypingTarget(e.target, code)) return;
 
     if (down) {
       const action = this.bindings.actionFor(code);

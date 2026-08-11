@@ -72,6 +72,36 @@ present-day optimisation.
 is no buoyancy, no dock, no wake and no way to board one. The Phase 10 brief
 made the boat conditional — *"only if feasible"* — and it was not.
 
+## Audio
+
+### A volume change allocates two or three nodes, and I do not know why
+
+`AudioManager.setLevels` only calls `setTargetAtTime` on gains that already
+exist, so dragging a volume slider should allocate nothing. Instrumenting
+`createGain` / `createOscillator` / `createBufferSource` in
+`tests/e2e/access.spec.ts` measures roughly 2–3 nodes per change, repeatably,
+against an idle control window of the same duration.
+
+They do **not** accumulate — the same test asserts that everything is
+released after a drain, and that passes — so this is not a leak. It is an
+unexplained cost, and the test says so rather than carrying a threshold tuned
+to hide it.
+
+Worth chasing: the settings subscription in `Game` runs `applyNeedsSettings`
+alongside `setLevels`, and `locator.fill()` fires `input` on top of the
+explicit dispatch, so each iteration runs the handler twice. Neither obviously
+builds a node.
+
+### One-shot sounds were leaking until Phase 11
+
+Every sound that starts and stops built a chain — source, filter, gain,
+sometimes a panner — and left it connected to its bus when the source ended.
+Found by instrumenting the constructors: nine of nine buffer sources retained
+across a run whose only activity was a panel opening and closing. Footsteps,
+insects, birdsong, the discovery arpeggio and the bell motif were all doing
+it, and had been since Phase 1. `AudioManager.releaseOnEnd` now unwires each
+one, and the criterion-5 test measures it.
+
 ## Rendering
 
 ### The interior is the worst case
