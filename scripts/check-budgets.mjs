@@ -55,7 +55,16 @@ const BUNDLE_BUDGETS = [
   // panel supplying an importer and a constructor. Five copies collapse to
   // five declarations, and the sixth screen costs a line rather than forty.
   // That is worth doing before the remaining screens, not after them.
-  { prefix: 'index-', ext: '.js', maxKB: 400, label: 'app chunk' },
+  // Phase 12: **put back to 390**, and it is worth saying why rather than just
+  // doing it. The pause menu raised this 390 -> 400. Phase 12 then moved two
+  // things that had been eager since Phase 2 — the job catalogue behind
+  // `taskRegistry`, and the district runtime behind `CitySubsystem` — and the
+  // chunk came out at 379.2 kB, which is under the *old* ceiling with 10 kB to
+  // spare. A raise that the next phase's first two moves undo was not needed,
+  // so it goes back. This is the second time in two phases the raise has been
+  // handed back (Phase 11 did the same after splitting `SettingsPanel`), and
+  // that is the rule working rather than a coincidence.
+  { prefix: 'index-', ext: '.js', maxKB: 390, label: 'app chunk' },
   { prefix: 'gsap-', ext: '.js', maxKB: 90, label: 'gsap chunk' },
   { prefix: 'bvh-', ext: '.js', maxKB: 75, label: 'bvh chunk' },
   { prefix: 'index-', ext: '.css', maxKB: 24, label: 'stylesheet' },
@@ -148,6 +157,18 @@ const LAZY_CHUNK_PREFIXES = [
   'Phone-',
   // Phase 11. Pause and the three save slots, fetched on the first pause.
   'PauseMenu-',
+  // Phase 12. The six job and activity definitions, behind `taskRegistry`.
+  // Phase 10 named this fix, raised `initial load` instead of doing it, and
+  // recorded that it should happen "before adding anything else eager" —
+  // which is exactly what this phase had to do first.
+  'taskCatalog-',
+  // Phase 12. The district runtime and its builder, behind the zone-travel
+  // boundary. **Owed since the Phase 4 report**, which said in as many words
+  // that this was the answer when the app chunk next needed room; five phases
+  // raised a ceiling instead. Travel already fades to black while it prepares
+  // the destination, so the fetch lands in a gap the player waits through
+  // anyway, and a session that never leaves the village never pays for it.
+  'CitySubsystem-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));

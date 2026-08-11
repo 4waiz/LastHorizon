@@ -71,7 +71,16 @@ export function tasksReady(): boolean {
  * at once — the three subsystems that need it all do, and share one fetch.
  */
 export function loadTasks(): Promise<void> {
-  loading ??= import('./taskCatalog').then(() => undefined);
+  // Registers from the resolved module rather than trusting `taskCatalog`'s
+  // module-scope call to have run. Those are the same thing exactly once —
+  // and a second import resolves from the module cache *without* re-running
+  // module scope, so relying on the side effect meant the registry could stay
+  // empty after a reset. The unit tests caught that, which is the whole
+  // argument for the explicit form: it does not depend on how many times the
+  // module has been evaluated.
+  loading ??= import('./taskCatalog').then((m) => {
+    registerTasks(m.TASKS);
+  });
   return loading;
 }
 

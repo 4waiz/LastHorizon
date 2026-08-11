@@ -5,8 +5,10 @@ import type { LifeSnapshot, NpcSnapshot, PopulationSnapshot, TestSurface } from 
 import type { PerceptionKind } from '../npc/Perception';
 import { DisposalRegistry } from './DisposalRegistry';
 import { ZoneManager } from '../world/zones/ZoneManager';
-import { buildCityChunk, buildCitySkyline } from '../world/zones/CityBuilder';
-import { CityRuntime } from '../world/zones/CityRuntime';
+// Type-only: the city runtime itself arrives through `CitySubsystem`, lazily,
+// at the moment of travel. See that file for why the boundary is here.
+type CityApi = typeof import('../world/zones/CitySubsystem');
+type CityRuntime = import('../world/zones/CityRuntime').CityRuntime;
 import type { ZoneId } from '../world/zones/Manifest';
 import type { ZoneRuntime } from '../world/zones/ZoneRuntime';
 import { SimulationClock } from './SimulationClock';
@@ -166,6 +168,8 @@ export class Game {
   private zoneGroup: THREE.Group | null = null;
   /** The active district runtime, if the player is in one. */
   private city: CityRuntime | null = null;
+  /** Resolved on first travel to a district, and kept for its chunk streaming. */
+  private cityApi: CityApi | null = null;
 
   /**
    * Renderer-lifetime resources.
@@ -456,7 +460,7 @@ export class Game {
     // its geometry, materials and textures back rather than relying on
     // Game.dispose() remembering to.
     this.zones = new ZoneManager(WORLD_MANIFEST, {
-      buildZone: (zone, scope) => {
+      buildZone: async (zone, scope) => {
         if (zone.id === 'village_coast') {
           const world = new World(assets, preset);
           world.build();
@@ -474,14 +478,20 @@ export class Game {
           return;
         }
 
-        // A city district. Streamed chunks attach to this group; the skyline
-        // is always-resident dressing so the horizon does not end in sky.
+        // A city district. The runtime and its builder are a lazy chunk, and
+        // this is the one place that can pull them in: travel has already
+        // faded to black and is preparing the destination, so the fetch lands
+        // in a gap the player is waiting through either way.
+        const cityApi = (this.cityApi ??= await import('../world/zones/CitySubsystem'));
+
+        // Streamed chunks attach to this group; the skyline is
+        // always-resident dressing so the horizon does not end in sky.
         const group = new THREE.Group();
         group.name = `zone_${zone.id}`;
         this.scene.add(group);
         this.zoneGroup = group;
 
-        const city = new CityRuntime(zone, group);
+        const city = new cityApi.CityRuntime(zone, group);
         this.city = city;
         this.runtime = city;
         // A district has no keepsakes and no interior cell. Clearing this is
@@ -498,12 +508,14 @@ export class Game {
           'other',
           `zone-group:${zone.id}`,
         );
-        buildCitySkyline(zone, scope, group);
+        cityApi.buildCitySkyline(zone, scope, group);
       },
       buildChunk: (zone, chunk, scope) => {
-        // Authored zones never stream, so this only fires for districts.
-        if (!this.zoneGroup || !this.city) return;
-        const meshes = buildCityChunk(zone, chunk, scope, this.zoneGroup);
+        // Authored zones never stream, so this only fires for districts —
+        // which means `buildZone` has already resolved `cityApi` for this
+        // zone. The check is a type narrowing, not a race.
+        if (!this.zoneGroup || !this.city || !this.cityApi) return;
+        const meshes = this.cityApi.buildCityChunk(zone, chunk, scope, this.zoneGroup);
         // Solid geometry has to reach collision too, or the player falls
         // through a district that renders perfectly well.
         const city = this.city;
