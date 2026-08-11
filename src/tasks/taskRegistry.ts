@@ -39,6 +39,7 @@ import type { TaskDef } from './TaskDefinition';
 
 let byId: Map<string, TaskDef> = new Map();
 let jobs: readonly string[] = [];
+let activities: readonly string[] = [];
 let loading: Promise<void> | null = null;
 
 /**
@@ -49,6 +50,7 @@ let loading: Promise<void> | null = null;
 export function registerTasks(list: readonly TaskDef[]): void {
   byId = new Map(list.map((t) => [t.id, t]));
   jobs = list.filter((t) => t.kind === 'job').map((t) => t.id);
+  activities = list.filter((t) => t.kind === 'activity').map((t) => t.id);
 }
 
 /** Null until the catalogue has loaded, and for an id that does not exist. */
@@ -59,6 +61,19 @@ export function taskDef(id: string): TaskDef | null {
 /** The five paid jobs, in catalogue order. Empty until the catalogue loads. */
 export function jobIds(): readonly string[] {
   return jobs;
+}
+
+/**
+ * The unpaid-or-scored things to go and do, in catalogue order.
+ *
+ * Separate from `jobIds` rather than filtered by the caller, because the
+ * distinction is the one a player makes: a job is work somebody pays you for
+ * and an activity is a thing you choose to do. Phase 10 added six of these and
+ * they appeared in no list anywhere, which `docs/UI_INVENTORY.md` recorded as
+ * the last reachability gap.
+ */
+export function activityIds(): readonly string[] {
+  return activities;
 }
 
 /** Whether a lookup can currently succeed. Test-facing; nothing branches on it. */
@@ -88,5 +103,9 @@ export function loadTasks(): Promise<void> {
 export function resetTasksForTest(): void {
   byId = new Map();
   jobs = [];
+  // Added with `activityIds` and forgotten here, which `activityBoard.test.ts`
+  // caught on its first run. A reset that clears two of three lists is worse
+  // than none: the third keeps answering for a registry that is empty.
+  activities = [];
   loading = null;
 }

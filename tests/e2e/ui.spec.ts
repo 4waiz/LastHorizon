@@ -338,6 +338,37 @@ test.describe('remapping a key changes what the key does', () => {
   });
 });
 
+test.describe('the work board lists things to do', () => {
+  /**
+   * Phase 10's activities appeared in no list anywhere. This is the last
+   * entry on the reachability gap, so the test is about *finding* them:
+   * grouped separately from paid work, and each saying where it starts.
+   */
+  test('shows both groups, and where each one is taken on', async ({ page }) => {
+    const errors = watchConsole(page);
+    await boot(page);
+
+    await page.keyboard.press('p');
+    await expect(page.locator('#phone')).toBeVisible({ timeout: 20_000 });
+    await page.getByText('Work', { exact: true }).click();
+
+    await expect(page.locator('#phoneBody')).toContainText('Paid work');
+    await expect(page.locator('#phoneBody')).toContainText('Things to do');
+
+    // A named Phase 10 activity, and a place to go and start it.
+    await expect(page.locator('#phoneBody')).toContainText(/scenic|delivery|trial|race/i);
+    await expect(page.locator('.phone__rowWhere').first()).toBeVisible();
+
+    const wheres = await page.$$eval('.phone__rowWhere', (els) =>
+      els.map((e) => e.textContent ?? ''),
+    );
+    expect(wheres.length).toBeGreaterThan(6);
+    // None of them may fall back — that is a task the player cannot find.
+    for (const w of wheres) expect(w).not.toMatch(/somewhere about/i);
+    expect(errors).toEqual([]);
+  });
+});
+
 test.describe('photo mode', () => {
   async function enter(page: Page): Promise<void> {
     await page.keyboard.press('k');

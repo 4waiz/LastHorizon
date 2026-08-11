@@ -34,6 +34,20 @@ export interface PhoneJob {
   /** Completed runs, which is what the difficulty scales on. */
   readonly done: number;
   readonly active: boolean;
+  /**
+   * Paid work, or a thing you choose to do.
+   *
+   * The distinction is the one a player makes, so the list makes it too.
+   */
+  readonly kind: 'job' | 'activity';
+  /**
+   * Where it is taken on, in words.
+   *
+   * The whole point of listing these. Phase 10's six activities existed and
+   * appeared in no list anywhere; a list that names them and not where to find
+   * them would fix half the problem and be more annoying than either.
+   */
+  readonly where: string;
 }
 
 export interface PhoneContact {
@@ -180,24 +194,45 @@ export class Phone {
       </li>`).join('')}</ul>`;
   }
 
+  /**
+   * Work and things to do, in two groups.
+   *
+   * Activities were added in Phase 10 and listed nowhere at all — the last
+   * entry on the reachability gap in `docs/UI_INVENTORY.md`. They are a
+   * separate group rather than mixed in, because "what pays" and "what is
+   * there to do" are different questions, and each row says where it starts:
+   * a list that names six activities without saying where to find them fixes
+   * half the problem and is more irritating than neither half.
+   */
   private renderJobs(): void {
-    const jobs = this.d.jobs();
-    if (!jobs.length) {
+    const all = this.d.jobs();
+    if (!all.length) {
       this.body.innerHTML = empty('Nothing going today.');
       return;
     }
-    this.body.innerHTML = `<ul class="phone__list">${jobs.map((j) => `
+
+    const row = (j: PhoneJob) => `
       <li class="phone__row${j.active ? ' is-active' : ''}">
         <div class="phone__rowMain">
           <span class="phone__rowName">${esc(j.name)}</span>
           <span class="phone__rowNote">${esc(j.summary)}</span>
+          <span class="phone__rowWhere">${esc(j.where)}</span>
         </div>
         <div class="phone__rowSide">
-          <span class="phone__pay">$${j.pay}</span>
+          ${j.pay > 0 ? `<span class="phone__pay">$${j.pay}</span>` : ''}
           <span class="phone__rowNote">${j.active ? 'in progress' : `done ${j.done}×`}</span>
         </div>
-      </li>`).join('')}</ul>
-      <p class="phone__foot">Work is taken on at the place that offers it, not from here.</p>`;
+      </li>`;
+
+    const group = (title: string, list: readonly PhoneJob[]) =>
+      list.length
+        ? `<h3 class="phone__group">${title}</h3><ul class="phone__list">${list.map(row).join('')}</ul>`
+        : '';
+
+    this.body.innerHTML =
+      group('Paid work', all.filter((j) => j.kind === 'job')) +
+      group('Things to do', all.filter((j) => j.kind === 'activity')) +
+      `<p class="phone__foot">Both are taken on where they are offered, not from here.</p>`;
   }
 
   private renderContacts(): void {

@@ -75,7 +75,8 @@ import type { BuiltPoint } from '../world/interiors/InteriorBuilder';
 import { Economy } from '../economy/Economy';
 import { RENT_PERIOD_DAYS, SERVICE_FEES } from '../economy/PriceCatalog';
 import { TaskSystem, type StartRefusal } from '../tasks/TaskSystem';
-import { jobIds, loadTasks, taskDef } from '../tasks/taskRegistry';
+import { activityIds, jobIds, loadTasks, taskDef } from '../tasks/taskRegistry';
+import { startPointName } from '../tasks/TaskDefinition';
 import type { ServiceFailure, ServiceHost } from '../services/ServiceSystem';
 import type { DecorItemId } from '../services/ServiceCatalog';
 import type { KitPart } from '../world/interiors/InteriorKit';
@@ -2080,7 +2081,7 @@ export class Game {
     return {
       jobs: () => {
         const active = this.tasks.active;
-        return jobIds().map((id) => {
+        const entry = (id: string, kind: 'job' | 'activity') => {
           const def = taskDef(id);
           return {
             id,
@@ -2089,8 +2090,16 @@ export class Game {
             pay: def?.basePay ?? 0,
             done: this.tasks.completionsOf(id),
             active: active?.def.id === id,
+            kind,
+            where: startPointName(def?.startPoint),
           };
-        });
+        };
+        // Both lists, so Phase 10's six activities are findable. They were in
+        // no list anywhere until this.
+        return [
+          ...jobIds().map((id) => entry(id, 'job')),
+          ...activityIds().map((id) => entry(id, 'activity')),
+        ];
       },
       contacts: () => {
         // Only people actually met. An address book pre-filled with strangers

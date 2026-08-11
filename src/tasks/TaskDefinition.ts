@@ -140,3 +140,32 @@ export function validateTask(def: TaskDef): TaskValidation {
 
   return { ok: errors.length === 0, errors };
 }
+
+/**
+ * Where a task is taken on, in words a player can act on.
+ *
+ * The ids are interaction-point names — `airstrip_desk`, `trial_marker_a` —
+ * and slugging them mechanically would produce "trial marker a", which is
+ * true and useless.
+ *
+ * Here rather than in `Game` so `taskRegistry.test.ts` can assert that every
+ * start point in the catalogue has one. A task whose location reads
+ * "somewhere about" is a task the player cannot find, which is the exact
+ * problem that listing the activities was meant to solve.
+ */
+export const START_POINT_NAMES: Readonly<Record<string, string>> = {
+  village_noticeboard: 'The village noticeboard',
+  grocery_shift: 'Behind the grocery counter',
+  garage_desk: 'The garage desk',
+  garage_lift: 'The garage lift',
+  police_desk: 'The police station desk',
+  airstrip_desk: 'The airstrip office',
+  fishing_spot: 'The fishing spot on the coast',
+  trial_marker_a: 'The first time-trial marker',
+  race_gate_c: 'The road-race start gate',
+};
+
+export function startPointName(id: string | undefined): string {
+  if (!id) return 'Somewhere about';
+  return START_POINT_NAMES[id] ?? 'Somewhere about';
+}
