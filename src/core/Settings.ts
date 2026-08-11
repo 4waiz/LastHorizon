@@ -224,6 +224,19 @@ export interface SettingsState {
    */
   holdToAim: boolean;
   holdToRun: boolean;
+
+  /**
+   * Which map layers are drawn, keyed by `MapFilterKey`.
+   *
+   * A loose `Record<string, boolean>` rather than the union, for the same
+   * reason `bindings` is: `Settings` is loaded before the map panel exists
+   * and must not import from a lazy chunk to describe its own state. The map
+   * validates the keys it cares about and ignores the rest.
+   *
+   * Everything defaults on. A map that hides things until you find the
+   * setting is a map that looks broken.
+   */
+  mapFilters: Record<string, boolean>;
 }
 
 /**
@@ -303,6 +316,7 @@ export class Settings {
       // what most players expect; toggle is the accommodation, not the norm.
       holdToAim: true,
       holdToRun: true,
+      mapFilters: {},
       ...defaults,
       ...this.read(),
     };
@@ -402,6 +416,16 @@ export class Settings {
       }
       if (typeof parsed.holdToAim === 'boolean') out.holdToAim = parsed.holdToAim;
       if (typeof parsed.holdToRun === 'boolean') out.holdToRun = parsed.holdToRun;
+
+      // Per key, and only booleans. An absent key means "on", so a blob from
+      // an older build gains a new layer switched on rather than hidden.
+      if (parsed.mapFilters && typeof parsed.mapFilters === 'object') {
+        const f: Record<string, boolean> = {};
+        for (const [k, v] of Object.entries(parsed.mapFilters)) {
+          if (typeof v === 'boolean') f[k] = v;
+        }
+        out.mapFilters = f;
+      }
 
       return out;
     } catch {
@@ -526,6 +550,19 @@ export class Settings {
   /** Store a layout. Validation lives in `Keybindings`, not here. */
   setBindings(map: Record<string, string>): void {
     this.state.bindings = { ...map };
+    this.persist();
+    this.emit();
+  }
+
+  /** Is this map layer drawn? Absent means yes. */
+  mapFilter(key: string): boolean {
+    return this.state.mapFilters[key] !== false;
+  }
+
+  setMapFilter(key: string, on: boolean): void {
+    if (typeof key !== 'string' || typeof on !== 'boolean') return;
+    if (this.mapFilter(key) === on) return;
+    this.state.mapFilters = { ...this.state.mapFilters, [key]: on };
     this.persist();
     this.emit();
   }

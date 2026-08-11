@@ -128,16 +128,32 @@ export interface MapMarker extends MinimapPoint {
   readonly label?: string;
 }
 
-/** What the legend explains, and the colours everything is drawn in. */
+/**
+ * What the legend explains, the colours everything is drawn in, and which
+ * rows are **filters** rather than captions.
+ *
+ * `filter: null` means the row describes part of the map itself — roads,
+ * buildings, and you. Turning those off would not be a filter, it would be a
+ * blank page. Everything else is a layer a player may want out of the way,
+ * and the legend is where they say so: it is already the place you look to
+ * find out what a mark means, so it is the place to say "not that one".
+ */
 export const MAP_LEGEND = [
-  { key: 'road', colour: '#b9bcb6', label: 'Road' },
-  { key: 'building', colour: '#c08a72', label: 'Building' },
-  { key: 'keepsake', colour: '#e3a63e', label: 'Keepsake to find' },
-  { key: 'found', colour: '#9aa093', label: 'Keepsake found' },
-  { key: 'vehicle', colour: '#4f7fa8', label: 'Your vehicle' },
-  { key: 'garage', colour: '#6f9a72', label: 'Garage' },
-  { key: 'player', colour: '#4a463e', label: 'You' },
+  { key: 'road', colour: '#b9bcb6', label: 'Road', filter: null },
+  { key: 'building', colour: '#c08a72', label: 'Building', filter: null },
+  { key: 'keepsake', colour: '#e3a63e', label: 'Keepsake to find', filter: 'keepsake' },
+  { key: 'found', colour: '#9aa093', label: 'Keepsake found', filter: 'found' },
+  { key: 'vehicle', colour: '#4f7fa8', label: 'Your vehicle', filter: 'vehicle' },
+  { key: 'garage', colour: '#6f9a72', label: 'Garage', filter: 'garage' },
+  { key: 'player', colour: '#4a463e', label: 'You', filter: null },
 ] as const;
+
+/** The layers a player can switch off. Derived, so the two cannot drift. */
+export const MAP_FILTER_KEYS = MAP_LEGEND
+  .map((e) => e.filter)
+  .filter((f): f is Exclude<typeof f, null> => f !== null);
+
+export type MapFilterKey = (typeof MAP_FILTER_KEYS)[number];
 
 const COL = {
   ground: '#e6e6da',

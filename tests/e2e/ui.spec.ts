@@ -369,6 +369,67 @@ test.describe('the work board lists things to do', () => {
   });
 });
 
+test.describe('the map legend filters layers', () => {
+  async function openMap(page: Page): Promise<void> {
+    await page.keyboard.press('m');
+    await expect(page.locator('#mapLegend .mapp__filter').first()).toBeVisible({
+      timeout: 20_000,
+    });
+  }
+
+  test('makes the removable layers buttons and leaves the map itself alone', async ({ page }) => {
+    const errors = watchConsole(page);
+    await boot(page);
+    await openMap(page);
+
+    const rows = await page.$$eval('#mapLegend li', (els) =>
+      els.map((e) => ({
+        text: (e.textContent ?? '').trim(),
+        button: !!e.querySelector('button'),
+      })),
+    );
+
+    // Road, building and "you" describe the map; switching them off would be
+    // a blank page rather than a filter.
+    const plain = rows.filter((r) => !r.button).map((r) => r.text);
+    expect(plain).toEqual(expect.arrayContaining(['Road', 'Building', 'You']));
+    expect(rows.filter((r) => r.button).length).toBe(4);
+    expect(errors).toEqual([]);
+  });
+
+  test('toggles a layer off and back, and says so without colour', async ({ page }) => {
+    await boot(page);
+    await openMap(page);
+
+    const vehicle = page.locator('#mapLegend .mapp__filter', { hasText: 'Your vehicle' });
+    await expect(vehicle).toHaveAttribute('aria-pressed', 'true');
+
+    await vehicle.click();
+    await expect(vehicle).toHaveAttribute('aria-pressed', 'false');
+    // Struck through and dimmed, not merely a paler dot.
+    await expect(vehicle).toHaveClass(/is-off/);
+    const line = await vehicle
+      .locator('span')
+      .evaluate((el) => getComputedStyle(el).textDecorationLine);
+    expect(line).toContain('line-through');
+
+    await vehicle.click();
+    await expect(vehicle).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('remembers the choice across a reload', async ({ page }) => {
+    await boot(page);
+    await openMap(page);
+    await page.locator('#mapLegend .mapp__filter', { hasText: 'Garage' }).click();
+
+    await boot(page);
+    await openMap(page);
+    await expect(
+      page.locator('#mapLegend .mapp__filter', { hasText: 'Garage' }),
+    ).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
 test.describe('photo mode', () => {
   async function enter(page: Page): Promise<void> {
     await page.keyboard.press('k');

@@ -143,3 +143,47 @@
   font: inherit;
   font-size: 11px;
 }
+
+/* --- legend rows as filters ---------------------------------------------- */
+
+/* A legend row that switches a layer off. The rows that describe the map
+   itself — road, building, you — stay plain text, because turning those off
+   would not be a filter. */
+.mapp__filter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 2px var(--sp-1);
+  margin: -2px calc(var(--sp-1) * -1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.mapp__filter:hover {
+  background: var(--paper-dim);
+}
+
+.mapp__filter:focus-visible {
+  outline: 3px solid var(--accent-cool);
+  outline-offset: 1px;
+}
+
+/* Off is struck through and dimmed, not merely a paler dot. A filter you can
+   only read by comparing two shades of the same colour is the thing the Heat
+   numerals setting exists to argue against. */
+.mapp__filter.is-off {
+  opacity: 0.5;
+}
+
+.mapp__filter.is-off span {
+  text-decoration: line-through;
+}
+
+.mapp__filter.is-off i {
+  box-shadow: inset 0 0 0 99px var(--paper-dim);
+}

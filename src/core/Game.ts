@@ -2297,9 +2297,14 @@ export class Game {
 
     // Only in this zone. A marker for a car two districts away would sit on
     // the rim pointing at nothing.
+    // Same filters the map legend sets, so the radar and the map agree. Two
+    // surfaces disagreeing about whether a layer is on would be worse than
+    // neither having filters.
+    const showVehicles = this.settings.mapFilter('vehicle');
+
     const here = this.zones.activeZoneId;
     for (const v of this.garage.owned()) {
-      if (v.impounded || v.zone !== here) continue;
+      if (!showVehicles || v.impounded || v.zone !== here) continue;
       markers.push({ x: v.transform.x, z: v.transform.z, kind: 'vehicle' });
     }
 

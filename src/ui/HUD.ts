@@ -888,12 +888,60 @@ export class HUD {
   private loadMapApi(): Promise<typeof import('./MapPanel')> {
     this.mapApiLoading ??= import('./MapPanel').then((api) => {
       this.mapApi = api;
-      $('mapLegend').innerHTML = api.MAP_LEGEND.map(
-        (e) => `<li><i style="background:${e.colour}"></i>${e.label}</li>`,
-      ).join('');
+      this.buildLegend(api);
       return api;
     });
     return this.mapApiLoading;
+  }
+
+  /**
+   * The legend, as controls.
+   *
+   * Rows whose entry carries a `filter` become toggle buttons; the rest stay
+   * plain captions, because switching off "road" or "you" is not a filter, it
+   * is a blank page. The legend is already where a player looks to find out
+   * what a mark means, so it is the right place to say "not that one" — a
+   * separate filter menu would be a second list to keep in step with this
+   * one.
+   *
+   * Built rather than static because the entries and their colours live in
+   * `MapPanel`, which is lazy, and a hard-coded copy in `index.html` would be
+   * the drift this avoids.
+   */
+  private buildLegend(api: typeof import('./MapPanel')): void {
+    const host = $('mapLegend');
+    host.replaceChildren(
+      ...api.MAP_LEGEND.map((e) => {
+        const li = document.createElement('li');
+        const swatch = `<i style="background:${e.colour}"></i>`;
+
+        if (e.filter === null) {
+          li.innerHTML = `${swatch}${e.label}`;
+          return li;
+        }
+
+        const key = e.filter;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'mapp__filter';
+        btn.innerHTML = `${swatch}<span>${e.label}</span>`;
+        const sync = () => {
+          const on = this.settings.mapFilter(key);
+          btn.setAttribute('aria-pressed', String(on));
+          // Off is marked by strike-through and dimming, not by colour alone.
+          btn.classList.toggle('is-off', !on);
+        };
+        btn.addEventListener('click', () => {
+          this.settings.setMapFilter(key, !this.settings.mapFilter(key));
+          this.cb.onUiSound('click');
+          sync();
+          this.drawMapNow();
+        });
+        sync();
+        li.append(btn);
+        return li;
+      }),
+    );
   }
 
   /**
@@ -929,7 +977,13 @@ export class HUD {
       this.mapData,
       this.mapView,
       src.player,
-      src.markers,
+      // A found keepsake and one still out there are different layers, so the
+      // filter key comes from `found` as well as `kind`. `home` has no key
+      // and is always drawn — it is the one mark you cannot navigate without.
+      src.markers.filter((m) => {
+        const key = m.kind === 'keepsake' ? (m.found ? 'found' : 'keepsake') : m.kind;
+        return this.settings.mapFilter(key);
+      }),
       this.mapCanvas.width,
       this.mapCanvas.height,
     );
