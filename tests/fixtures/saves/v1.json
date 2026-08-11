@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "savedAt": 1754390000000,
+  "mode": "story",
+  "slot": "slot1",
+  "zone": "village_coast",
+  "spawnId": "default",
+  "player": {
+    "position": {
+      "x": 5.4,
+      "y": 2.1,
+      "z": -39.3
+    },
+    "facing": 1.57
+  },
+  "life": {
+    "ageYears": 16.5,
+    "yearProgress": 0.5,
+    "lastHandledAge": 16,
+    "rate": 60,
+    "activeSeconds": 5400
+  },
+  "world": {
+    "time": 0.42,
+    "mode": "cycle",
+    "day": 12
+  },
+  "money": 45,
+  "collectibles": [
+    "paper_plane",
+    "toy_boat"
+  ]
+}

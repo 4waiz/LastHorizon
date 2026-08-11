@@ -1,0 +1,167 @@
+name: Game bug
+description: Something in Last Horizon behaves wrongly, looks wrong, or stops working.
+title: '[bug] '
+labels: ['bug', 'needs triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The fields below are the ones that decide whether
+        a bug can be reproduced, and most reports that go stale go stale for
+        want of one of them — usually the browser or the save version.
+
+        **If the game showed you a "The game stopped" screen, press "Save a
+        diagnostic file" and attach it.** It carries the build, the browser,
+        where you were and what had loaded, and it is built on your device and
+        uploaded nowhere unless you attach it here. You can open it in a text
+        editor first; it contains no personal information and no save data.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+      placeholder: |
+        I walked into the grocery at 07:00 and the shop was dark and the
+        counter would not open. I expected it to be open — the sign said 07:00.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: >
+        Step by step, from a fresh page load if you can. "It happens sometimes"
+        is still worth reporting — say roughly how often instead.
+      placeholder: |
+        1. New Story Mode run
+        2. Work one grocery shift
+        3. Sleep at home
+        4. Walk to the grocery — the door refuses
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome / Chromium / Edge
+        - Firefox
+        - Safari
+        - Samsung Internet
+        - Other (say which below)
+    validations:
+      required: true
+
+  - type: input
+    id: browser-version
+    attributes:
+      label: Browser version
+      description: In the browser's About page. "Chrome 141" is enough.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options:
+        - Desktop or laptop
+        - Phone
+        - Tablet
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: device-detail
+    attributes:
+      label: Device and operating system
+      description: >
+        Model and OS if you know them. On a phone this matters more than
+        anywhere else — the mobile frame budget is the least verified thing in
+        the project and a model name is genuinely useful.
+      placeholder: 'Windows 11 desktop, RTX 3060 — or — Pixel 8, Android 15'
+
+  - type: dropdown
+    id: input-method
+    attributes:
+      label: How were you playing
+      multiple: true
+      options:
+        - Keyboard and mouse
+        - Touch
+        - Gamepad
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Story Mode
+        - Free Roam
+        - Did not get that far
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Game version and build
+      description: >
+        At the bottom of the credits (the ⓘ tile), or the `version` and `built`
+        fields of a diagnostic file. "0.1.0 / 172aef0" is the shape.
+    validations:
+      required: true
+
+  - type: input
+    id: save-version
+    attributes:
+      label: Save version
+      description: >
+        The `version` field if you export a save (pause → export). Leave blank
+        if the bug happened before you had a save.
+      placeholder: '5'
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic file or console output
+      description: >
+        Attach the diagnostic JSON if you have one. Otherwise, open the
+        browser console (F12) and paste any red errors. Please do not paste a
+        whole save file into a public issue.
+      render: text
+
+  - type: dropdown
+    id: blocking
+    attributes:
+      label: Does this block progress
+      description: >
+        A bug that makes the story impossible to finish is the highest
+        priority in the project, and criterion 4 of the release is that none
+        is known.
+      options:
+        - 'No — it is cosmetic or I could work around it'
+        - 'Yes — I cannot continue the story or the run'
+        - 'It lost progress or corrupted a save'
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I reloaded the page and it still happens
+        - label: >
+            I checked docs/KNOWN_LIMITATIONS.md and this is not already listed
+          required: false

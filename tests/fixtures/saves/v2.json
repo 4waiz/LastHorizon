@@ -1,0 +1,92 @@
+{
+  "version": 2,
+  "contentVersion": 1,
+  "savedAt": 1754390000000,
+  "mode": "story",
+  "slot": "slot1",
+  "zone": "village_coast",
+  "spawnId": "default",
+  "player": {
+    "position": {
+      "x": 5.4,
+      "y": 2.1,
+      "z": -39.3
+    },
+    "facing": 1.57
+  },
+  "life": {
+    "ageYears": 16.5,
+    "yearProgress": 0.5,
+    "lastHandledAge": 16,
+    "rate": 60,
+    "activeSeconds": 5400
+  },
+  "world": {
+    "time": 0.42,
+    "mode": "cycle",
+    "day": 12
+  },
+  "story": {
+    "chapter": 2,
+    "chapterSeconds": 300,
+    "totalSeconds": 5400,
+    "completedChapters": [
+      "chapter_1"
+    ],
+    "quests": {}
+  },
+  "money": 45,
+  "inventory": [
+    {
+      "id": "bread",
+      "count": 2
+    },
+    {
+      "id": "bicycle_key",
+      "count": 1
+    }
+  ],
+  "wardrobe": {
+    "shirt": "#efede2",
+    "trousers": "#9b8fc7",
+    "hat": "#dcc177",
+    "hatOn": true
+  },
+  "vehicles": [
+    {
+      "id": "bike_1",
+      "kind": "bicycle",
+      "zone": "village_coast",
+      "position": {
+        "x": 8.1,
+        "y": 2,
+        "z": -35
+      },
+      "facing": 0.4,
+      "impounded": false
+    }
+  ],
+  "needs": {
+    "hunger": 0.72,
+    "energy": 0.61,
+    "cleanliness": 0.88,
+    "mood": 0.7
+  },
+  "relationships": [
+    {
+      "npcId": "maryam",
+      "familiarity": 0.6,
+      "trust": 0.45,
+      "affection": 0.2,
+      "fear": 0,
+      "respect": 0.3
+    }
+  ],
+  "collectibles": [
+    "paper_plane",
+    "toy_boat"
+  ],
+  "unlockedZones": [
+    "village_coast"
+  ]
+}
