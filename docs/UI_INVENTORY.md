@@ -227,8 +227,21 @@ lazy-chunk fetch timing **read off the network** rather than off file names,
 stylesheet-applied-before-reveal, forty open/close cycles returning the DOM
 node count, and zero console errors throughout.
 
-Still missing: a touch run, a gamepad run, a full accessibility snapshot
-across every screen, and a DevTools heap and audio-node pass.
+All three input paths are now evidenced, across three spec files:
+
+| File | Covers |
+| --- | --- |
+| `tests/e2e/ui.spec.ts` | Keyboard-only reach, tab strips, the Escape cascade, remapping end to end, lazy-chunk fetch timing, forty open/close cycles |
+| `tests/e2e/touch.spec.ts` | Emulated iPhone 13, real touch events: on-screen controls, tap-to-open and tap-to-close, a setting operated by tap, no sideways scroll, rotation |
+| `tests/e2e/access.spec.ts` | Roles and accessible names on every screen; gamepad seen, moving the character, leaving a panel, and unplugging mid-session |
+
+**The gamepad test found a real bug.** `Enter` is a fixed alternate for
+`interact`, the key listener is on `window`, and it called `preventDefault()`
+— so tabbing to a HUD tile and pressing Enter did nothing at all. Fixed by
+having `InputManager` ignore presses aimed at a button, link, form control or
+contenteditable.
+
+Still missing: a DevTools heap snapshot and an audio-node count.
 
 ---
 
