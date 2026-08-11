@@ -197,6 +197,9 @@ const LAZY_CHUNK_PREFIXES = [
   // `AssetManager.loadAll()` and it resolves during the 1.4 MB of GLB. Moved
   // rather than raised, which is the rule.
   'VillageSubsystem-',
+  // Phase 11. Carrying, record and property, opened with I. The sixth panel
+  // to follow the pattern.
+  'LifePanel-',
 ];
 
 const isLazyChunk = (name) => LAZY_CHUNK_PREFIXES.some((p) => name.startsWith(p));

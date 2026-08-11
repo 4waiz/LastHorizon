@@ -51,6 +51,7 @@ export class InputManager {
   private mapQueued = false;
   private journalQueued = false;
   private phoneQueued = false;
+  private lifeQueued = false;
   private interactQueued = false;
   /** Touch or gamepad interact, which have no entry in `keys`. */
   private pointerInteractHeld = false;
@@ -178,6 +179,13 @@ export class InputManager {
       }
       if (code === 'KeyP') {
         this.phoneQueued = true;
+        e.preventDefault();
+      }
+      // I for "inventory", which is where a player's hand goes first. The
+      // panel is more than an inventory — record and property too — but the
+      // key somebody presses looking for their pockets should open it.
+      if (code === 'KeyI') {
+        this.lifeQueued = true;
         e.preventDefault();
       }
       if (code === 'KeyQ') {
@@ -425,6 +433,13 @@ export class InputManager {
   consumePhone(): boolean {
     if (!this.phoneQueued) return false;
     this.phoneQueued = false;
+    return true;
+  }
+
+  /** True once per press of I. Opens or closes carrying/record/property. */
+  consumeLife(): boolean {
+    if (!this.lifeQueued) return false;
+    this.lifeQueued = false;
     return true;
   }
 

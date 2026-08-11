@@ -270,8 +270,10 @@ export class HUD {
       });
     };
     backdrop($('phone'), () => this.openPhone(false));
+    backdrop($('life'), () => this.openLife(false));
     backdrop(this.info, () => this.settingsPanel.set(false));
     $('phoneClose').addEventListener('click', () => this.openPhone(false));
+    $('lifeClose').addEventListener('click', () => this.openLife(false));
     $('infoClose').addEventListener('click', () => this.settingsPanel.set(false));
 
     window.addEventListener('keydown', (e) => {
@@ -282,6 +284,7 @@ export class HUD {
       // has nothing to close.
       if (!this.mapPanel.hidden) this.openMap(false);
       else if (this.phonePanel.open) this.openPhone(false);
+      else if (this.lifePanel.open) this.openLife(false);
       else if (this.settingsPanel.open) this.settingsPanel.set(false);
       else if (this.pausePanel.open) this.openPause(false);
       else if (document.pointerLockElement) document.exitPointerLock();
@@ -354,6 +357,33 @@ export class HUD {
   openPhone(open: boolean): void {
     if (open && !this.phoneDeps) return;
     this.phonePanel.set(open);
+  }
+
+  // -- carrying, record and property ----------------------------------------
+  private lifeDeps: import('./LifePanel').LifeDeps | null = null;
+  private readonly lifePanel = new LazyPanel({
+    element: $('life'),
+    load: async () => new (await import('./LifePanel')).LifePanel(this.lifeDeps!),
+    onOpen: (p) => p.open(),
+    transitionClass: 'is-on',
+    afterShow: () => this.input.releaseAll(),
+  });
+
+  setLifeDeps(deps: import('./LifePanel').LifeDeps): void {
+    this.lifeDeps = deps;
+  }
+
+  get lifeOpen(): boolean {
+    return this.lifePanel.open;
+  }
+
+  toggleLife(): void {
+    if (this.lifeDeps) this.lifePanel.toggle();
+  }
+
+  openLife(open: boolean): void {
+    if (open && !this.lifeDeps) return;
+    this.lifePanel.set(open);
   }
 
   private readonly settingsPanel = new LazyPanel({

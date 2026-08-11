@@ -62,7 +62,7 @@ import {
 } from '../interaction/WorldInteractables';
 import { Environment } from '../world/Environment';
 import { Player } from '../player/Player';
-import { Inventory, Equipment, type EquipSlot } from '../player/Inventory';
+import { Inventory, Equipment, itemDef, type EquipSlot } from '../player/Inventory';
 import { Needs } from '../player/Needs';
 import { DEFAULT_CAMERA, ThirdPersonCamera } from '../camera/ThirdPersonCamera';
 import { ContactShadow } from '../graphics/StylizedShadows';
@@ -681,6 +681,7 @@ export class Game {
     // The phone's data sources, handed over once the HUD exists. Without this
     // `openPhone` refuses rather than showing an empty handset.
     this.hud.setPhoneDeps(this.phoneDeps());
+    this.hud.setLifeDeps(this.lifeDeps());
     this.hud.setPauseDeps(this.pauseDeps());
     this.hud.syncOutfit(this.player.outfit);
     this.hud.setCounter(this.village!.collectibles.count, this.village!.collectibles.total);
@@ -2093,6 +2094,107 @@ export class Game {
     };
   }
 
+  /**
+   * Carrying, record and property, for `LifePanel`.
+   *
+   * Closes the reachability gap §4 of `docs/UI_INVENTORY.md` names: weapons,
+   * Heat and arrest had HUD readouts and no screen, and the aeroplane had no
+   * interface at all outside the test bridge.
+   *
+   * Reads live state through a narrow interface, exactly like `phoneDeps`.
+   * The panel gets flattened data and no handle on `Inventory`, `Heat` or the
+   * registry — it can render a fine, not forgive one.
+   */
+  private lifeDeps(): import('../ui/LifePanel').LifeDeps {
+    return {
+      carrying: () =>
+        this.inventory.toJSON().map((stack) => {
+          const def = itemDef(stack.id);
+          const slot = def?.slot;
+          const worn = slot !== undefined && this.equipment.equippedId(slot) === stack.id;
+          return {
+            id: stack.id,
+            name: def?.name ?? stack.id,
+            count: stack.count,
+            kind: def?.kind ?? 'other',
+            ...(def?.colour !== undefined ? { colour: def.colour } : {}),
+            // A hat that is in the wardrobe but switched off is not being
+            // worn, whatever the slot says.
+            equipped: worn && (slot !== 'hat' || this.equipment.hatOn),
+            equippable: slot !== undefined,
+            removable: slot === 'hat',
+          };
+        }),
+      equip: (id) => {
+        if (!this.equipment.equip(id)) return false;
+        // Putting a hat on is what choosing one means. Otherwise picking a hat
+        // from the list would change a colour nobody can see.
+        if (itemDef(id)?.slot === 'hat') this.equipment.setHatOn(true);
+        this.player.setOutfit(this.equipment.toOutfit());
+        return true;
+      },
+      unequip: (id) => {
+        // Only the hat comes off; the other two slots are never empty. See
+        // `CarriedItem.removable`.
+        if (itemDef(id)?.slot !== 'hat') return false;
+        this.equipment.setHatOn(false);
+        this.player.setOutfit(this.equipment.toOutfit());
+        return true;
+      },
+      use: (id) => {
+        const def = itemDef(id);
+        if (!def?.restores || !this.inventory.has(id)) return false;
+        this.inventory.remove(id, 1);
+        this.needs.restoreMany(def.restores);
+        this.hud.showToast(def.name, 'That is better.');
+        return true;
+      },
+      record: () => {
+        const heat = this.combat?.heat ?? null;
+        return {
+          entries: heat?.record.map((r) => ({ crime: r.crime, heat: r.heat })) ?? [],
+          arrests: heat?.arrests ?? 0,
+          finesOwed: this.combatState.finesOwed,
+          heatLevel: heat?.level ?? 0,
+          impounded: this.garage
+            .owned()
+            .filter((v) => v.impounded)
+            .map((v) => v.kind),
+        };
+      },
+      owned: () => {
+        const out: Array<import('../ui/LifePanel').OwnedThing> = [];
+        for (const v of this.garage.owned()) {
+          out.push({
+            id: v.id,
+            name: v.kind,
+            status: v.impounded ? 'In the pound' : `Parked · ${v.zone.replace(/_/g, ' ')}`,
+            kind: 'vehicle',
+          });
+        }
+        // The aeroplane is not in the registry — it is one aircraft with its
+        // own state, and `FlightState` is the eager half that knows where it
+        // is parked without the flight chunk being present.
+        if (this.unlockedZones.has('hill_airstrip')) {
+          const p = this.flightState.parked;
+          out.push({
+            id: 'plane',
+            name: 'Light aircraft',
+            status: this.flightState.airborne
+              ? 'In the air'
+              : p
+                ? `On the ground · ${Math.round(p.x)}, ${Math.round(p.z)}`
+                : 'On the apron',
+            kind: 'aircraft',
+          });
+        }
+        return out;
+      },
+      money: () => this.economy.wallet.cash,
+      toast: (title, body) => this.hud.showToast(title, body),
+    };
+  }
+
   /** Flying, flattened for the bridge. Never a handle on the director. */
   private flightSnapshot(): import('./TestMode').FlightSnapshotData {
     const f = this.flight;
@@ -2280,6 +2382,7 @@ export class Game {
       this.panels.openJournal(open, open ? (this.director?.journal() ?? []) : []);
     }
     if (this.input.consumePhone()) this.hud.togglePhone();
+    if (this.input.consumeLife()) this.hud.toggleLife();
 
     this.hud.setWallet(this.economy.wallet.cash);
 
