@@ -35,6 +35,12 @@ export function swState(): SwState {
   return state;
 }
 
+/** Test-only: forget the registration so a suite can drive this twice. */
+export function resetServiceWorkerForTest(): void {
+  registration = null;
+  state = 'unsupported';
+}
+
 function showBanner(id: string, show: boolean): void {
   const el = $(id);
   if (el) el.hidden = !show;
@@ -94,7 +100,13 @@ function watchConnectivity(): void {
  * it simply is not offline-capable.
  */
 export function registerServiceWorker(): void {
-  if (!('serviceWorker' in navigator) || !window.isSecureContext) {
+  // Check the *value*, not just the key. `'serviceWorker' in navigator` is
+  // true for a property that exists and is undefined, which is exactly what a
+  // browser with the API stubbed out looks like — and the guard then falls
+  // through to `navigator.serviceWorker.register` and throws a TypeError
+  // during boot. Firefox's private-browsing mode is the realistic case: the
+  // property is present and unusable.
+  if (!navigator.serviceWorker || !window.isSecureContext) {
     state = 'unsupported';
     return;
   }
@@ -102,7 +114,7 @@ export function registerServiceWorker(): void {
   watchConnectivity();
   state = 'registering';
 
-  window.addEventListener('load', () => {
+  const go = (): void => {
     // Relative, so the game works when deployed in a subdirectory as well as
     // at a domain root — which is the difference between kanbanstudios.ae/game
     // and game.kanbanstudios.ae, and both are on the table.
@@ -119,7 +131,22 @@ export function registerServiceWorker(): void {
         state = 'failed';
         console.warn('[LastHorizon] service worker registration failed', err);
       });
-  });
+  };
+
+  // **Check `readyState` first — a `load` listener added after `load` has
+  // fired never runs.**
+  //
+  // The first version of this waited unconditionally on the event, and the
+  // call site is at the end of `boot()`, which is `async` and awaits ~1.4 MB
+  // of GLB. `load` fires long before that resolves, so the listener was always
+  // registered too late and the worker was **never installed at all** — no
+  // offline play, no update prompt, and no error to say so.
+  //
+  // The deferral itself is still right: registration should not compete for
+  // bandwidth with the assets the loading screen is waiting on. It is just
+  // that by the time this is called, the deferral has already happened.
+  if (document.readyState === 'complete') go();
+  else window.addEventListener('load', go, { once: true });
 }
 
 /** Test-facing: ask the browser to look for a new build. */

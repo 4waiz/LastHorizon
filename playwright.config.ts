@@ -1,6 +1,30 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * The preview port, overridable with `LH_TEST_PORT`.
+ *
+ * 4173 stays the default, so nothing about a normal run changes. The override
+ * exists because `reuseExistingServer: false` — correct, and the fix for a
+ * server that served a two-commit-old build — turns a fixed port into a lock
+ * that two runs cannot share.
+ *
+ * That is not hypothetical. Two Claude Code sessions working this repository at
+ * once both ran the suite; each started `vite preview` on 4173 and each tore
+ * "its" server down at the end, killing the other's mid-run. The symptom is
+ * `net::ERR_CONNECTION_REFUSED` partway through, and the failure *before* that
+ * point is worse than the crash: the page loads and its stylesheet does not, so
+ * tests report "the dashboard is unstyled" against CSS that is demonstrably in
+ * the bundle. Sixty-three failures that were entirely about the port.
+ *
+ * The same applies to any two runs on one machine — two terminals, a watch
+ * mode beside a full run, or a CI runner with two jobs on one host.
+ *
+ *     LH_TEST_PORT=4273 npm run test:e2e
+ */
+const PORT = Number(process.env.LH_TEST_PORT ?? 4173);
+const BASE_URL = `http://localhost:${PORT}`;
+
+/**
  * Smoke tests run against the *production* preview build, not the dev server,
  * so what CI exercises is what ships. `?e2e=1` installs the deterministic
  * bridge the specs drive.
@@ -37,7 +61,7 @@ export default defineConfig({
   expect: { timeout: 20_000 },
 
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: BASE_URL,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'off',
@@ -68,8 +92,8 @@ export default defineConfig({
    * this pays ~3 s of startup per run to be sure.
    */
   webServer: {
-    command: 'npm run preview -- --port 4173 --strictPort',
-    url: 'http://localhost:4173',
+    command: `npm run preview -- --port ${PORT} --strictPort`,
+    url: BASE_URL,
     reuseExistingServer: false,
     timeout: 120_000,
   },

@@ -1,6 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
+ * Same overridable port as `playwright.config.ts` — see the note there. Two
+ * concurrent runs on one machine cannot share a fixed port once
+ * `reuseExistingServer` is false, and the failure looks like the app being
+ * broken rather than the port being taken.
+ */
+const PORT = Number(process.env.LH_TEST_PORT ?? 4173);
+const BASE_URL = `http://localhost:${PORT}`;
+
+/**
  * The long-running layers: soak and performance.
  *
  * Separate from the functional suite because they are minutes rather than
@@ -29,15 +38,15 @@ export default defineConfig({
   timeout: 15 * 60_000,
   expect: { timeout: 30_000 },
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: BASE_URL,
     trace: 'off',
     video: 'off',
   },
   projects: [{ name: 'long', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'npm run preview -- --port 4173 --strictPort',
-    url: 'http://localhost:4173',
-    reuseExistingServer: !process.env.CI,
+    command: `npm run preview -- --port ${PORT} --strictPort`,
+    url: BASE_URL,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });
