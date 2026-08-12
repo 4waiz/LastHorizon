@@ -127,3 +127,50 @@ consecutive phases, which is why this script exists.`);
 }
 
 console.log('\nEvery chunk is deliberately eager or deliberately lazy.');
+
+// ---------------------------------------------------------------------------
+// The stylesheet must parse to the end.
+//
+// Phase 12 merged two branches that had both appended to `src/style.css`, and
+// the conflict was resolved by deleting the three marker lines by number. One
+// of those numbers was also the closing `}` of an `@media` block, so from that
+// point on the file was one unterminated rule — and a CSS parser does not fail
+// loudly. It silently drops everything after the error.
+//
+// The build succeeded. `grep` still found `.dash{position:absolute}` in the
+// output, because the *bytes* were all there. What was gone was the browser's
+// ability to reach them: `document.styleSheets[0].cssRules` held 159 rules
+// where the file describes 181, and every rule after the break — the whole
+// vehicle dashboard and flight instrument set — matched nothing.
+//
+// Two end-to-end tests caught it, which is the system working. This is the
+// cheaper check: an unbalanced brace is a build failure, not a mystery two
+// hours later.
+const cssFiles = existsSync(assetsDir)
+  ? readdirSync(assetsDir).filter((f) => f.endsWith('.css'))
+  : [];
+
+const unbalanced = [];
+for (const name of cssFiles) {
+  const src = readFileSync(join(assetsDir, name), 'utf8');
+  // Minified output has no comments or newlines to confuse this, and CSS
+  // string literals containing braces are vanishingly rare — a false positive
+  // here is a five-second look at one file.
+  const open = (src.match(/{/g) ?? []).length;
+  const close = (src.match(/}/g) ?? []).length;
+  if (open !== close) unbalanced.push(`${name}: ${open} "{" vs ${close} "}"`);
+}
+
+if (unbalanced.length) {
+  console.error('\nUNBALANCED STYLESHEET:');
+  for (const u of unbalanced) console.error(`  - ${u}`);
+  console.error(`
+A CSS parser drops every rule after an unterminated block and reports
+nothing. The bytes stay in the file, so grep still finds the selector you
+are looking for while the browser cannot see it.
+
+Look for a missing "}" — a bad merge resolution is the usual cause.`);
+  process.exit(1);
+}
+
+console.log(`Stylesheets balanced (${cssFiles.length} checked).`);

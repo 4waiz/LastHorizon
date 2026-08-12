@@ -1487,6 +1487,7 @@ body:has(#touch:not([hidden])) .minimap {
     bottom: auto;
     top: max(var(--sp-2), var(--safe-t));
   }
+}
 
 /* ===========================================================================
    Vehicle dashboard and flight instruments
