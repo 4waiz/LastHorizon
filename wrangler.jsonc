@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "lasthorizon",
+  "compatibility_date": "2026-08-01",
+  // Static-only deployment: no `main`, so Cloudflare serves dist/ directly off
+  // the asset worker and never spins up a script. `npm run build` writes dist/,
+  // which is gitignored — build before every deploy.
+  "assets": {
+    "directory": "./dist",
+    // The game is one page; any unknown path should still boot it rather than
+    // 404, which is also what the service worker's navigation fallback assumes.
+    "not_found_handling": "single-page-application"
+  }
+}
