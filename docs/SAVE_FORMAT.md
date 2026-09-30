@@ -1,6 +1,6 @@
 # Save format reference
 
-**Current schema version: 4.** Content version: 1.
+**Current schema version: 5.** Content version: 1.
 Source of truth: [`src/save/SaveSchema.ts`](../src/save/SaveSchema.ts).
 
 ---
@@ -167,6 +167,54 @@ Absent and empty mean the same thing to `StoryState.restore`, and absent is the
 honest record: a v3 save did not have a story, so it does not get one invented.
 The player picks it up at chapter 1 with whatever money, vehicles and
 friendships they had already earned.
+
+### v4 → v5
+
+Phase 9's optional systems, and it adds exactly one optional field: `combat`.
+
+Two serialised blobs — what the player carries, and what the police know —
+borrowed from `CombatState` rather than restated, for the reason this file
+gives at length above. A v4 save is left **without** it rather than given an
+empty record: absent and empty mean the same thing to `CombatState.restore`,
+and absent is the honest one. A player who never drew a weapon does not get a
+criminal record invented for them.
+
+---
+
+## Fixtures
+
+`tests/fixtures/saves/v1.json` … `v5.json`, one per version this game has
+ever written, walked to the current schema by
+`tests/saveMigrationFixtures.test.ts` on every commit.
+
+They are **hand-authored and frozen**: written from the interfaces at the
+version each claims, with a fixed `savedAt` so they are byte-identical on
+every machine and a diff means somebody edited one. Regenerating them from the
+current code would make the test circular — it would prove only that the
+migrations agree with themselves.
+
+Writing them found the first draft encoding an economy shape no build ever
+wrote (`paidAwards` where the field is `awards`), which is exactly the kind
+of thing a fixture is for.
+
+**When `CURRENT_SAVE_VERSION` next goes up, add `v<n>.json`.** A count
+assertion fails until you do.
+
+---
+
+## The service worker reads this number
+
+`scripts/vite-plugin-pwa.ts` parses `CURRENT_SAVE_VERSION` out of
+`SaveSchema.ts` and puts it in the service worker's cache name:
+
+```
+lh-0.1.0-172aef0-s5-f1
+                  ^^ this file
+```
+
+So a schema bump orphans every previously cached build by construction. It is
+read rather than restated because a second copy is a second thing to forget to
+bump, and the cost of forgetting is a cached old build handed a new save.
 
 ---
 

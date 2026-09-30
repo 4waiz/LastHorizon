@@ -92,10 +92,10 @@ consequences, completes a meaningful story, flies a small plane, sees a
 personal Life Reel, and continues in Free Roam — with no launcher and no
 broken state.
 
-## Where Phase 8 leaves this
+## Where 0.1.0 leaves this
 
-Eight of the twelve phases are done, and the promise at the top of this
-document is now a thing you can play from one end to the other.
+All twelve phases are done, and the promise at the top of this document is a
+thing you can play from one end to the other.
 
 | Phase | What it added | Report |
 | --- | --- | --- |
@@ -106,17 +106,31 @@ document is now a thing you can play from one end to the other.
 | 5 | Five ground vehicles on Rapier, ownership, garages | [05](PHASE_05_REPORT.md) |
 | 6 | Twenty residents, schedules, navmesh, traffic, relationships | [06](PHASE_06_REPORT.md) |
 | 7 | Nine enterable buildings, the economy, five job loops | [07](PHASE_07_REPORT.md) |
-| 8 | **The authored story, ages 15–25, and the Life Reel** | [08](PHASE_08_REPORT.md) |
+| 8 | The authored story, ages 15–25, and the Life Reel | [08](PHASE_08_REPORT.md) |
+| 9 | Police, optional combat, and an original Heat model | [09](PHASE_09_REPORT.md) |
+| 10 | An aeroplane, an edge of the world, six activities | [10](PHASE_10_REPORT.md) |
+| 11 | Design tokens, accessibility, the phone, pause, true credits | [11](PHASE_11_REPORT.md) |
+| 12 | **Production hardening: offline, security, the release gate** | [0.1.0](RELEASE_REPORT_0.1.0.md) |
 
-A player can now start at fifteen in the village, find the five keepsakes, work
-for money, earn a bicycle and then a licence, leave for the city at eighteen,
-rent a room, take a job, build a name honestly or otherwise, answer what the
-road costs, and be handed a card at twenty-five that says what they became.
+## The success test, answered
 
-**Still to come:** police and optional combat (9), aircraft and activities
-(10), the full interface, audio and accessibility pass (11), and production
-hardening (12).
+> A new player opens a link, starts in the village, collects the five
+> keepsakes, ages from 15 to 18 through real play, earns and drives vehicles,
+> moves to the city, enters useful buildings, buys groceries, works jobs,
+> builds relationships, chooses legal or criminal actions, experiences fair
+> police consequences, completes a meaningful story, flies a small plane, sees
+> a personal Life Reel, and continues in Free Roam — with no launcher and no
+> broken state.
 
-The pillar most at risk is still **"every building has a purpose"** — nine
-building types exist and the city districts have none of them yet. That is
-recorded at the end of both the Phase 7 and Phase 8 reports.
+**Every clause of that is true, with one qualification and one caveat.**
+
+The qualification is *"enters useful buildings"*: nine building types are
+enterable and every one of them is in the village. The city districts have
+streets, traffic and people, and no doors. That is the pillar most at risk —
+"every building has a purpose" — and it has been flagged at the end of the
+Phase 7, 8 and 12 reports rather than quietly dropped.
+
+The caveat is that the whole loop is proved in pieces rather than as one
+continuous played run. Both story routes are walked end to end on every commit
+and every objective kind has a proven reporter, but part of that walk still
+reports objectives by id. See `docs/KNOWN_LIMITATIONS.md` §7.

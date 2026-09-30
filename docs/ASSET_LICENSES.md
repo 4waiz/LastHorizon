@@ -190,3 +190,50 @@ means, but both are redistributed in `dist/`, so both belong here.
    ordinary props, vegetation, markers and effects.
 3. Never use assets ripped from a commercial game.
 4. Check it against `docs/PERFORMANCE_BUDGETS.md`.
+
+
+---
+
+## Phase 12 added no assets, and re-measured the ones there are
+
+Checked rather than assumed, which is what this document exists for — it has
+been wrong twice, both times about a size.
+
+The release-hardening phase added a crash screen, a CSP, a service worker, an
+import guard and five test layers. Not one model, texture, sound or font. The
+crash screen and the two PWA banners are DOM and CSS; the manifest reuses
+`icon.png`, and declares one 512 px source for both the `any` and
+`maskable` purposes rather than shipping three near-identical PNGs to satisfy
+a lint rule.
+
+Re-measured on 2026-08-11 against `public/assets/models/`:
+
+| File | Size |
+| --- | --- |
+| `buildings.glb` | 362.3 kB |
+| `player.glb` | 369.8 kB |
+| `vehicles.glb` | 173.9 kB |
+| `interior_kit.glb` | 149.0 kB |
+| `nature.glb` | 114.8 kB |
+| `props.glb` | 102.4 kB |
+| `collectibles.glb` | 39.2 kB |
+| `weapons.glb` | 66.7 kB |
+| `aircraft.glb` | 59.9 kB |
+
+Audio is unchanged: `outdoor.mp3` 577.6 kB,
+`indoor.mp3` 1130.2 kB.
+
+**One thing about `indoor.mp3` did change, and it is not the file.** It was
+being preloaded by every player on every first visit whether or not they ever
+went indoors — 1.1 MB of interior music downloaded by somebody who never opened
+a door. It now loads on the first trip inside, alongside the interior kit it
+shares a fade with. See `docs/PERFORMANCE_BUDGETS.md`.
+
+### The GSAP note still stands
+
+GSAP is free to use under GreenSock's standard licence and **is not an OSI
+open-source licence**. Its terms differ for paid products. The in-game credits
+say so explicitly rather than rounding it to "open source", which would be a
+licensing statement rather than a typo. **Confirm the current terms against the
+intended commercial model before a public release.** Flagged since Phase 11,
+and still not resolved.

@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite';
 import { fileURLToPath, URL } from 'node:url';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { lastHorizonPwa, currentSaveVersion } from './scripts/vite-plugin-pwa';
 
 /**
  * Build identity: the version a player sees, and the commit that produced it.
@@ -138,7 +139,17 @@ function shotSink(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [shotSink()],
+  plugins: [
+    shotSink(),
+    // Build-only, by `apply: 'build'` inside the plugin. A service worker on
+    // the dev server serves yesterday's module to a hot reload, which is a
+    // bad afternoon and teaches you nothing about production.
+    lastHorizonPwa({
+      version: pkg.version,
+      build: buildId(),
+      saveSchema: currentSaveVersion(),
+    }),
+  ],
   define: {
     __LH_VERSION__: JSON.stringify(pkg.version),
     __LH_BUILD__: JSON.stringify(buildId()),

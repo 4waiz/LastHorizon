@@ -1,78 +1,219 @@
 # Known limitations
 
-Things that are deliberately unfinished, deliberately weaker than they look,
-or blocked on something outside this repository. Written down so they are
-limitations rather than surprises.
-
 *A Kanban Studios game — kanbanstudios.ae. Game Developer: Awaiz Ahmed.*
+
+**Everything the release does not do, in one place.** Carried forward from the
+phase reports rather than re-derived, and re-checked against the repository on
+2026-08-11.
+
+Two things this list is not. It is not a roadmap — several entries are
+deliberate and will stay. And it is not softened: where a phase report said
+"not done", this says not done.
 
 ---
 
-## Content Security Policy
+## 1. Progress-blocking
 
-The policy is delivered by a `<meta http-equiv>` element in `index.html`
-because the game ships as static files with no server of its own. That is a
-real constraint, not a preference, and it has three consequences.
+**None known.** That is the release's fourth acceptance criterion, and it is
+the one claim here with no qualifier. Both story routes are walked end to end
+on every commit — the legal one and the criminal one — and every objective
+*kind* has a proven reporter.
 
-### `frame-ancestors` cannot be set from the page
+## 2. Verification gaps — what has not been measured
 
-The spec requires a `<meta>`-delivered policy to ignore `frame-ancestors`,
-`report-uri` and `sandbox`. Browsers ignore it *and* log a warning, which is a
-console message in normal play — not allowed here, and caught by
-`tests/e2e/smoke.spec.ts` on the first run after the policy landed. It has
-been removed from the meta tag.
+These are the entries most likely to hide a real problem, so they come first.
 
-**The game is therefore embeddable in a frame by anyone.** Fixing it needs one
-of these on the response, from whatever serves `dist/`:
+| Gap | State |
+| --- | --- |
+| **Mobile frame rate** | **Never measured on real hardware.** The 30 FPS Medium-preset target has been an unverified budget since Phase 1 and this release does not lift that. Everything known about mobile is inference from desktop plus scene cost. |
+| **Firefox and WebKit** | **Closed for 0.1.0.** Both were installed locally and run: Firefox 111/111 in 17.9 min. CI continues to run all three sharded two ways per browser. |
+| **Frame timing in CI** | Headless Chromium has no GPU and rasterises in software, so the perf layer asserts *scene cost* (draw calls, triangles, programs) and deliberately does not assert a frame rate. Real timing is a Chrome DevTools trace on a real machine, by hand. |
+| **30-minute heap soak** | The soak layer runs ~10 minutes of simulated play and asserts object counts, which is the reliable leak signal. A 30-minute heap-snapshot pass has not been run for this release. |
+| **Low-memory and low-quality behaviour** | The Low preset exists and is tested; behaviour under genuine memory pressure is not. |
+| **Golden path as one continuous played run** | Proved in pieces — see §7. |
 
-```
-Content-Security-Policy: frame-ancestors 'none'
-X-Frame-Options: DENY
-```
+## 3. Interface
 
-Neither can be added from inside the repository. Not done, not claimed.
+- **No key remapping.** The bindings are fixed. The single largest
+  accessibility gap in the release.
+- **A gamepad cannot navigate menus.** It moves the character, drives, flies
+  and interacts; it does not move focus through a panel. No screen in this game
+  is pad-navigable, so dialogue choices, the phone and the save slots need a
+  keyboard or a touch screen. Open since Phase 8.
+- **No touch layout editor.** The on-screen controls are where they are.
+- **At phone width the bottom-left corner collides.** The discovery toast,
+  the objective pill and the touch joystick all occupy the same area at
+  390 px, and the toast lands on top of the other two. Found by *looking at*
+  the visual baseline rather than by any assertion — the shot is committed at
+  `tests/visual/scenes.spec.ts-snapshots/touch-portrait-visual-win32.png`, so
+  it is reproducible and a fix will show as a diff. Cosmetic and not
+  progress-blocking: everything is still legible and every control still
+  works. Not fixed here because Phase 12 is hardening rather than layout.
+- **No photo mode**, so the `photograph` objective kind is declared and
+  unauthored, and the phone's Camera tile says "not yet" rather than opening
+  something empty.
+- **Messages** is present on the phone, disabled, for the same reason: nothing
+  writes to a conversation store yet.
+- **No character setup screen**, no inventory or equipment screen, no
+  relationships screen, no property screen. Wardrobe, inventory and
+  relationships are reachable through the wardrobe panel and the phone.
+- **Portraits are an initial in a coloured disc.** A portrait system needs art
+  nobody has drawn.
+- **Dialogue history is a list, not a transcript** — it does not survive
+  leaving a conversation.
+- **One locale.** `t()` falls back to its key and the table is the `en` table.
+  Adding a second is another table and a lookup order; nothing above
+  `strings.ts` would change, and nothing has proved that.
 
-### `style-src 'unsafe-inline'` is still required
+## 4. World and content
 
-Several panels build markup containing `style="..."` attributes. Assigning
-`element.style` from script is CSSOM and needs no permission; a style
-*attribute* in parsed markup does. Removing the last of these would let the
-directive go, and is worth doing.
+- **The city districts have no enterable buildings.** Nine interiors exist and
+  all nine are in the village. `CityRuntime` produces no doors. Chapter 4
+  onward points at interior places that resolve in the village, so the
+  objectives complete — but a player in Downtown has fewer buildings than the
+  fiction implies. **This is the oldest open gap in the project** and the one
+  most visible to a player; it is carried from Phase 7.
+- **Interiors are nine rooms, not hundreds.** Deliberate, and in the deferred
+  list from the beginning.
+- **The boat is a model and nothing else.** 104 triangles in the same lazy GLB
+  as the aeroplane; no buoyancy, no dock entry, no wake, no save state. Phase
+  10 declined to claim it under its own quality gate, and this release agrees.
+- **Officers walk in straight lines.** `OfficerCorps` steps toward a goal and
+  snaps to terrain height; it does not use the navmesh, because the navmesh
+  belongs to `Population` and an officer is not one of its agents. An officer
+  will walk into a fence.
+- **There is no patrol car.** A motorised pursuit moves at driving speed with
+  no car model, so the player sees somebody on foot keeping up with a
+  hatchback. The one place the phase asks you to look away.
+- **Roadblocks are counted and never placed.**
+- **Four crimes have no trigger in the world:** `trespass`, `shoplifting`,
+  `dangerous_driving`, `hit_and_run`. Defined, scored and testable; nothing in
+  normal play raises them.
+- **A stationary wanted player is arrested repeatedly.** Each arrest is
+  individually correct and nothing stops the next report arriving immediately.
+  It wants a grace period after release.
+- **Side tasks are authored and not offered.** Twenty of them, validated and
+  startable, and `offersTask` exists on the dialogue choice type with nothing
+  setting it.
+- **Ambient pedestrians do not use doors**, and the mid LOD tier uses the
+  player's full-detail 4,890-triangle body rather than a decimated one.
+- **The aerial streaming policy does not currently do anything.**
+  `AERIAL_POLICY` fades the chunk load radius from two rings to one between
+  45 m and 160 m AGL, which is what the Phase 10 brief asks for, and it has no
+  effect on the world as it stands — for two independent reasons. Every
+  district is 4×3 chunks over 192×144 m, so with one ring at 48 m and 14 m of
+  hysteresis a chunk is kept to 62 m while the furthest chunk's near edge is
+  53.7 m from the centre: nothing is ever released at any altitude. And the
+  aeroplane lives at `hill_airstrip`, an authored zone that does not stream at
+  all, so a player in the air is never inside a streamed zone to begin with.
+- **The `follow` objective kind is implemented and unused.**
+- **`chapter_7` never lands in `completedChapters`** — it resolves an ending
+  instead. Cosmetic; nothing reads the flag.
 
-### `script-src 'wasm-unsafe-eval'`
+## 5. Rendering and performance
 
-Needed by Rapier and recast-navigation, both of which compile WebAssembly.
-This is *not* `'unsafe-eval'` — `eval` and `new Function` stay blocked, and
-neither appears in `src/`.
+- **The occlusion raycast is still the frame's largest single item.**
+  `CameraCollision` raycasts the whole scene every frame with
+  `firstHitOnly = false`. Phase 6 took the player, the NPC bodies and the
+  traffic out of it; the world itself is still walked in full. The fix is a
+  registry of fadeable meshes.
+- **`initial load` improved by 1.1 MB in this phase and the next eager change
+  still needs care.** 3,110.7 kB against a 4,215 kB ceiling is real headroom
+  for the first time in five phases, but the app chunk is at 385.1 / 390 kB.
+- **A modular room costs more draw calls than a merged one** — 256 against
+  Phase 1's single merged GLB at 183. Merging a built room's parts by material
+  at assembly time should take it back under 200.
+- **The interior reports 38 textures** against a documented outdoor ceiling of
+  32. Now asserted against its own limit rather than left unmeasured.
+- **Visual regression uses a 2% tolerance, not a pixel hash.** `prepareShot()`
+  pins the clock and the dev readout but does not freeze cloud drift, bird
+  animation or wind phase. It catches structural regressions and will not catch
+  a subtle shading change. Pinning `uTime` is the improvement that would let the
+  tolerance come down.
+- **Meshopt is wired up and not used** — at this GLB size the decoder costs
+  more than it saves. **KTX2/Basis is not used at all**, because the game ships
+  essentially no textures: everything is vertex colour and a three-band ramp.
+  Both are in the brief; both would be pure cost today, and that is a
+  measurement rather than an opinion.
+- **`WindowPortal` re-renders the outdoor world** for two interiors, which is
+  what makes the interior the triangle worst case.
 
-## Flight
+## 6. Platform and delivery
 
-### The aerial streaming policy does not currently save anything
+- **The service worker is hand-written, not Workbox.** Reasoning and what is
+  given up in [adr/0003-hand-written-service-worker.md](adr/0003-hand-written-service-worker.md):
+  no navigation preload, no range-request handling for audio, no background
+  sync, and we now own the correctness of a service worker.
+- **The game can be embedded in a frame by anyone.** The policy is delivered
+  by a `<meta http-equiv>` element, because the game ships as static files
+  with no server of its own — and the spec requires a meta-delivered policy to
+  ignore `frame-ancestors`, `report-uri` and `sandbox`. Browsers ignore it
+  *and* log a warning, which is a console message in normal play and therefore
+  not allowed here. The smoke suite caught it on the first run after the policy
+  landed, failing all 111 scenarios; it has been removed from the meta tag.
 
-`AERIAL_POLICY` fades the chunk load radius from two rings to one between
-45 m and 160 m AGL, which is what the Phase 10 brief asks for. It has no
-effect on the world as it stands, for two independent reasons:
+  Clickjacking protection has to come from whatever serves `dist/`, as
+  `Content-Security-Policy: frame-ancestors 'none'` or `X-Frame-Options: DENY`.
+  Both are in [DEPLOYMENT.md](DEPLOYMENT.md) §3. **Neither can be added from
+  inside this repository**, so it is not done and not claimed — a directive
+  that is silently ignored is worse than one that is absent, because it reads
+  as protection nobody has.
+- **`style-src 'unsafe-inline'` is still required.** Several panels build
+  markup containing `style="..."` attributes. Assigning `element.style` from
+  script is CSSOM and needs no permission; a style *attribute* in parsed markup
+  does. Removing the last of these would let the directive go.
+- **WebGL context loss does not resume.** It stops, explains and asks for a
+  reload. Resuming would leave the portal render target and ~54 patched
+  programs in a state nothing has verified.
+- **No WebGPU backend.** The seam exists; the toon look is built from
+  `onBeforeCompile` patches that `WebGPURenderer` does not run, so a swap is a
+  TSL reimplementation rather than a port. `?webgpu=1` exercises the fallback.
+- **Vite is pinned to 7.** Vite 8's Rolldown native binding is blocked by this
+  machine's Smart App Control — a host constraint, not an inherent one. See
+  [adr/0002-vite-7-not-8.md](adr/0002-vite-7-not-8.md).
+- **`dist/` is *not* committed** — it has been gitignored since Phase 4. The
+  Phase 1 report listed it as tracked and that has been stale for eight
+  phases; corrected here rather than copied forward again.
+- **Root-level duplicate assets retained at the author's request**:
+  `indoor.mp3`, `outdoor.mp3` and a larger `icon.png`. Not served.
 
-1. Every district is 4x3 chunks over 192x144 m. One ring is 48 m and the
-   hysteresis is 14, so a chunk is kept to 62 m — and the furthest chunk's
-   near edge is 53.7 m from the centre of a district. Nothing is ever
-   released at any altitude.
-2. The aeroplane lives at `hill_airstrip`, which is an authored zone and does
-   not stream at all. Flying does not change the active zone, so a player in
-   the air is never inside a streamed zone in the first place.
+## 7. The golden path, stated precisely
 
-`tests/aerialStreaming.test.ts` asserts both of these rather than pretending
-otherwise, and proves the policy does bite on a district four times the size.
-It is a guard against a zone that outgrows the keep distance, not a
-present-day optimisation.
+Acceptance criterion 3 asks that a fresh player can complete the prologue,
+reach the city, work, buy groceries, drive, save, reload, complete the story,
+enter Free Roam, trigger and resolve Heat, and fly the plane.
 
-### The boat is a model, not a vehicle
+**Every one of those is proved, and not all in one continuous run.** The story
+graph is walked start to finish on two routes in a real browser on every
+commit; every objective kind has a proven reporter; the nine buildings, the
+five jobs, the five vehicles, the aeroplane, Heat and arrest, and the Life
+Reel each have their own browser coverage.
 
-`aircraft.glb` contains `Boat`, `Boat_LOD1`, `Boat_LOD2` and `Boat_Col`. There
-is no buoyancy, no dock, no wake and no way to board one. The Phase 10 brief
-made the boat conditional — *"only if feasible"* — and it was not.
+What does not exist is a single run that plays the *whole* story by doing
+every objective rather than reporting some by id. Phase 8 recorded that gap and
+the reason it matters: three objective kinds shipped with no reporter at all,
+and every test passed. It is narrower now — those three are wired and proved by
+doing — but the gap is real and is not rounded up.
 
-## Audio
+## 8. Licensing
+
+- **GSAP is not open source.** Its standard licence is free for most uses, is
+  not an OSI licence, and its terms differ for paid products. **Confirm the
+  current terms against the intended commercial model before a public
+  release.** Flagged in `docs/ASSET_LICENSES.md` since Phase 11 and still
+  unresolved — the one item on this page that is a business decision rather
+  than an engineering one.
+
+## 9. Deferred beyond the MVP, deliberately
+
+Not bugs. Named in the vision document from the start and still out:
+multiplayer or an authoritative server, accounts and cloud saves, voice chat,
+generative NPC dialogue, hundreds of interiors, a seamless metropolis,
+destructible buildings, realistic gore, aircraft combat, a stock market or
+crypto, real-money monetisation, a mod marketplace, a procedural infinite
+world.
+
+## 10. Audio
 
 ### A volume change allocates two or three nodes, and I do not know why
 
@@ -101,20 +242,3 @@ across a run whose only activity was a panel opening and closing. Footsteps,
 insects, birdsong, the discovery arpeggio and the bell motif were all doing
 it, and had been since Phase 1. `AudioManager.releaseOnEnd` now unwires each
 one, and the criterion-5 test measures it.
-
-## Rendering
-
-### The interior is the worst case
-
-The window portal re-renders the outdoor world, taking triangles from ~482 k
-to ~780 k. Budget against the interior, never the village. Enforced in
-`tests/e2e/interiorBudget.spec.ts`.
-
-## Licensing
-
-### GSAP is not open source
-
-The standard GSAP licence is free for most uses but is not an OSI
-open-source licence, and its terms differ for paid products. Confirm the
-current terms against the intended commercial model before release. Flagged
-in `docs/ASSET_LICENSES.md`, not resolved.
