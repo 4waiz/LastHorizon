@@ -142,4 +142,48 @@ describe('LazyPanel', () => {
     expect(e.hidden, 'the delayed hide must re-check').toBe(false);
     vi.useRealTimers();
   });
+
+  it('closing gives up the keyboard, even before the fade-out ends', async () => {
+    // WebKit leaves focus on a control whose panel has been hidden, and a
+    // focused slider swallows every key `InputManager` would otherwise read —
+    // so a panel closed from its own slider left the game deaf in Safari.
+    vi.useFakeTimers();
+    const e = el();
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    e.appendChild(slider);
+    const p = new LazyPanel({
+      element: e,
+      load: async () => 'panel',
+      transitionClass: 'is-on',
+      closeDelay: 200,
+    });
+
+    p.set(true);
+    await p.ensure();
+    await Promise.resolve();
+    slider.focus();
+    expect(document.activeElement).toBe(slider);
+
+    p.set(false);
+    expect(document.activeElement, 'still focused during the fade-out').not.toBe(slider);
+    vi.advanceTimersByTime(300);
+    expect(e.hidden).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('leaves focus alone when it is somewhere else', async () => {
+    const e = el();
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    const p = new LazyPanel({ element: e, load: async () => 'panel' });
+
+    p.set(true);
+    await p.ensure();
+    await Promise.resolve();
+    outside.focus();
+
+    p.set(false);
+    expect(document.activeElement).toBe(outside);
+  });
 });

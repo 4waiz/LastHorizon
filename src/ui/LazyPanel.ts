@@ -137,6 +137,16 @@ export class LazyPanel<T> {
   }
 
   private hide(): void {
+    // A panel on its way out gives up the keyboard. The focus-fixup rule
+    // moves focus off a control whose panel is hidden, but WebKit does not
+    // apply it, and a slider left focused swallows every key — `InputManager`
+    // gives a text field everything typed at it. Adjust photo mode's field of
+    // view, press Escape, and in Safari K, WASD and the arrows stayed dead
+    // until something else took focus. Done at the start of the close, so a
+    // key pressed during the fade-out is not swallowed either.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && this.o.element.contains(focused)) focused.blur();
+
     if (!this.o.transitionClass) {
       this.o.element.hidden = true;
       return;
