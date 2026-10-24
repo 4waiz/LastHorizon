@@ -125,8 +125,22 @@ jobs:
 
       # WebGL under headless CI is SwiftShader software rendering, so nothing
       # here may assume hardware — see the note in tests/long/perf.spec.ts.
+      #
+      # Firefox runs under a virtual display, and has to. Headless with no
+      # DISPLAY, its graphics probe has nothing to examine, so the driver
+      # blocklist refuses WebGL outright ("AllowWebgl2:false restricts context
+      # creation on this system") and the game shows "This browser cannot run
+      # WebGL" — which is where every Firefox scenario in CI had stopped since
+      # the first run. `webgl.force-enabled` does not help: it gets past the
+      # blocklist and then has no display to make a context on. Under Xvfb the
+      # probe finds Mesa's software renderer, which Playwright's Firefox already
+      # permits (`webgl.forbid-software` is false in its profile), and the game
+      # boots in about a second. The browser is still headless; Xvfb only
+      # supplies the display that GL needs.
       - name: End-to-end tests
-        run: npx playwright test --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/2
+        run: >-
+          ${{ matrix.browser == 'firefox' && 'xvfb-run --auto-servernum --' || '' }}
+          npx playwright test --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/2
 
       - name: Upload report
         if: always()

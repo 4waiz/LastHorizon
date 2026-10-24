@@ -120,6 +120,13 @@ export class Collectibles {
   readonly store: CollectibleStore;
   private items: LiveItem[] = [];
   private elapsed = 0;
+  /**
+   * Geometry built here rather than cloned from the pack: the halo ring every
+   * item shares, plus the stand-in for a missing model. `dispose` gives it
+   * back — the village is rebuilt on every return from a district, and the
+   * ring alone was one geometry per round trip.
+   */
+  private readonly ownGeometry: THREE.BufferGeometry[] = [];
 
   constructor(
     defs: CollectibleDef[],
@@ -135,6 +142,7 @@ export class Collectibles {
 
     const haloGeo = new THREE.RingGeometry(0.42, 0.62, 24);
     haloGeo.rotateX(-Math.PI / 2);
+    this.ownGeometry.push(haloGeo);
 
     for (const def of defs) {
       const proto = prototypes.get(def.model);
@@ -142,10 +150,14 @@ export class Collectibles {
       pivot.name = `Collectible_${def.id}`;
       pivot.position.copy(def.position);
 
-      const model = proto ? proto.clone(true) : new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.22),
-        makeToon(0xe7c266),
-      );
+      let model: THREE.Object3D;
+      if (proto) {
+        model = proto.clone(true);
+      } else {
+        const standIn = new THREE.OctahedronGeometry(0.22);
+        this.ownGeometry.push(standIn);
+        model = new THREE.Mesh(standIn, makeToon(0xe7c266));
+      }
       model.traverse((o) => {
         const mesh = o as THREE.Mesh;
         if (mesh.isMesh) {
@@ -293,5 +305,6 @@ export class Collectibles {
       gsap.killTweensOf([it.pivot.position, it.model.scale, it.model.rotation, it.halo.scale]);
     }
     this.items = [];
+    for (const g of this.ownGeometry.splice(0)) g.dispose();
   }
 }

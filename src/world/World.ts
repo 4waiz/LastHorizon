@@ -181,6 +181,17 @@ export class World implements ZoneRuntime {
   private lampLights: THREE.PointLight[] = [];
   private lampPools: THREE.InstancedMesh | null = null;
 
+  /**
+   * Geometry this class builds itself, held so `dispose` can give it back.
+   *
+   * Buildings and props are clones of the asset packs and share their
+   * geometry with them; that belongs to `AssetManager` and must outlive any
+   * one village. These three do not — every `build()` makes new ones.
+   */
+  private terrainMesh: THREE.Mesh | null = null;
+  private roadGroup: THREE.Group | null = null;
+  private cables: THREE.Mesh | null = null;
+
   readonly spawn = new THREE.Vector3();
   spawnFacing = 0;
 
@@ -215,10 +226,12 @@ export class World implements ZoneRuntime {
 
   build(): void {
     const terrainMesh = this.terrain.build();
+    this.terrainMesh = terrainMesh;
     this.group.add(terrainMesh);
     this.colliderMeshes.push(terrainMesh);
 
     const roads = buildRoadMeshes(this.road, (x, z) => this.terrain.heightAt(x, z));
+    this.roadGroup = roads.group;
     this.group.add(roads.group);
 
     this.placeBuildings();
@@ -554,6 +567,7 @@ export class World implements ZoneRuntime {
     cables.name = 'Cables';
     cables.castShadow = true;
     cables.receiveShadow = false;
+    this.cables = cables;
     this.group.add(cables);
   }
 
@@ -826,6 +840,17 @@ export class World implements ZoneRuntime {
     this.collision.dispose();
     this.lampPools?.geometry.dispose();
     (this.lampPools?.material as THREE.Material | undefined)?.dispose();
+    // The terrain grid, the road ribbons and quads, and the merged cables.
+    // Missed until the soak caught them: the village is a zone now and is
+    // rebuilt on every return from a district, so every round trip left them
+    // on the GPU — with the collectibles' halo ring, fifteen geometries a
+    // trip, and 173 became 493 over twenty. Only geometry: their materials
+    // come from the shared toon cache.
+    this.terrainMesh?.geometry.dispose();
+    this.roadGroup?.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).geometry.dispose();
+    });
+    this.cables?.geometry.dispose();
     this.group.removeFromParent();
   }
 }

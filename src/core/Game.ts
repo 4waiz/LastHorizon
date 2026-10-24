@@ -167,6 +167,8 @@ const EMPTY_POPULATION: PopulationSnapshot = {
   witnessed: 0,
   stuckRecoveries: 0,
   farTickMs: 0,
+  drawnVariants: 0,
+  boneTextures: 0,
 };
 
 export class Game {
@@ -335,6 +337,13 @@ export class Game {
    */
   private population: Population | null = null;
   private populationLoading: Promise<void> | null = null;
+  /**
+   * The test bridge's "hold the population still", remembered rather than
+   * applied once. A zone change disposes the population and builds a new
+   * one, which would otherwise start active and walk straight into a
+   * measurement that asked for it to be held. Never set in normal play.
+   */
+  private populationHeld = false;
   /**
    * Relationships live here rather than in `Population` because they outlive
    * it: the player's history with a village resident has to survive travelling
@@ -1720,7 +1729,10 @@ export class Game {
         );
       },
       trafficList: () => this.population?.trafficPositions() ?? [],
-      populationActive: (on) => this.population?.setActive(on),
+      populationActive: (on) => {
+        this.populationHeld = !on;
+        this.population?.setActive(on);
+      },
 
       // ---- Phase 7 ----------------------------------------------------------
       // Read off the zone rather than the registry: the registry does not
@@ -2698,6 +2710,8 @@ export class Game {
           this.worldClock.time,
         );
         this.population = population;
+        // Before its first update, so a held population never draws a body.
+        if (this.populationHeld) population.setActive(false);
         population.restoreAges(this.npcAges);
         // Residents are interactable from the moment they exist, not from when
         // the navmesh lands.

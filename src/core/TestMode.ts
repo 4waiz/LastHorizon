@@ -396,6 +396,10 @@ export interface PopulationSnapshot {
   witnessed: number;
   stuckRecoveries: number;
   farTickMs: number;
+  /** Appearance variants drawn: one geometry each on the GPU, bounded by the wardrobe. */
+  drawnVariants: number;
+  /** Bone textures the bodies hold: one per skeleton drawn, bounded by the pool. */
+  boneTextures: number;
 }
 
 export interface NpcSnapshot {
@@ -704,6 +708,9 @@ export interface LHTestBridge {
    *
    * For measurements about something else — a draw-call assertion on the
    * player's rig cannot be made against a village of moving pedestrians.
+   *
+   * The hold outlives a zone change: the population a journey builds starts
+   * held too, until this is called with `true`.
    */
   setPopulationActive(on: boolean): void;
   /** Raise a perception event at a point, attributed to the player. */

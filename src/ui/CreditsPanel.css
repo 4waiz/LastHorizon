@@ -44,12 +44,21 @@
   color: var(--ink);
 }
 
-/* Library and licence, as a two-column definition list: the pairing is the
-   content, and a <dl> says so to a screen reader as well as to the eye. */
+/* Library and licence, as a definition list: the pairing is the content, and a
+   <dl> says so to a screen reader as well as to the eye.
+
+   One column, each licence under its library, at every screen size. This was
+   two columns with a one-column fallback below a 420 px *viewport* — written
+   for the settings modal. The credits now stand in the handset card, which is
+   phone-width on every screen, so the fallback never fired on a desktop: the
+   Rapier package name took the row and squeezed GSAP's licence to a word a
+   line, with "GreenSock" clipped at the card's edge — on the one line here
+   that is a licensing statement. A licence wrapping to three lines beside a
+   library name is less readable than the pair stacked; that was true on a
+   phone and the card is a phone. */
 .credits__libs {
   display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
-  gap: var(--sp-1) var(--sp-4);
+  grid-template-columns: 1fr;
   margin: 0 0 var(--sp-3);
   font-size: var(--text-sm);
 }
@@ -59,20 +68,8 @@
 }
 
 .credits__libs dd {
-  margin: 0;
+  margin: 0 0 var(--sp-2);
   color: var(--ink-soft);
-}
-
-@media (max-width: 420px) {
-  /* One column on a phone: a licence string wrapping to three lines beside a
-     library name is less readable than the pair stacked. */
-  .credits__libs {
-    grid-template-columns: 1fr;
-    gap: 0 0;
-  }
-  .credits__libs dd {
-    margin: 0 0 var(--sp-2);
-  }
 }
 
 .credits code {

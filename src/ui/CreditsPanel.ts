@@ -1,3 +1,6 @@
+// The `.phone` shell this panel's markup stands in. Not optional: without it
+// the credits open unstyled, behind the canvas, unless the phone came first.
+import './PhoneShell.css';
 import './CreditsPanel.css';
 
 /**

@@ -88,6 +88,14 @@ export interface PopulationStats {
   readonly stuckRecoveries: number;
   /** Milliseconds the last far tick took. Bounded by `farPerTick`. */
   readonly farTickMs: number;
+  /**
+   * Appearance variants the renderer has drawn: one geometry each on the GPU,
+   * kept for the life of the population and bounded by the wardrobe, not by
+   * play time.
+   */
+  readonly drawnVariants: number;
+  /** Bone textures the bodies hold: one per skeleton drawn, bounded by the pool. */
+  readonly boneTextures: number;
 }
 
 /** Far schedules are re-examined at this rate, not per frame. */
@@ -680,6 +688,7 @@ export class Population {
     for (const s of this.ambient) tally(s.agent);
 
     const navStats = this.nav.stats;
+    const visual = this.visuals?.stats;
     return {
       named: this.named.length,
       ambient: this.ambient.length,
@@ -697,6 +706,8 @@ export class Population {
       witnessed: this.bus.witnessed,
       stuckRecoveries: recoveries,
       farTickMs: Math.round(this.lastFarTickMs * 100) / 100,
+      drawnVariants: visual?.drawnVariants ?? 0,
+      boneTextures: visual?.boneTextures ?? 0,
     };
   }
 

@@ -237,7 +237,14 @@ test.describe('gamepad', () => {
 
     await setButton(page, BTN.interact, 1);
     await settle(page, 4);
-    await page.waitForTimeout(2500); // the transition is a real-time fade
+    // The transition is a real-time fade -- and, on the first door of a
+    // session, a lazy chunk, the kit and a room build too, each queued behind
+    // the frame loop. Wait for it rather than for a fixed 2.5 s, which under
+    // CI's software rendering can end before the room exists;
+    // interaction.spec.ts has the trace that showed it.
+    await expect
+      .poll(async () => (await player(page)).indoors, { timeout: 20_000 })
+      .toBe(true);
     await setButton(page, BTN.interact, 0);
     await settle(page, 20);
 

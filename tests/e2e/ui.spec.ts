@@ -556,8 +556,16 @@ test.describe('photo mode', () => {
     const blocked = () => page.evaluate(() => window.__LH_TEST__!.getLifeState().blocked);
     expect(await blocked()).not.toContain('photoMode');
 
+    // Polled, not read once. The block reason is written by the frame loop
+    // (`advanceClocks`), so it lands on the first frame after the shutter
+    // opens — before the clock can advance, but after the panel is already
+    // visible. At Firefox's frame rate under CI's software GL, a single read
+    // straight after `enter` came back empty on every run. The year staying
+    // put below is the assertion that the clock really stopped.
     await enter(page);
-    expect(await blocked(), 'the life clock ran during a still').toContain('photoMode');
+    await expect
+      .poll(blocked, { message: 'the life clock ran during a still' })
+      .toContain('photoMode');
 
     // The year does not advance while the clock is blocked.
     const during = await page.evaluate(() => window.__LH_TEST__!.getLifeState().yearProgress);
@@ -567,7 +575,9 @@ test.describe('photo mode', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#photo')).toBeHidden();
-    expect(await blocked(), 'the block was never released').not.toContain('photoMode');
+    await expect
+      .poll(blocked, { message: 'the block was never released' })
+      .not.toContain('photoMode');
 
     await page.evaluate(() => window.__LH_TEST__!.settle(600));
     const after = await page.evaluate(() => window.__LH_TEST__!.getLifeState().yearProgress);
@@ -649,11 +659,17 @@ test.describe('no leak, no error', () => {
 
     const before = await page.evaluate(() => document.querySelectorAll('*').length);
 
+    // Paced: each cycle must really open and really close. I is read by the
+    // frame loop and Escape on keydown, so unpaced pairs race the frame and
+    // drift out of step at software-GL frame rates (access.spec.ts has the
+    // whole story) — and a cycle that never opened never rendered anything
+    // for this to count.
     for (let i = 0; i < 40; i++) {
       await page.keyboard.press('i');
+      await expect(page.locator('#life')).toBeVisible();
       await page.keyboard.press('Escape');
+      await expect(page.locator('#life')).toBeHidden();
     }
-    await expect(page.locator('#life')).toBeHidden();
 
     const after = await page.evaluate(() => document.querySelectorAll('*').length);
     // `replaceChildren` on every render means the node count returns to where

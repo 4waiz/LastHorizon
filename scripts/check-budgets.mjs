@@ -203,6 +203,13 @@ const LAZY_CHUNK_PREFIXES = [
   // Phase 11. The credits, moved out of the settings modal into a screen of
   // their own. Almost all stylesheet: the class exists so the CSS travels.
   'CreditsPanel-',
+  // The handset shell the phone, the life panel and the credits share. A
+  // stylesheet-only chunk Vite splits out because three lazy panels import
+  // it; it appears only in their dynamic-import preload lists, never in
+  // `index.html`, so it is lazy for the same reason they are. It used to sit
+  // inside `Phone.css`, which left the other two unstyled until the phone
+  // had been opened once.
+  'PhoneShell-',
   // Phase 11. Photo mode: chrome, framing guides and the capture. The seventh
   // panel to follow the pattern, and the first that is not a modal.
   'PhotoMode-',

@@ -1,3 +1,4 @@
+import './PhoneShell.css';
 import './Phone.css';
 
 /**

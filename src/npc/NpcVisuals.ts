@@ -72,10 +72,21 @@ const FIXED: Record<'skin' | 'hair' | 'eye' | 'trim' | 'shoe', number> = {
 export interface NpcVisualStats {
   /** Distinct appearance variants built. */
   variants: number;
+  /**
+   * Variants the renderer has drawn, so one geometry each on the GPU. Can lag
+   * `variants`: a body is built by distance, not visibility, so a pedestrian
+   * behind the camera has a variant long before anything draws it.
+   */
+  drawnVariants: number;
   /** Bodies currently attached to the scene. */
   live: number;
   /** Bodies parked in the pool, ready to be reused. */
   pooled: number;
+  /**
+   * Bone textures the bodies hold. three.js makes one per skeleton the first
+   * time it draws it, and keeps it until the skeleton is disposed.
+   */
+  boneTextures: number;
   /** True when the merge failed and bodies fall back to nine draw calls. */
   degraded: boolean;
 }
@@ -94,6 +105,8 @@ export interface NpcBody {
 interface Variant {
   geometry: THREE.BufferGeometry;
   material: THREE.Material;
+  /** Set when the renderer first uploads this variant's colour buffer. */
+  drawn: boolean;
 }
 
 interface PooledBody {
@@ -128,10 +141,20 @@ export class NpcVisuals {
   }
 
   get stats(): NpcVisualStats {
+    let drawnVariants = 0;
+    for (const v of this.variants.values()) if (v.drawn) drawnVariants++;
+    let boneTextures = 0;
+    for (const body of [...this.live, ...this.pool]) {
+      for (const m of body.mesh ? [body.mesh] : body.fallbackMeshes) {
+        if (m.skeleton.boneTexture) boneTextures++;
+      }
+    }
     return {
       variants: this.variants.size,
+      drawnVariants,
       live: this.live.size,
       pooled: this.pool.length,
+      boneTextures,
       degraded: this.degraded,
     };
   }
@@ -280,11 +303,18 @@ export class NpcVisuals {
     }
     const index = base.getIndex();
     if (index) geometry.setIndex(index);
-    geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3, true));
+    const colour = new THREE.BufferAttribute(colours, 3, true);
+    geometry.setAttribute('color', colour);
     geometry.boundingSphere = base.boundingSphere?.clone() ?? null;
 
     const material = makeToon(0xffffff, { vertexColors: true, kind: 'solid', id: 'npc_body' });
-    const variant: Variant = { geometry, material };
+    const variant: Variant = { geometry, material, drawn: false };
+    // The colour buffer is the one attribute a variant does not share, so its
+    // first upload is the draw that puts this variant on the GPU — the same
+    // draw that counts it in `renderer.info`. Free: it runs once, not per frame.
+    colour.onUpload(() => {
+      variant.drawn = true;
+    });
     this.variants.set(key, variant);
     return variant;
   }
@@ -435,6 +465,14 @@ export class NpcVisuals {
       pooled.mixer.stopAllAction();
       pooled.mixer.uncacheRoot(pooled.root);
       pooled.root.removeFromParent();
+      // The skeleton is the one per-body GPU resource. three.js gives every
+      // skeleton it draws a float texture of bone matrices, and nothing but
+      // `Skeleton.dispose` frees it — so every zone change, which rebuilds the
+      // population, used to leave one texture per body that had been on
+      // screen. In the unmerged fallback each of the nine meshes has its own:
+      // `SkeletonUtils.clone` clones the skeleton per skinned mesh.
+      pooled.mesh?.skeleton.dispose();
+      for (const m of pooled.fallbackMeshes) m.skeleton.dispose();
     }
     this.live.clear();
     this.pool.length = 0;

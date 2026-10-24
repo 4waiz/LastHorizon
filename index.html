@@ -30,6 +30,16 @@
       exported through a data URL to the player's own device, which is also
       why there is no `connect-src` beyond 'self' — nothing in this game
       talks to a server.
+
+      No `upgrade-insecure-requests` here, deliberately — it belongs in the
+      header form only. Over plain http, which is what `vite preview` and the
+      dev server are, it rewrites every subresource to https:, and WebKit
+      does that even for localhost, where nothing answers TLS: the bundle
+      never loads and the page sits on the loading screen at 0%. Chromium
+      exempts localhost, which is why it went unnoticed — from the phase the
+      policy landed in, every WebKit scenario in CI timed out at boot while
+      Chromium stayed green. Over https it adds nothing, because every
+      reference in this page is relative and therefore already 'self'.
     -->
     <meta
       http-equiv="Content-Security-Policy"
@@ -44,8 +54,7 @@
                manifest-src 'self';
                object-src 'none';
                base-uri 'self';
-               form-action 'none';
-               upgrade-insecure-requests"
+               form-action 'none'"
     />
     <!--
       No `frame-ancestors` here, deliberately.
