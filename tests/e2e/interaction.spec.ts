@@ -85,6 +85,7 @@ test.describe('interaction', () => {
 
     const result = await page.evaluate(async (door) => {
       const t = window.__LH_TEST__!;
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
       t.teleport(door.x, door.z, door.facing);
       t.settle(8);
 
@@ -96,11 +97,27 @@ test.describe('interaction', () => {
 
       // Going inside is a real-time fade, not simulation steps -- `settle`
       // advances the sim synchronously and would race straight past it.
-      await new Promise((r) => setTimeout(r, 2500));
-
+      //
+      // So wait for the door itself, not for a fixed 2.5 s. The first door of
+      // a session fades out on a timer, then fetches the interior chunk, the
+      // kit and the task catalogue, then builds the room -- and every one of
+      // those steps queues behind the frame loop. Under CI's software
+      // rendering a frame can take the best part of a second: the trace of a
+      // failing run had the kit not even *requested* until 3.8 s after the
+      // press, so the fixed wait read `indoors` before the room existed, on
+      // every run, while the failure screenshot showed the player standing in
+      // the grocery.
+      const deadline = performance.now() + 20_000;
+      while (!t.getPlayerState().indoors && performance.now() < deadline) await sleep(100);
       const indoors = t.getPlayerState().indoors;
+
+      // Still holding, now inside with the way out in range -- the window the
+      // fixed wait used to leave by accident, made deliberate. Leaving is a
+      // fade of its own, so a misfire needs time to land before it shows.
+      await sleep(2500);
       t.pressInteract(false);
       t.settle(20);
+      await sleep(1500);
 
       // Indoors and still indoors: the way out was in range the whole time
       // with the button down, and did not fire.
