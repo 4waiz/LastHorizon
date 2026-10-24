@@ -201,12 +201,22 @@ test.describe('nothing accumulates', () => {
 
     const before = await nodes(page);
 
+    // Each cycle waits to be a real open and a real close.
+    //
+    // I is read by the frame loop on its next frame; Escape is handled the
+    // moment the key goes down. Pressed back to back, the two race the frame:
+    // an Escape that lands before the frame has opened the panel closes
+    // nothing — or pauses — and from then on every pair is out of step. On
+    // Firefox under CI's software GL, at a few frames a second, 25 unpaced
+    // pairs ended with the panel open; and a cycle that never opened never
+    // played the two interface sounds this test exists to count.
     const CYCLES = 25;
     for (let i = 0; i < CYCLES; i++) {
       await page.keyboard.press('i');
+      await expect(page.locator('#life')).toBeVisible();
       await page.keyboard.press('Escape');
+      await expect(page.locator('#life')).toBeHidden();
     }
-    await expect(page.locator('#life')).toBeHidden();
     /*
      * Five seconds, not one.
      *
