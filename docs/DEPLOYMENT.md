@@ -89,6 +89,12 @@ The CSP is in `index.html` as a `<meta>` tag so it travels with the code and
 protects `file://` and `vite preview`. **Send it as a header too**: `meta`
 cannot express `frame-ancestors`, which is the one that stops clickjacking.
 
+The header also carries `upgrade-insecure-requests`, which the meta tag
+deliberately does not. In a page served over plain http — `vite preview`, the
+dev server — WebKit applies it even to localhost, rewrites every script and
+stylesheet to an https: URL nothing answers, and the game never leaves the
+loading screen. Sent as a header by an https host it is harmless.
+
 ```
 Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests
 X-Content-Type-Options: nosniff
