@@ -432,8 +432,22 @@ function quadsToGeometry(quads: number[][]): THREE.BufferGeometry {
   return g;
 }
 
-/** Speckled asphalt, generated at runtime so no texture ships in the build. */
+let asphalt: THREE.Texture | null = null;
+
+/**
+ * Speckled asphalt, generated at runtime so no texture ships in the build.
+ *
+ * Painted once per session and shared, like the material it feeds. The toon
+ * cache keys on `map.uuid`, so a fresh canvas per village build was a fresh
+ * texture *and* a fresh material on every return from a district — both held
+ * by the cache for good, one more texture per round trip.
+ */
 function asphaltTexture(): THREE.Texture {
+  asphalt ??= paintAsphalt();
+  return asphalt;
+}
+
+function paintAsphalt(): THREE.Texture {
   const s = 256;
   const c = document.createElement('canvas');
   c.width = c.height = s;
