@@ -137,7 +137,10 @@ test.describe('nothing accumulates', () => {
    */
   async function instrument(page: Page): Promise<void> {
     await page.addInitScript(() => {
-      const w = window as unknown as { __nodes: { made: number; live: number } };
+      const w = window as unknown as {
+        __nodes: { made: number; live: number };
+        __audioCtx?: AudioContext;
+      };
       w.__nodes = { made: 0, live: 0 };
       const Ctor = window.AudioContext ?? (window as unknown as {
         webkitAudioContext: typeof AudioContext;
@@ -147,6 +150,8 @@ test.describe('nothing accumulates', () => {
         const original = Ctor.prototype[name] as (this: AudioContext) => AudioNode;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (Ctor.prototype as any)[name] = function patched(this: AudioContext) {
+          // Kept so the test can ask whether this context's clock runs at all.
+          w.__audioCtx ??= this;
           w.__nodes.made++;
           w.__nodes.live++;
           const node = original.call(this);
@@ -198,6 +203,28 @@ test.describe('nothing accumulates', () => {
     await expect(page.locator('#life')).toBeVisible({ timeout: 20_000 });
     await page.keyboard.press('Escape');
     await expect(page.locator('#life')).toBeHidden();
+
+    // A one-shot unwires itself when it *ends*, and only a running audio
+    // clock ends anything. Firefox on the CI runner never ran one: every sound
+    // of all twenty-five cycles was still wired after the drain — exactly four
+    // nodes a cycle, two one-shots of two nodes each — while Chromium and
+    // WebKit on the same runner released theirs. A frozen clock retains
+    // everything by definition, so where there is none this test has nothing
+    // to measure: it says so and skips, rather than calling it a leak or a
+    // pass. Everywhere the clock runs, the assertions below are unchanged.
+    const clock = await page.evaluate(async () => {
+      const ctx = (window as unknown as { __audioCtx?: AudioContext }).__audioCtx;
+      if (!ctx) return { state: 'never created', advances: false };
+      const from = ctx.currentTime;
+      await new Promise((r) => setTimeout(r, 750));
+      return { state: ctx.state as string, advances: ctx.currentTime > from };
+    });
+    test.skip(
+      clock.state !== 'running' || !clock.advances,
+      `no running audio clock in this browser here (context ${clock.state}, ` +
+        `time ${clock.advances ? 'advancing' : 'frozen'}): one-shots cannot end, ` +
+        'so retention cannot be measured',
+    );
 
     const before = await nodes(page);
 
