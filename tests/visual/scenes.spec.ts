@@ -133,6 +133,12 @@ test.describe('interface', () => {
   test('the credits, where every licence claim lives', async ({ page }) => {
     await boot(page);
     await page.locator('#btnInfo').click();
+    // Phase 11 gave the credits their own dialog, opened from a button where
+    // the section used to be. This shot was written before that and kept
+    // waiting for `.credits` inside the info modal, where it is now hidden
+    // markup -- 20 s and a timeout on every run. Open it the way a player
+    // does, as `ui.spec.ts` already does.
+    await page.locator('#openCredits').click();
     // The panel is lazy; wait for its content rather than a timeout.
     await page.waitForSelector('.credits', { state: 'visible', timeout: 20_000 });
 
@@ -147,9 +153,15 @@ test.describe('interface', () => {
     // This is the one screen where a wrong pixel is a licensing statement:
     // GSAP is not open source, and the credits saying otherwise would be a
     // claim rather than a typo.
-    const credits = page.locator('.credits');
-    await credits.scrollIntoViewIfNeeded();
-    await expect(credits).toHaveScreenshot('credits.png');
+    //
+    // Since Phase 11 the section is no longer the thing to shoot either. The
+    // credits stand in the handset card, whose body scrolls, so `.credits` is
+    // taller than anything ever on screen at once: shooting the element
+    // returned the top half of the text, the card's lower edge and the road
+    // beneath it — and still no licences. Bring the licence list into view
+    // and shoot the card, which is what a player reading them actually sees.
+    await page.locator('#credits .credits__libs').scrollIntoViewIfNeeded();
+    await expect(page.locator('#credits .phone__card')).toHaveScreenshot('credits.png');
   });
 });
 
